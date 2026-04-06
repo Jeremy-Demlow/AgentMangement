@@ -1,0 +1,120 @@
+name: Deploy Infrastructure (DCM)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'dcm/**'
+
+  push:
+    branches: [main]
+    paths:
+      - 'dcm/**'
+
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'DCM target environment'
+        required: true
+        default: 'DEV'
+        type: choice
+        options:
+          - DEV
+          - QA
+          - PROD
+      plan_only:
+        description: 'Plan only (no deploy)'
+        required: false
+        default: true
+        type: boolean
+
+env:
+  DCM_PROJECT_PATH: dcm/
+  SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+  SNOWFLAKE_PRIVATE_KEY_RAW: ${{ secrets.SNOWFLAKE_PRIVATE_KEY_RAW }}
+  SNOWFLAKE_AUTHENTICATOR: SNOWFLAKE_JWT
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  # --- PR: plan only, post as comment ---
+  plan-pr:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    environment: DEV
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: Snowflake-Labs/snowflake_dcm_projects/actions/dcm-plan@v1
+        with:
+          target: DEV
+          project-path: ${{ env.DCM_PROJECT_PATH }}
+          snowflake-user: ${{ env.SNOWFLAKE_USER }}
+          comment-on-pr: "true"
+
+  # --- Push to main: plan + deploy DEV ---
+  deploy-dev:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: DEV
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: Snowflake-Labs/snowflake_dcm_projects/actions/dcm-plan@v1
+        with:
+          target: DEV
+          project-path: ${{ env.DCM_PROJECT_PATH }}
+          snowflake-user: ${{ env.SNOWFLAKE_USER }}
+
+      - uses: Snowflake-Labs/snowflake_dcm_projects/actions/dcm-deploy@v1
+        with:
+          target: DEV
+          project-path: ${{ env.DCM_PROJECT_PATH }}
+          snowflake-user: ${{ env.SNOWFLAKE_USER }}
+          allow-drops: "false"
+          post-scripts-path: ""
+
+  # --- Manual: plan (+ optional deploy) for any target ---
+  plan-manual:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.target }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: Snowflake-Labs/snowflake_dcm_projects/actions/dcm-connection-test@v1
+        with:
+          target: ${{ inputs.target }}
+          project-path: ${{ env.DCM_PROJECT_PATH }}
+          snowflake-user: ${{ env.SNOWFLAKE_USER }}
+
+      - uses: Snowflake-Labs/snowflake_dcm_projects/actions/dcm-plan@v1
+        with:
+          target: ${{ inputs.target }}
+          project-path: ${{ env.DCM_PROJECT_PATH }}
+          snowflake-user: ${{ env.SNOWFLAKE_USER }}
+
+  deploy-manual:
+    if: github.event_name == 'workflow_dispatch' && inputs.plan_only == false
+    needs: plan-manual
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.target }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: Snowflake-Labs/snowflake_dcm_projects/actions/dcm-plan@v1
+        with:
+          target: ${{ inputs.target }}
+          project-path: ${{ env.DCM_PROJECT_PATH }}
+          snowflake-user: ${{ env.SNOWFLAKE_USER }}
+
+      - uses: Snowflake-Labs/snowflake_dcm_projects/actions/dcm-deploy@v1
+        with:
+          target: ${{ inputs.target }}
+          project-path: ${{ env.DCM_PROJECT_PATH }}
+          snowflake-user: ${{ env.SNOWFLAKE_USER }}
+          allow-drops: "false"
+          post-scripts-path: ""

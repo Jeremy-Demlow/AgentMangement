@@ -1,0 +1,98 @@
+name: sem_lessons_analytics
+description: Ski school analytics
+tables:
+  - name: FACT_LESSONS
+    synonyms:
+      - lessons
+      - ski_school
+      - instruction
+    description: Ski lesson bookings
+    base_table:
+      database: AM_SKI_RESORT_QA
+      schema: MARTS
+      table: FACT_LESSONS
+    primary_key:
+      columns:
+        - LESSON_ID
+    dimensions:
+      - name: BOOKING_CHANNEL
+        description: Booking channel
+        expr: BOOKING_CHANNEL
+        data_type: VARCHAR(20)
+      - name: COMPLETED
+        description: Completed
+        expr: COMPLETED
+        data_type: BOOLEAN
+      - name: CUSTOMER_SEGMENT
+        description: Customer segment
+        expr: CUSTOMER_SEGMENT
+        data_type: VARCHAR(50)
+      - name: INSTRUCTOR_NAME
+        description: Instructor
+        expr: INSTRUCTOR_NAME
+        data_type: VARCHAR(100)
+      - name: LESSON_DATE
+        description: Date of lesson
+        expr: LESSON_DATE
+        data_type: DATE
+      - name: LESSON_TYPE
+        synonyms:
+          - type
+        description: Lesson type
+        expr: LESSON_TYPE
+        data_type: VARCHAR(30)
+      - name: SKILL_LEVEL
+        description: Skill level
+        expr: SKILL_LEVEL
+        data_type: VARCHAR(20)
+      - name: SPORT_TYPE
+        description: Sport
+        expr: SPORT_TYPE
+        data_type: VARCHAR(20)
+    facts:
+      - name: DURATION_HOURS
+        description: Lesson duration
+        expr: DURATION_HOURS
+        data_type: "NUMBER(3,1)"
+        access_modifier: public_access
+      - name: GROUP_SIZE
+        description: Group size
+        expr: GROUP_SIZE
+        data_type: "NUMBER(2,0)"
+        access_modifier: public_access
+      - name: LESSON_AMOUNT
+        description: Base lesson price
+        expr: LESSON_AMOUNT
+        data_type: "NUMBER(10,2)"
+        access_modifier: public_access
+      - name: STUDENT_RATING
+        description: Student rating
+        expr: STUDENT_RATING
+        data_type: "NUMBER(2,1)"
+        access_modifier: public_access
+      - name: TOTAL_LESSON_REVENUE
+        description: Total lesson revenue
+        expr: TOTAL_LESSON_REVENUE
+        data_type: "NUMBER(12,2)"
+        access_modifier: public_access
+    metrics:
+      - name: AVG_STUDENT_RATING
+        description: Avg student rating
+        expr: AVG(FACT_LESSONS.STUDENT_RATING)
+        access_modifier: public_access
+      - name: GROUP_LESSONS
+        description: Group lessons
+        expr: COUNT(CASE WHEN FACT_LESSONS.LESSON_TYPE = 'Group' THEN 1 END)
+        access_modifier: public_access
+      - name: PRIVATE_LESSONS
+        description: Private lessons
+        expr: COUNT(CASE WHEN FACT_LESSONS.LESSON_TYPE = 'Private' THEN 1 END)
+        access_modifier: public_access
+      - name: TOTAL_LESSONS
+        description: Total lessons
+        expr: COUNT(FACT_LESSONS.LESSON_ID)
+        access_modifier: public_access
+      - name: TOTAL_REVENUE
+        description: Total revenue
+        expr: SUM(FACT_LESSONS.TOTAL_LESSON_REVENUE)
+        access_modifier: public_access

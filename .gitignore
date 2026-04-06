@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+*.whl
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# dbt
+dbt_ski_resort/target/
+dbt_ski_resort/dbt_packages/
+dbt_ski_resort/dbt_modules/
+dbt_ski_resort/logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Snowflake secrets (never commit keys or credentials)
+*.p8
+*.pem
+connections.toml
+
+# Project generated artifacts
+agent-evaluation/results/
+agents/snapshots/
+semantic-views/snapshots/
+.plans/
+
+# Misc
+*.log
+.env
+.snowflake/
+docs/
+models/
+requirements/

@@ -1,0 +1,382 @@
+# Daily Data Refresh Pipeline
+# ============================
+# Runs at 5am PST (1pm UTC) daily to:
+# 1. Check data integrity and coverage
+# 2. Generate incremental data (with smart backfill)
+# 3. Run DBT fact tables
+# 4. Refresh semantic views
+#
+# All database/schema names are loaded from project.yml at runtime.
+# No hardcoded database names — fully config-driven.
+#
+# Recovery options for data corruption:
+# - rebuild_from_date: Regenerate data from a specific date
+# - full_refresh: Rebuild all DBT models from scratch
+# - clear_raw_data: Delete raw data before regenerating (nuclear option)
+#
+# Uses official Snowflake CLI GitHub Action:
+# https://github.com/snowflakedb/snowflake-cli-action
+
+name: Daily Data Refresh
+
+on:
+  schedule:
+    # 5am PST = 1pm UTC (13:00)
+    - cron: '0 13 * * *'
+
+  workflow_dispatch:
+    inputs:
+      rebuild_from_date:
+        description: 'Rebuild from date (YYYY-MM-DD) - leave empty for auto-detect'
+        required: false
+        default: ''
+      days:
+        description: 'Number of days to generate (overrides auto-detect)'
+        required: false
+        default: ''
+      full_refresh:
+        description: 'Force full DBT refresh (rebuilds all fact tables)'
+        required: false
+        default: 'false'
+        type: boolean
+      clear_raw_data:
+        description: 'DANGER: Clear raw data before rebuild (use with rebuild_from_date)'
+        required: false
+        default: 'false'
+        type: boolean
+
+jobs:
+  data-refresh:
+    name: Generate Data & Run DBT
+    runs-on: ubuntu-latest
+
+    env:
+      SNOWFLAKE_CONNECTIONS_DEFAULT_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+      SNOWFLAKE_CONNECTIONS_DEFAULT_USER: ${{ secrets.SNOWFLAKE_USER }}
+      SNOWFLAKE_CONNECTIONS_DEFAULT_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+      SNOWFLAKE_CONNECTIONS_DEFAULT_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+      SNOWFLAKE_CONNECTIONS_DEFAULT_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Load Project Config
+        id: config
+        run: |
+          pip install pyyaml --quiet
+          python3 -c "
+          import yaml, os
+          with open('project.yml') as f:
+              cfg = yaml.safe_load(f)
+          prod_db = cfg['environments']['prod']['database']
+          raw_schema = cfg['defaults']['schemas']['raw']
+          raw_tables = cfg.get('raw_tables', [])
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              out.write(f'prod_database={prod_db}\n')
+              out.write(f'raw_schema={raw_schema}\n')
+              out.write(f'raw_tables={chr(10).join(raw_tables)}\n')
+          "
+
+      - name: Setup Snowflake CLI
+        uses: snowflakedb/snowflake-cli-action@v1.5
+        with:
+          cli-version: "latest"
+          default-config-file-path: "config.toml"
+        env:
+          SNOWFLAKE_CONNECTIONS_DEFAULT_DATABASE: ${{ steps.config.outputs.prod_database }}
+          SNOWFLAKE_CONNECTIONS_DEFAULT_SCHEMA: ${{ steps.config.outputs.raw_schema }}
+
+      - name: Test Snowflake Connection
+        run: |
+          snow --version
+          snow connection test
+        env:
+          SNOWFLAKE_CONNECTIONS_DEFAULT_DATABASE: ${{ steps.config.outputs.prod_database }}
+          SNOWFLAKE_CONNECTIONS_DEFAULT_SCHEMA: ${{ steps.config.outputs.raw_schema }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Python Dependencies
+        run: |
+          pip install --upgrade pip
+          pip install "snowflake-snowpark-python[pandas]" pandas pyarrow numpy pyyaml toml pydantic cryptography
+
+      # ─── Data Integrity Check ───────────────────────────────────────────
+      - name: Check Data Integrity & Coverage
+        id: check_data
+        env:
+          PROD_DB: ${{ steps.config.outputs.prod_database }}
+          RAW_SCHEMA: ${{ steps.config.outputs.raw_schema }}
+        run: |
+          DB="${PROD_DB}"
+          SCHEMA="${RAW_SCHEMA}"
+
+          snow sql -q "
+            SELECT
+              MIN(VISIT_DATE) as first_date,
+              MAX(VISIT_DATE) as last_date,
+              COUNT(DISTINCT VISIT_DATE) as total_days,
+              COUNT(*) as total_records
+            FROM ${DB}.${SCHEMA}.PASS_USAGE
+          " --format json > /tmp/data_stats.json
+
+          FIRST_DATE=$(python3 -c "import json; data=json.load(open('/tmp/data_stats.json')); print(data[0]['FIRST_DATE'] if data and data[0]['FIRST_DATE'] else '2025-12-01')")
+          LAST_DATE=$(python3 -c "import json; data=json.load(open('/tmp/data_stats.json')); print(data[0]['LAST_DATE'] if data and data[0]['LAST_DATE'] else '2025-12-01')")
+          TOTAL_DAYS=$(python3 -c "import json; data=json.load(open('/tmp/data_stats.json')); print(data[0]['TOTAL_DAYS'] if data and data[0]['TOTAL_DAYS'] else 0)")
+          TOTAL_RECORDS=$(python3 -c "import json; data=json.load(open('/tmp/data_stats.json')); print(data[0]['TOTAL_RECORDS'] if data and data[0]['TOTAL_RECORDS'] else 0)")
+
+          echo "Current Data Status:"
+          echo "   First date: $FIRST_DATE"
+          echo "   Last date:  $LAST_DATE"
+          echo "   Total days: $TOTAL_DAYS"
+          echo "   Total records: $TOTAL_RECORDS"
+
+          echo ""
+          echo "Checking for data gaps..."
+          snow sql -q "
+            WITH date_range AS (
+              SELECT DATEADD(day, SEQ4(), '$FIRST_DATE'::DATE) as expected_date
+              FROM TABLE(GENERATOR(ROWCOUNT => 365))
+              WHERE expected_date <= '$LAST_DATE'::DATE
+            ),
+            actual_dates AS (
+              SELECT DISTINCT VISIT_DATE FROM ${DB}.${SCHEMA}.PASS_USAGE
+            )
+            SELECT expected_date as missing_date
+            FROM date_range
+            LEFT JOIN actual_dates ON date_range.expected_date = actual_dates.VISIT_DATE
+            WHERE actual_dates.VISIT_DATE IS NULL
+            ORDER BY expected_date
+            LIMIT 10
+          " --format json > /tmp/gaps.json
+
+          GAPS=$(python3 -c "import json; data=json.load(open('/tmp/gaps.json')); print(','.join([d['MISSING_DATE'] for d in data]) if data else 'none')")
+
+          if [ "$GAPS" != "none" ] && [ -n "$GAPS" ]; then
+            echo "Data gaps detected: $GAPS"
+            echo "has_gaps=true" >> $GITHUB_OUTPUT
+            echo "gap_dates=$GAPS" >> $GITHUB_OUTPUT
+          else
+            echo "No data gaps detected"
+            echo "has_gaps=false" >> $GITHUB_OUTPUT
+          fi
+
+          echo "first_date=$FIRST_DATE" >> $GITHUB_OUTPUT
+          echo "last_date=$LAST_DATE" >> $GITHUB_OUTPUT
+          echo "total_days=$TOTAL_DAYS" >> $GITHUB_OUTPUT
+          echo "total_records=$TOTAL_RECORDS" >> $GITHUB_OUTPUT
+
+      # ─── Calculate What Needs Generating ────────────────────────────────
+      - name: Calculate Data Generation Plan
+        id: plan
+        run: |
+          TODAY=$(date +%Y-%m-%d)
+          LAST_DATE="${{ steps.check_data.outputs.last_date }}"
+
+          REBUILD_FROM="${{ github.event.inputs.rebuild_from_date }}"
+          MANUAL_DAYS="${{ github.event.inputs.days }}"
+
+          if [ -n "$REBUILD_FROM" ]; then
+            START_DATE="$REBUILD_FROM"
+            DAYS=$(python3 -c "from datetime import datetime; start = datetime.strptime('$START_DATE', '%Y-%m-%d'); today = datetime.strptime('$TODAY', '%Y-%m-%d'); print(max((today - start).days + 1, 0))")
+            echo "Manual rebuild from $START_DATE ($DAYS days)"
+          elif [ -n "$MANUAL_DAYS" ]; then
+            DAYS="$MANUAL_DAYS"
+            START_DATE=$(python3 -c "from datetime import datetime, timedelta; today = datetime.strptime('$TODAY', '%Y-%m-%d'); start = today - timedelta(days=$DAYS - 1); print(start.strftime('%Y-%m-%d'))")
+            echo "Manual: $DAYS days from $START_DATE"
+          else
+            START_DATE=$(python3 -c "from datetime import datetime, timedelta; last = datetime.strptime('$LAST_DATE', '%Y-%m-%d'); start = last + timedelta(days=1); print(start.strftime('%Y-%m-%d'))")
+            DAYS=$(python3 -c "from datetime import datetime; start = datetime.strptime('$START_DATE', '%Y-%m-%d'); today = datetime.strptime('$TODAY', '%Y-%m-%d'); days = (today - start).days + 1; print(max(days, 0))")
+
+            if [ "$DAYS" -le 0 ]; then
+              echo "Data is already up to date (last: $LAST_DATE, today: $TODAY)"
+              DAYS=0
+            else
+              echo "Auto-detected: $DAYS days from $START_DATE"
+            fi
+          fi
+
+          echo "start_date=$START_DATE" >> $GITHUB_OUTPUT
+          echo "days=$DAYS" >> $GITHUB_OUTPUT
+          echo "today=$TODAY" >> $GITHUB_OUTPUT
+          echo "skip_generation=$( [ "$DAYS" -le 0 ] && echo 'true' || echo 'false' )" >> $GITHUB_OUTPUT
+
+          echo ""
+          echo "Generation Plan:"
+          echo "   Start date: $START_DATE"
+          echo "   Days to generate: $DAYS"
+          echo "   End date: $TODAY"
+
+      # ─── Clear Raw Data (Optional - for corruption recovery) ────────────
+      - name: Clear Raw Data (if requested)
+        if: github.event.inputs.clear_raw_data == 'true'
+        env:
+          PROD_DB: ${{ steps.config.outputs.prod_database }}
+          RAW_SCHEMA: ${{ steps.config.outputs.raw_schema }}
+        run: |
+          DB="${PROD_DB}"
+          SCHEMA="${RAW_SCHEMA}"
+          START="${{ steps.plan.outputs.start_date }}"
+          echo "CLEARING RAW DATA from ${START} onwards..."
+
+          python3 -c "
+          import yaml
+          with open('project.yml') as f:
+              cfg = yaml.safe_load(f)
+          db = cfg['environments']['prod']['database']
+          schema = cfg['defaults']['schemas']['raw']
+          date_cols = {
+              'PASS_USAGE': 'VISIT_DATE', 'LIFT_SCANS': 'SCAN_DATE',
+              'TICKET_SALES': 'PURCHASE_DATE', 'FOOD_BEVERAGE': 'TRANSACTION_DATE',
+              'RENTALS': 'RENTAL_DATE', 'WEATHER_CONDITIONS': 'WEATHER_DATE',
+              'STAFFING_SCHEDULE': 'SCHEDULE_DATE', 'SKI_LESSONS': 'LESSON_DATE',
+              'INCIDENTS': 'INCIDENT_DATE', 'CUSTOMER_FEEDBACK': 'FEEDBACK_DATE',
+              'PARKING_OCCUPANCY': 'RECORDED_DATE', 'GROOMING_LOGS': 'GROOMING_DATE',
+          }
+          stmts = []
+          for t in cfg.get('raw_tables', []):
+              col = date_cols.get(t, 'DATE')
+              stmts.append(f\"DELETE FROM {db}.{schema}.{t} WHERE {col} >= '${START}'::DATE\")
+          print('; '.join(stmts))
+          " > /tmp/clear_sql.txt
+
+          snow sql -q "$(cat /tmp/clear_sql.txt)"
+          echo "Raw data cleared"
+
+      # ─── Generate Data ──────────────────────────────────────────────────
+      - name: Generate Incremental Data
+        if: steps.plan.outputs.skip_generation != 'true'
+        working-directory: data_generation
+        env:
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+          SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+          SNOWFLAKE_DATABASE: ${{ steps.config.outputs.prod_database }}
+          SNOWFLAKE_SCHEMA: ${{ steps.config.outputs.raw_schema }}
+        run: |
+          DAYS="${{ steps.plan.outputs.days }}"
+          START_DATE="${{ steps.plan.outputs.start_date }}"
+          echo "Generating $DAYS day(s) of data starting from $START_DATE..."
+          python generate_daily_increment.py \
+            --date "$START_DATE" \
+            --days "$DAYS" \
+            --connection default
+
+      - name: Skip Data Generation
+        if: steps.plan.outputs.skip_generation == 'true'
+        run: echo "Data is already current (last date ${{ steps.check_data.outputs.last_date }}), skipping generation"
+
+      # ─── DBT Setup & Run ────────────────────────────────────────────────
+      - name: Install DBT
+        run: pip install dbt-snowflake
+
+      - name: Configure DBT Profile
+        run: echo "Using project profiles.yml with env vars"
+
+      - name: Install DBT Dependencies
+        working-directory: dbt_ski_resort
+        env:
+          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+        run: dbt deps
+
+      - name: Run DBT Fact Tables
+        working-directory: dbt_ski_resort
+        env:
+          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+        run: |
+          if [ "${{ github.event.inputs.full_refresh }}" = "true" ]; then
+            echo "Full refresh requested - rebuilding all fact tables..."
+            dbt run --select "marts.facts" --full-refresh
+          else
+            dbt run --select "marts.facts"
+          fi
+
+      - name: Run DBT Semantic Views
+        working-directory: dbt_ski_resort
+        env:
+          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+        run: dbt run --select "marts.semantic"
+
+      # ─── Verification ───────────────────────────────────────────────────
+      - name: Verify Data Load
+        id: verify
+        env:
+          PROD_DB: ${{ steps.config.outputs.prod_database }}
+          RAW_SCHEMA: ${{ steps.config.outputs.raw_schema }}
+        run: |
+          DB="${PROD_DB}"
+          SCHEMA="${RAW_SCHEMA}"
+
+          snow sql -q "
+            SELECT VISIT_DATE, COUNT(*) as visitors
+            FROM ${DB}.${SCHEMA}.PASS_USAGE
+            WHERE VISIT_DATE >= DATEADD(day, -7, CURRENT_DATE())
+            GROUP BY VISIT_DATE
+            ORDER BY VISIT_DATE DESC
+            LIMIT 7
+          "
+
+          snow sql -q "
+            SELECT
+              MIN(VISIT_DATE) as first_date,
+              MAX(VISIT_DATE) as last_date,
+              COUNT(DISTINCT VISIT_DATE) as total_days,
+              COUNT(*) as total_records
+            FROM ${DB}.${SCHEMA}.PASS_USAGE
+          " --format json > /tmp/final_stats.json
+
+          FINAL_LAST=$(python3 -c "import json; data=json.load(open('/tmp/final_stats.json')); print(data[0]['LAST_DATE'])")
+          FINAL_DAYS=$(python3 -c "import json; data=json.load(open('/tmp/final_stats.json')); print(data[0]['TOTAL_DAYS'])")
+          FINAL_RECORDS=$(python3 -c "import json; data=json.load(open('/tmp/final_stats.json')); print(data[0]['TOTAL_RECORDS'])")
+
+          echo "final_last_date=$FINAL_LAST" >> $GITHUB_OUTPUT
+          echo "final_total_days=$FINAL_DAYS" >> $GITHUB_OUTPUT
+          echo "final_total_records=$FINAL_RECORDS" >> $GITHUB_OUTPUT
+
+      # ─── Summary ────────────────────────────────────────────────────────
+      - name: Job Summary
+        run: |
+          echo "## Daily Data Refresh Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Database:** ${{ steps.config.outputs.prod_database }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Run Date:** $(date '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "### Data Status Before:" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| First Date | ${{ steps.check_data.outputs.first_date }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Last Date | ${{ steps.check_data.outputs.last_date }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Total Days | ${{ steps.check_data.outputs.total_days }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Total Records | ${{ steps.check_data.outputs.total_records }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Gaps Detected | ${{ steps.check_data.outputs.has_gaps }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "### Generation Plan:" >> $GITHUB_STEP_SUMMARY
+          echo "- **Start Date:** ${{ steps.plan.outputs.start_date }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Days Generated:** ${{ steps.plan.outputs.days }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Full Refresh:** ${{ github.event.inputs.full_refresh || 'false' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Clear Raw Data:** ${{ github.event.inputs.clear_raw_data || 'false' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "### Data Status After:" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Last Date | ${{ steps.verify.outputs.final_last_date }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Total Days | ${{ steps.verify.outputs.final_total_days }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Total Records | ${{ steps.verify.outputs.final_total_records }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "### Recovery Options:" >> $GITHUB_STEP_SUMMARY
+          echo "- \`rebuild_from_date\`: Regenerate from a specific date" >> $GITHUB_STEP_SUMMARY
+          echo "- \`full_refresh\`: Rebuild all DBT fact tables" >> $GITHUB_STEP_SUMMARY
+          echo "- \`clear_raw_data\`: Delete and regenerate raw data" >> $GITHUB_STEP_SUMMARY

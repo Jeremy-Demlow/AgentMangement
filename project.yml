@@ -1,0 +1,75 @@
+project:
+  name: agent-management-framework
+  version: "0.5.0"
+  description: "CI/CD reference framework for Snowflake Cortex Agents, Semantic Views, and dbt"
+
+defaults:
+  snowflake:
+    account: trb65519
+
+  schemas:
+    raw: RAW
+    staging: STAGING
+    marts: MARTS
+    semantic: SEMANTIC
+    agents: AGENTS
+
+  model:
+    orchestration: claude-sonnet-4-5
+
+  orchestration:
+    budget:
+      seconds: 300
+      tokens: 50000
+
+deployment:
+  mode: single_account
+  data_source: prod
+
+environments:
+  dev:
+    database: AM_SKI_RESORT_DEV
+    role: AM_DEPLOY_ROLE_DEV
+    warehouse: AM_SKI_RESORT_WH_DEV
+    semantic_schema: SEMANTIC
+    agents_schema: AGENTS
+    name_suffix: _DEV
+  qa:
+    database: AM_SKI_RESORT_QA
+    role: AM_DEPLOY_ROLE_QA
+    warehouse: AM_SKI_RESORT_WH_QA
+    semantic_schema: SEMANTIC
+    agents_schema: AGENTS
+    name_suffix: _QA
+  prod:
+    database: AM_SKI_RESORT_PROD
+    role: AM_DEPLOY_ROLE_PROD
+    warehouse: AM_SKI_RESORT_WH_PROD
+    semantic_schema: SEMANTIC
+    agents_schema: AGENTS
+    name_suffix: ""
+
+eval:
+  source_schemas:
+    marts: MARTS
+    agents: AGENTS
+  stage: eval_config_stage
+  file_format: yaml_file_format
+
+raw_tables:
+  - PASS_USAGE
+  - LIFT_SCANS
+  - TICKET_SALES
+  - FOOD_BEVERAGE
+  - RENTALS
+  - WEATHER_CONDITIONS
+  - STAFFING_SCHEDULE
+  - SKI_LESSONS
+  - INCIDENTS
+  - CUSTOMER_FEEDBACK
+  - PARKING_OCCUPANCY
+  - GROOMING_LOGS
+
+dbt:
+  project_dir: dbt_ski_resort
+  profile: dbt_ski_resort

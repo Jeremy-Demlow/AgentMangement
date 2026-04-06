@@ -1,0 +1,83 @@
+name: sem_safety_incidents
+description: Safety incident tracking
+tables:
+  - name: FACT_INCIDENTS
+    synonyms:
+      - incidents
+      - accidents
+      - safety
+    description: Safety incident records
+    base_table:
+      database: {{ env.database }}
+      schema: MARTS
+      table: FACT_INCIDENTS
+    primary_key:
+      columns:
+        - INCIDENT_ID
+    dimensions:
+      - name: CUSTOMER_SEGMENT
+        description: Customer segment
+        expr: CUSTOMER_SEGMENT
+        data_type: VARCHAR(50)
+      - name: CUSTOMER_SKILL_LEVEL
+        description: Customer skill level
+        expr: CUSTOMER_SKILL_LEVEL
+        data_type: VARCHAR(20)
+      - name: INCIDENT_DATE
+        description: Date of incident
+        expr: INCIDENT_DATE
+        data_type: DATE
+      - name: INCIDENT_TYPE
+        synonyms:
+          - type
+        description: Type of incident
+        expr: INCIDENT_TYPE
+        data_type: VARCHAR(30)
+      - name: LIFT_ID
+        description: Lift associated
+        expr: LIFT_ID
+        data_type: VARCHAR(10)
+      - name: LOCATION_ID
+        description: Location ID
+        expr: LOCATION_ID
+        data_type: VARCHAR(20)
+      - name: SEVERITY
+        description: Severity level
+        expr: SEVERITY
+        data_type: VARCHAR(20)
+      - name: TRAIL_NAME
+        description: Trail name
+        expr: TRAIL_NAME
+        data_type: VARCHAR(50)
+      - name: TRANSPORT_REQUIRED
+        description: Transport required
+        expr: TRANSPORT_REQUIRED
+        data_type: BOOLEAN
+    facts:
+      - name: PATROL_RESPONSE_MINUTES
+        description: Ski patrol response time
+        expr: PATROL_RESPONSE_MINUTES
+        data_type: "NUMBER(38,0)"
+        access_modifier: public_access
+      - name: SEVERITY_SCORE
+        description: Numeric severity (1-4)
+        expr: SEVERITY_SCORE
+        data_type: "NUMBER(1,0)"
+        access_modifier: public_access
+    metrics:
+      - name: AVERAGE_SEVERITY
+        description: Average severity
+        expr: AVG(FACT_INCIDENTS.SEVERITY_SCORE)
+        access_modifier: public_access
+      - name: AVG_PATROL_RESPONSE
+        description: Avg patrol response time
+        expr: AVG(FACT_INCIDENTS.PATROL_RESPONSE_MINUTES)
+        access_modifier: public_access
+      - name: CRITICAL_INCIDENTS
+        description: Critical incidents
+        expr: COUNT(CASE WHEN FACT_INCIDENTS.SEVERITY = 'Critical' THEN 1 END)
+        access_modifier: public_access
+      - name: TOTAL_INCIDENTS
+        description: Total incidents
+        expr: COUNT(FACT_INCIDENTS.INCIDENT_ID)
+        access_modifier: public_access

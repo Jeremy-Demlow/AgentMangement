@@ -1,0 +1,170 @@
+name: sem_staffing_analytics
+description: Staffing and labor analytics for ski resort. Tracks scheduled vs actual
+  staffing levels, coverage ratios, understaffing incidents, and labor hours by department,
+  job role, and location to optimize workforce planning.
+tables:
+  - name: FACT_STAFFING
+    base_table:
+      database: AM_SKI_RESORT_QA
+      schema: MARTS
+      table: FACT_STAFFING
+    dimensions:
+      - name: STAFFING_KEY
+        expr: STAFFING_KEY
+        data_type: VARCHAR
+      - name: DATE_KEY
+        expr: DATE_KEY
+        data_type: NUMBER
+      - name: LOCATION_KEY
+        expr: LOCATION_KEY
+        data_type: VARCHAR
+      - name: SCHEDULE_ID
+        expr: SCHEDULE_ID
+        data_type: VARCHAR
+      - name: DEPARTMENT
+        expr: DEPARTMENT
+        data_type: VARCHAR
+      - name: JOB_ROLE
+        expr: JOB_ROLE
+        data_type: VARCHAR
+      - name: IS_UNDERSTAFFED
+        expr: IS_UNDERSTAFFED
+        data_type: BOOLEAN
+    time_dimensions:
+      - name: SCHEDULE_DATE
+        expr: SCHEDULE_DATE
+        data_type: DATE
+      - name: SHIFT_START
+        expr: SHIFT_START
+        data_type: TIMESTAMP_NTZ
+      - name: SHIFT_END
+        expr: SHIFT_END
+        data_type: TIMESTAMP_NTZ
+    facts:
+      - name: SHIFT_HOURS
+        expr: SHIFT_HOURS
+        data_type: NUMBER
+      - name: SCHEDULED_EMPLOYEES
+        expr: SCHEDULED_EMPLOYEES
+        data_type: NUMBER
+      - name: ACTUAL_EMPLOYEES
+        expr: ACTUAL_EMPLOYEES
+        data_type: NUMBER
+      - name: COVERAGE_RATIO
+        expr: COVERAGE_RATIO
+        data_type: FLOAT
+      - name: STAFF_VARIANCE
+        expr: STAFF_VARIANCE
+        data_type: NUMBER
+      - name: SCHEDULED_LABOR_HOURS
+        expr: SCHEDULED_LABOR_HOURS
+        data_type: NUMBER
+      - name: ACTUAL_LABOR_HOURS
+        expr: ACTUAL_LABOR_HOURS
+        data_type: NUMBER
+    metrics:
+      - name: AVG_COVERAGE_RATIO
+        description: "Average staffing coverage ratio (actual/scheduled)"
+        expr: AVG(COVERAGE_RATIO)
+        access_modifier: public_access
+      - name: TOTAL_LABOR_HOURS
+        description: "Total actual labor hours worked"
+        expr: SUM(ACTUAL_LABOR_HOURS)
+        access_modifier: public_access
+      - name: UNDERSTAFFED_SHIFTS
+        description: "Number of shifts that were understaffed"
+        expr: "COUNT(CASE WHEN IS_UNDERSTAFFED THEN 1 END)"
+        access_modifier: public_access
+      - name: TOTAL_STAFF_VARIANCE
+        description: "Total variance between scheduled and actual employees"
+        expr: SUM(STAFF_VARIANCE)
+        access_modifier: public_access
+  - name: DIM_DATE
+    base_table:
+      database: AM_SKI_RESORT_QA
+      schema: MARTS
+      table: DIM_DATE
+    primary_key:
+      columns:
+        - DATE_KEY
+    dimensions:
+      - name: DATE_KEY
+        expr: DATE_KEY
+        data_type: NUMBER
+      - name: DAY_NAME
+        expr: DAY_NAME
+        data_type: VARCHAR
+      - name: DAY_OF_WEEK
+        expr: DAY_OF_WEEK
+        data_type: NUMBER
+      - name: MONTH_NAME
+        expr: MONTH_NAME
+        data_type: VARCHAR
+      - name: CALENDAR_YEAR
+        expr: CALENDAR_YEAR
+        data_type: NUMBER
+      - name: SKI_SEASON
+        expr: SKI_SEASON
+        data_type: VARCHAR
+      - name: IS_WEEKEND
+        expr: IS_WEEKEND
+        data_type: BOOLEAN
+      - name: IS_HOLIDAY
+        expr: IS_HOLIDAY
+        data_type: BOOLEAN
+    time_dimensions:
+      - name: FULL_DATE
+        expr: FULL_DATE
+        data_type: DATE
+  - name: DIM_LOCATION
+    base_table:
+      database: AM_SKI_RESORT_QA
+      schema: MARTS
+      table: DIM_LOCATION
+    primary_key:
+      columns:
+        - LOCATION_KEY
+    dimensions:
+      - name: LOCATION_KEY
+        expr: LOCATION_KEY
+        data_type: VARCHAR
+      - name: LOCATION_ID
+        expr: LOCATION_ID
+        data_type: VARCHAR
+      - name: LOCATION_NAME
+        expr: LOCATION_NAME
+        data_type: VARCHAR
+      - name: LOCATION_TYPE
+        expr: LOCATION_TYPE
+        data_type: VARCHAR
+      - name: ELEVATION_ZONE
+        expr: ELEVATION_ZONE
+        data_type: VARCHAR
+relationships:
+  - name: FACT_STAFFING_TO_DIM_DATE
+    left_table: FACT_STAFFING
+    right_table: DIM_DATE
+    join_type: inner
+    relationship_type: many_to_one
+    relationship_columns:
+      - left_column: DATE_KEY
+        right_column: DATE_KEY
+  - name: FACT_STAFFING_TO_DIM_LOCATION
+    left_table: FACT_STAFFING
+    right_table: DIM_LOCATION
+    join_type: inner
+    relationship_type: many_to_one
+    relationship_columns:
+      - left_column: LOCATION_KEY
+        right_column: LOCATION_KEY
+verified_queries:
+  - name: staffing_by_department
+    question: What is the staffing coverage by department and day of week?
+    sql: >-
+      SELECT s.DEPARTMENT, d.DAY_NAME, AVG(s.COVERAGE_RATIO) AS avg_coverage,
+      SUM(CASE WHEN s.IS_UNDERSTAFFED THEN 1 ELSE 0 END) AS understaffed_shifts,
+      SUM(s.ACTUAL_LABOR_HOURS) AS total_labor_hours
+      FROM fact_staffing AS s JOIN dim_date AS d ON s.DATE_KEY = d.DATE_KEY
+      GROUP BY s.DEPARTMENT, d.DAY_NAME ORDER BY s.DEPARTMENT, d.DAY_NAME
+    verified_at: 1774650000
+    verified_by: SADM Generator

@@ -1,0 +1,151 @@
+"""
+Generate lineage impact comment for a PR that modifies dbt models.
+
+Usage:
+    python -m agent_management.ci.generate_lineage_comment --project dbt_ski_resort --models dim_customer,stg_ticket_sales
+
+Outputs markdown suitable for a GitHub PR comment.
+"""
+import argparse
+import subprocess
+import sys
+import os
+
+
+def find_fdbt() -> str:
+    fdbt = os.environ.get("FDBT_PATH")
+    if fdbt and os.path.isfile(fdbt):
+        return fdbt
+    result = subprocess.run(["which", "fdbt"], capture_output=True, text=True)
+    if result.returncode == 0:
+        return result.stdout.strip()
+    cortex_dir = os.path.expanduser("~/.local/share/cortex")
+    if os.path.isdir(cortex_dir):
+        candidates = []
+        for d in os.listdir(cortex_dir):
+            p = os.path.join(cortex_dir, d, "fdbt")
+            if os.path.isfile(p):
+                candidates.append(p)
+        if candidates:
+            return sorted(candidates)[-1]
+    print("ERROR: fdbt not found. Set FDBT_PATH or install fdbt.", file=sys.stderr)
+    sys.exit(1)
+
+
+def get_changed_models(project: str) -> list[str]:
+    result = subprocess.run(
+        ["git", "diff", "--name-only", "origin/main...HEAD"],
+        capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        result = subprocess.run(
+            ["git", "diff", "--name-only", "HEAD~1"],
+            capture_output=True, text=True
+        )
+
+    models = []
+    for line in result.stdout.strip().splitlines():
+        line = line.strip()
+        if line.startswith(f"{project}/models/") and line.endswith(".sql"):
+            model_name = os.path.basename(line).replace(".sql", "")
+            models.append(model_name)
+        if line.startswith(f"{project}/models/") and line.endswith(".yml"):
+            models.append(f"[schema: {os.path.basename(line)}]")
+    return models
+
+
+def get_impact(fdbt: str, project: str, model: str) -> str:
+    cmd = [fdbt, "-p", project, "impact", model]
+    result = subprocess.run(cmd, capture_output=True, text=True, cwd=os.getcwd())
+    return result.stdout if result.returncode == 0 else f"Could not analyze {model}"
+
+
+def get_lineage(fdbt: str, project: str, model: str) -> str:
+    cmd = [fdbt, "-p", project, "lineage", model, "--downstream", "-d", "3"]
+    result = subprocess.run(cmd, capture_output=True, text=True, cwd=os.getcwd())
+    return result.stdout if result.returncode == 0 else ""
+
+
+def get_coverage(fdbt: str, project: str) -> str:
+    cmd = [fdbt, "-p", project, "tests", "coverage"]
+    result = subprocess.run(cmd, capture_output=True, text=True, cwd=os.getcwd())
+    return result.stdout if result.returncode == 0 else ""
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Generate lineage PR comment")
+    parser.add_argument("--project", default="dbt_ski_resort", help="Path to dbt project")
+    parser.add_argument("--models", help="Comma-separated model names (auto-detects from git diff if omitted)")
+    parser.add_argument("--output", help="Write to file instead of stdout")
+    args = parser.parse_args()
+
+    fdbt = find_fdbt()
+
+    if args.models:
+        models = [m.strip() for m in args.models.split(",")]
+    else:
+        models = get_changed_models(args.project)
+
+    sql_models = [m for m in models if not m.startswith("[")]
+
+    lines = []
+    lines.append("## dbt Model Impact Analysis")
+    lines.append("")
+
+    if not models:
+        lines.append("No dbt model changes detected in this PR.")
+        output = "\n".join(lines)
+        if args.output:
+            with open(args.output, "w") as f:
+                f.write(output)
+        else:
+            print(output)
+        return
+
+    lines.append(f"**Changed models**: {', '.join(f'`{m}`' for m in models)}")
+    lines.append("")
+
+    for model in sql_models:
+        lines.append(f"### `{model}` — Impact")
+        lines.append("")
+        lines.append("```")
+        impact = get_impact(fdbt, args.project, model)
+        lines.append(impact.strip())
+        lines.append("```")
+        lines.append("")
+
+        lineage = get_lineage(fdbt, args.project, model)
+        if lineage.strip():
+            lines.append(f"<details><summary>Downstream lineage</summary>")
+            lines.append("")
+            lines.append("```")
+            lines.append(lineage.strip())
+            lines.append("```")
+            lines.append("")
+            lines.append("</details>")
+            lines.append("")
+
+    lines.append("### Test Coverage Summary")
+    lines.append("")
+    lines.append("```")
+    coverage = get_coverage(fdbt, args.project)
+    for cov_line in coverage.splitlines():
+        if "Model Coverage" in cov_line or "Models with" in cov_line or "Models without" in cov_line or "Total models" in cov_line or "Total tests" in cov_line:
+            lines.append(cov_line)
+    lines.append("```")
+    lines.append("")
+    lines.append("---")
+    lines.append("*Generated by fdbt CI — no Snowflake connection required*")
+
+    output = "\n".join(lines)
+
+    if args.output:
+        with open(args.output, "w") as f:
+            f.write(output)
+        print(f"Comment written to {args.output}")
+    else:
+        print(output)
+
+
+if __name__ == "__main__":
+    main()

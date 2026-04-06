@@ -1,0 +1,268 @@
+# SKI_OPS_ASSISTANT - Agent Evaluation Questions (Dynamic Ground Truth)
+#
+# Test questions for {{ eval.source_database }}.AGENTS.SKI_OPS_ASSISTANT
+# Tools: LiftOperationsAnalytics, StaffingAnalytics, WeatherAnalytics, SafetyIncidentsAnalytics
+#
+# Ground Truth Strategy:
+#   - validation_query: SQL executed at eval time to generate fresh ground truth
+#   - answer_template: Python format string that combines query results into NL ground truth
+#
+# Time Anchoring:
+#   Questions use relative references ("most recent complete season", "current season")
+#   so the same eval set works across seasons without manual updates.
+
+questions:
+  # ===========================================================================
+  # LIFT OPERATIONS — Wait Times and Capacity
+  # ===========================================================================
+  - question: "What was the average lift wait time for the most recent complete season?"
+    expected_tools: ["LiftOperationsAnalytics"]
+    category: operations
+    tags: [wait_time, season_total, dynamic]
+    test_type: in_scope
+    validation_query: |
+      WITH most_recent_complete AS (
+        SELECT MAX(SKI_SEASON) AS season FROM {{ eval.source_database }}.MARTS.DIM_DATE
+        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM {{ eval.source_database }}.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
+      )
+      SELECT d.SKI_SEASON AS season,
+             ROUND(AVG(ls.WAIT_TIME_MINUTES), 1) AS avg_wait,
+             COUNT(*) AS total_scans
+      FROM {{ eval.source_database }}.MARTS.FACT_LIFT_SCANS ls
+      JOIN {{ eval.source_database }}.MARTS.DIM_DATE d ON ls.DATE_KEY = d.DATE_KEY
+      WHERE d.SKI_SEASON = (SELECT season FROM most_recent_complete)
+      GROUP BY d.SKI_SEASON
+    answer_template: >-
+      Average lift wait time for the {season} season was {avg_wait} minutes
+      across {total_scans:,} total lift scans.
+
+  - question: "Which lifts had the longest average wait times during the most recent complete season?"
+    expected_tools: ["LiftOperationsAnalytics"]
+    category: operations
+    tags: [wait_time, ranking, dynamic]
+    test_type: in_scope
+    validation_query: |
+      WITH most_recent_complete AS (
+        SELECT MAX(SKI_SEASON) AS season FROM {{ eval.source_database }}.MARTS.DIM_DATE
+        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM {{ eval.source_database }}.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
+      )
+      SELECT l.LIFT_NAME AS lift_name,
+             ROUND(AVG(ls.WAIT_TIME_MINUTES), 1) AS avg_wait,
+             COUNT(*) AS scan_count
+      FROM {{ eval.source_database }}.MARTS.FACT_LIFT_SCANS ls
+      JOIN {{ eval.source_database }}.MARTS.DIM_DATE d ON ls.DATE_KEY = d.DATE_KEY
+      JOIN {{ eval.source_database }}.MARTS.DIM_LIFT l ON ls.LIFT_KEY = l.LIFT_KEY
+      WHERE d.SKI_SEASON = (SELECT season FROM most_recent_complete)
+      GROUP BY l.LIFT_NAME
+      ORDER BY avg_wait DESC
+      LIMIT 3
+    answer_template: >-
+      The lifts with the longest average wait times were {lift_name} at {avg_wait} minutes
+      ({scan_count:,} scans) during the most recent complete season.
+
+  - question: "How do weekend wait times compare to weekday wait times across all lifts?"
+    expected_tools: ["LiftOperationsAnalytics"]
+    category: operations
+    tags: [wait_time, weekend_vs_weekday, dynamic]
+    test_type: in_scope
+    validation_query: |
+      WITH most_recent_complete AS (
+        SELECT MAX(SKI_SEASON) AS season FROM {{ eval.source_database }}.MARTS.DIM_DATE
+        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM {{ eval.source_database }}.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
+      )
+      SELECT ROUND(AVG(CASE WHEN d.IS_WEEKEND THEN ls.WAIT_TIME_MINUTES END), 1) AS weekend_avg,
+             ROUND(AVG(CASE WHEN NOT d.IS_WEEKEND THEN ls.WAIT_TIME_MINUTES END), 1) AS weekday_avg,
+             d.SKI_SEASON AS season
+      FROM {{ eval.source_database }}.MARTS.FACT_LIFT_SCANS ls
+      JOIN {{ eval.source_database }}.MARTS.DIM_DATE d ON ls.DATE_KEY = d.DATE_KEY
+      WHERE d.SKI_SEASON = (SELECT season FROM most_recent_complete)
+      GROUP BY d.SKI_SEASON
+    answer_template: >-
+      During the {season} season, average weekend wait time was {weekend_avg} minutes
+      compared to {weekday_avg} minutes on weekdays.
+
+  # ===========================================================================
+  # STAFFING — Coverage and Understaffing
+  # ===========================================================================
+  - question: "What was the average staffing coverage ratio during the most recent complete season?"
+    expected_tools: ["StaffingAnalytics"]
+    category: staffing
+    tags: [coverage, season_total, dynamic]
+    test_type: in_scope
+    validation_query: |
+      WITH most_recent_complete AS (
+        SELECT MAX(SKI_SEASON) AS season FROM {{ eval.source_database }}.MARTS.DIM_DATE
+        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM {{ eval.source_database }}.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
+      )
+      SELECT d.SKI_SEASON AS season,
+             ROUND(AVG(s.COVERAGE_RATIO), 2) AS avg_coverage,
+             SUM(CASE WHEN s.IS_UNDERSTAFFED THEN 1 ELSE 0 END) AS understaffed_shifts,
+             COUNT(*) AS total_shifts
+      FROM {{ eval.source_database }}.MARTS.FACT_STAFFING s
+      JOIN {{ eval.source_database }}.MARTS.DIM_DATE d ON s.DATE_KEY = d.DATE_KEY
+      WHERE d.SKI_SEASON = (SELECT season FROM most_recent_complete)
+      GROUP BY d.SKI_SEASON
+    answer_template: >-
+      Average staffing coverage ratio was {avg_coverage} during the {season} season
+      with {understaffed_shifts} understaffed shifts out of {total_shifts:,} total shifts.
+
+  - question: "Which departments had the most understaffed shifts during the most recent complete season?"
+    expected_tools: ["StaffingAnalytics"]
+    category: staffing
+    tags: [understaffed, department, ranking, dynamic]
+    test_type: in_scope
+    validation_query: |
+      WITH most_recent_complete AS (
+        SELECT MAX(SKI_SEASON) AS season FROM {{ eval.source_database }}.MARTS.DIM_DATE
+        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM {{ eval.source_database }}.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
+      )
+      SELECT s.DEPARTMENT AS dept,
+             SUM(CASE WHEN s.IS_UNDERSTAFFED THEN 1 ELSE 0 END) AS understaffed_count,
+             COUNT(*) AS total_shifts
+      FROM {{ eval.source_database }}.MARTS.FACT_STAFFING s
+      JOIN {{ eval.source_database }}.MARTS.DIM_DATE d ON s.DATE_KEY = d.DATE_KEY
+      WHERE d.SKI_SEASON = (SELECT season FROM most_recent_complete)
+      GROUP BY s.DEPARTMENT
+      ORDER BY understaffed_count DESC
+      LIMIT 3
+    answer_template: >-
+      {dept} had the most understaffed shifts with {understaffed_count}
+      out of {total_shifts:,} total shifts during the most recent complete season.
+
+  # ===========================================================================
+  # WEATHER — Snowfall and Conditions
+  # ===========================================================================
+  - question: "How much total snowfall did we get during the most recent complete season and how many powder days?"
+    expected_tools: ["WeatherAnalytics"]
+    category: weather
+    tags: [snowfall, powder_days, dynamic]
+    test_type: in_scope
+    validation_query: |
+      WITH most_recent_complete AS (
+        SELECT MAX(SKI_SEASON) AS season FROM {{ eval.source_database }}.MARTS.DIM_DATE
+        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM {{ eval.source_database }}.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
+      )
+      SELECT d.SKI_SEASON AS season,
+             ROUND(SUM(w.SNOWFALL_INCHES), 1) AS total_snowfall,
+             SUM(CASE WHEN w.IS_POWDER_DAY THEN 1 ELSE 0 END) AS powder_days
+      FROM {{ eval.source_database }}.MARTS.FACT_WEATHER w
+      JOIN {{ eval.source_database }}.MARTS.DIM_DATE d ON w.DATE_KEY = d.DATE_KEY
+      WHERE d.SKI_SEASON = (SELECT season FROM most_recent_complete)
+      GROUP BY d.SKI_SEASON
+    answer_template: >-
+      Total snowfall for the {season} season was {total_snowfall:,.1f} inches
+      with {powder_days} powder days.
+
+  - question: "What were the wind conditions like during the most recent complete season? How many high wind days?"
+    expected_tools: ["WeatherAnalytics"]
+    category: weather
+    tags: [wind, high_wind, dynamic]
+    test_type: in_scope
+    validation_query: |
+      WITH most_recent_complete AS (
+        SELECT MAX(SKI_SEASON) AS season FROM {{ eval.source_database }}.MARTS.DIM_DATE
+        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM {{ eval.source_database }}.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
+      )
+      SELECT d.SKI_SEASON AS season,
+             ROUND(AVG(w.WIND_SPEED_MPH), 1) AS avg_wind,
+             ROUND(MAX(w.WIND_SPEED_MPH), 1) AS max_wind,
+             SUM(CASE WHEN w.IS_HIGH_WIND THEN 1 ELSE 0 END) AS high_wind_days
+      FROM {{ eval.source_database }}.MARTS.FACT_WEATHER w
+      JOIN {{ eval.source_database }}.MARTS.DIM_DATE d ON w.DATE_KEY = d.DATE_KEY
+      WHERE d.SKI_SEASON = (SELECT season FROM most_recent_complete)
+      GROUP BY d.SKI_SEASON
+    answer_template: >-
+      During the {season} season, average wind speed was {avg_wind} mph
+      with a peak gust of {max_wind} mph. There were {high_wind_days} high wind days.
+
+  # ===========================================================================
+  # SAFETY — Incidents and Response
+  # ===========================================================================
+  - question: "How many safety incidents occurred during the most recent complete season and what was the average patrol response time?"
+    expected_tools: ["SafetyIncidentsAnalytics"]
+    category: safety
+    tags: [incidents, response_time, dynamic]
+    test_type: in_scope
+    validation_query: |
+      WITH most_recent_complete AS (
+        SELECT MAX(SKI_SEASON) AS season FROM {{ eval.source_database }}.MARTS.DIM_DATE
+        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM {{ eval.source_database }}.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
+      )
+      SELECT d.SKI_SEASON AS season,
+             COUNT(*) AS incident_count,
+             ROUND(AVG(i.SEVERITY_SCORE), 2) AS avg_severity,
+             ROUND(AVG(i.PATROL_RESPONSE_MINUTES), 1) AS avg_response
+      FROM {{ eval.source_database }}.MARTS.FACT_INCIDENTS i
+      JOIN {{ eval.source_database }}.MARTS.DIM_DATE d ON i.INCIDENT_DATE = d.FULL_DATE
+      WHERE d.SKI_SEASON = (SELECT season FROM most_recent_complete)
+      GROUP BY d.SKI_SEASON
+    answer_template: >-
+      There were {incident_count} safety incidents during the {season} season
+      with average severity of {avg_severity} and average patrol response time
+      of {avg_response} minutes.
+
+  - question: "What were the most common incident types during the most recent complete season?"
+    expected_tools: ["SafetyIncidentsAnalytics"]
+    category: safety
+    tags: [incident_type, ranking, dynamic]
+    test_type: in_scope
+    validation_query: |
+      WITH most_recent_complete AS (
+        SELECT MAX(SKI_SEASON) AS season FROM {{ eval.source_database }}.MARTS.DIM_DATE
+        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM {{ eval.source_database }}.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
+      )
+      SELECT i.INCIDENT_TYPE AS incident_type,
+             COUNT(*) AS count
+      FROM {{ eval.source_database }}.MARTS.FACT_INCIDENTS i
+      JOIN {{ eval.source_database }}.MARTS.DIM_DATE d ON i.INCIDENT_DATE = d.FULL_DATE
+      WHERE d.SKI_SEASON = (SELECT season FROM most_recent_complete)
+      GROUP BY i.INCIDENT_TYPE
+      ORDER BY count DESC
+      LIMIT 3
+    answer_template: >-
+      The most common incident type was {incident_type} with {count} occurrences
+      during the most recent complete season.
+
+  # ===========================================================================
+  # CROSS-DOMAIN — Operational Summary
+  # ===========================================================================
+  - question: "Give me a daily operations summary for yesterday: lift wait times, staffing coverage, weather, and any safety incidents."
+    expected_tools: ["LiftOperationsAnalytics", "StaffingAnalytics", "WeatherAnalytics", "SafetyIncidentsAnalytics"]
+    category: cross_domain
+    tags: [daily_summary, multi_tool, dynamic]
+    test_type: in_scope
+    validation_query: |
+      WITH yesterday AS (SELECT CURRENT_DATE() - 1 AS dt),
+      lifts AS (
+        SELECT ROUND(AVG(ls.WAIT_TIME_MINUTES), 1) AS avg_wait,
+               COUNT(*) AS total_scans
+        FROM {{ eval.source_database }}.MARTS.FACT_LIFT_SCANS ls
+        JOIN {{ eval.source_database }}.MARTS.DIM_DATE d ON ls.DATE_KEY = d.DATE_KEY
+        WHERE d.FULL_DATE = (SELECT dt FROM yesterday)
+      ),
+      staff AS (
+        SELECT ROUND(AVG(s.COVERAGE_RATIO), 2) AS avg_coverage
+        FROM {{ eval.source_database }}.MARTS.FACT_STAFFING s
+        JOIN {{ eval.source_database }}.MARTS.DIM_DATE d ON s.DATE_KEY = d.DATE_KEY
+        WHERE d.FULL_DATE = (SELECT dt FROM yesterday)
+      ),
+      wx AS (
+        SELECT ROUND(SUM(w.SNOWFALL_INCHES), 1) AS snowfall,
+               ROUND(AVG(w.TEMP_HIGH_F), 0) AS high_temp
+        FROM {{ eval.source_database }}.MARTS.FACT_WEATHER w
+        JOIN {{ eval.source_database }}.MARTS.DIM_DATE d ON w.DATE_KEY = d.DATE_KEY
+        WHERE d.FULL_DATE = (SELECT dt FROM yesterday)
+      ),
+      safety AS (
+        SELECT COUNT(*) AS incidents
+        FROM {{ eval.source_database }}.MARTS.FACT_INCIDENTS i
+        WHERE i.INCIDENT_DATE = (SELECT dt FROM yesterday)
+      )
+      SELECT (SELECT dt FROM yesterday) AS report_date,
+             l.avg_wait, l.total_scans, s.avg_coverage,
+             w.snowfall, w.high_temp, sf.incidents
+      FROM lifts l, staff s, wx w, safety sf
+    answer_template: >-
+      Yesterday ({report_date}): avg wait {avg_wait} min across {total_scans:,} scans,
+      staffing coverage {avg_coverage}, snowfall {snowfall} in, high {high_temp}F,
+      {incidents} safety incidents.

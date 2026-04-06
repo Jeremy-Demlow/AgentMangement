@@ -1,0 +1,170 @@
+name: sem_marketing_analytics
+description: Marketing analytics semantic view for campaign performance and ROI analysis
+tables:
+  - name: DATES
+    synonyms:
+      - calendar
+      - day_attributes
+    description: Calendar dimension
+    base_table:
+      database: AM_SKI_RESORT_PROD
+      schema: MARTS
+      table: DIM_DATE
+    primary_key:
+      columns:
+        - DATE_KEY
+    dimensions:
+      - name: MONTH_NAME
+        description: Month name
+        expr: MONTH_NAME
+        data_type: VARCHAR(3)
+      - name: SKI_SEASON
+        synonyms:
+          - season
+        description: Ski season identifier
+        expr: SKI_SEASON
+        data_type: VARCHAR(16777216)
+  - name: MARKETING
+    synonyms:
+      - campaigns
+      - promotions
+    description: Marketing campaign performance and attribution
+    base_table:
+      database: AM_SKI_RESORT_PROD
+      schema: MARTS
+      table: FACT_MARKETING
+    primary_key:
+      columns:
+        - MARKETING_KEY
+    dimensions:
+      - name: AUDIENCE_SEGMENT
+        synonyms:
+          - segment
+          - audience
+        description: Target audience segment
+        expr: AUDIENCE_SEGMENT
+        data_type: VARCHAR(100)
+      - name: CAMPAIGN_CHANNEL
+        synonyms:
+          - channel
+          - medium
+        description: "Marketing channel (Email, Social, etc)"
+        expr: CAMPAIGN_CHANNEL
+        data_type: VARCHAR(50)
+      - name: CAMPAIGN_NAME
+        synonyms:
+          - campaign
+          - promo
+        description: Campaign name
+        expr: CAMPAIGN_NAME
+        data_type: VARCHAR(150)
+      - name: CAMPAIGN_TYPE
+        synonyms:
+          - type
+          - category
+        description: "Campaign type (Acquisition, Retention, etc)"
+        expr: CAMPAIGN_TYPE
+        data_type: VARCHAR(50)
+      - name: SENT_DATE
+        synonyms:
+          - date
+          - campaign_date
+          - send_date
+        description: Date campaign was sent
+        expr: SENT_DATE
+        data_type: DATE
+    facts:
+      - name: CLICK_RATE
+        description: Click-through rate
+        expr: CLICK_RATE
+        data_type: FLOAT
+        access_modifier: public_access
+      - name: CONVERSION_COUNT
+        description: Number of conversions
+        expr: CONVERSION_COUNT
+        data_type: "NUMBER(38,0)"
+        access_modifier: public_access
+      - name: CONVERSION_RATE
+        description: Conversion rate
+        expr: CONVERSION_RATE
+        data_type: FLOAT
+        access_modifier: public_access
+      - name: OPEN_RATE
+        description: Email open rate
+        expr: OPEN_RATE
+        data_type: FLOAT
+        access_modifier: public_access
+      - name: REVENUE_ATTRIBUTED
+        description: Revenue attributed to campaign
+        expr: REVENUE_ATTRIBUTED
+        data_type: FLOAT
+        access_modifier: public_access
+      - name: TARGET_COUNT
+        description: Number of recipients targeted
+        expr: TARGET_COUNT
+        data_type: "NUMBER(38,0)"
+        access_modifier: public_access
+    metrics:
+      - name: AVG_CLICK_RATE
+        synonyms:
+          - ctr
+          - click_rate
+        description: Average click-through rate
+        expr: AVG(MARKETING.CLICK_RATE)
+        access_modifier: public_access
+      - name: AVG_CONVERSION_RATE
+        description: Average conversion rate
+        expr: AVG(MARKETING.CONVERSION_RATE)
+        access_modifier: public_access
+      - name: AVG_OPEN_RATE
+        synonyms:
+          - open_rate
+        description: Average email open rate
+        expr: AVG(MARKETING.OPEN_RATE)
+        access_modifier: public_access
+      - name: CAMPAIGN_COUNT
+        description: Number of campaign touches
+        expr: COUNT(MARKETING.MARKETING_KEY)
+        access_modifier: public_access
+      - name: REVENUE_PER_CONVERSION
+        synonyms:
+          - aov
+          - avg_order_value
+        description: Average revenue per conversion
+        expr: |-
+          DIV0(
+                  SUM(MARKETING.REVENUE_ATTRIBUTED),
+                  NULLIF(SUM(MARKETING.CONVERSION_COUNT), 0)
+              )
+        access_modifier: public_access
+      - name: TOTAL_CONVERSIONS
+        synonyms:
+          - conversions
+          - sales
+        description: Total conversion count
+        expr: SUM(MARKETING.CONVERSION_COUNT)
+        access_modifier: public_access
+      - name: TOTAL_REVENUE
+        synonyms:
+          - revenue
+          - attributed_revenue
+        description: Total revenue attributed to campaigns
+        expr: SUM(MARKETING.REVENUE_ATTRIBUTED)
+        access_modifier: public_access
+      - name: TOTAL_TARGETED
+        synonyms:
+          - recipients
+          - audience_size
+        description: Total recipients targeted
+        expr: SUM(MARKETING.TARGET_COUNT)
+        access_modifier: public_access
+relationships:
+  - name: MARKETING_TO_DATE
+    left_table: MARKETING
+    right_table: DATES
+    relationship_columns:
+      - left_column: SEND_DATE_KEY
+        right_column: DATE_KEY
+module_custom_instructions:
+  sql_generation: Group by CAMPAIGN_CHANNEL for channel analysis. Use CAMPAIGN_TYPE to compare acquisition vs retention. Calculate ROI as (TOTAL_REVENUE - campaign_cost) / campaign_cost when cost data available. Use DIV0 for safe division.
+  question_categorization: "Use this view for marketing questions: campaign performance, conversion rates, revenue attribution, and channel effectiveness. For customer-level campaign impact, join with customer dimension."

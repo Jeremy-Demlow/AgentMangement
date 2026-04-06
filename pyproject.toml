@@ -1,0 +1,46 @@
+[project]
+name = "agent-management"
+version = "0.6.0"
+description = "CI/CD reference framework for Snowflake Cortex Agents, Semantic Views, and dbt"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "Apache-2.0"}
+dependencies = [
+    "snowflake-connector-python>=3.6.0",
+    "pyyaml>=6.0",
+    "jinja2>=3.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.4",
+]
+crypto = [
+    "cryptography>=41.0",
+]
+
+[project.scripts]
+agent-mgmt-deploy-agents = "agent_management.deploy_agents:main"
+agent-mgmt-deploy-svs = "agent_management.deploy_semantic_views:main"
+agent-mgmt-validate = "agent_management.validate_specs:main"
+agent-mgmt-snapshot = "agent_management.snapshot_state:main"
+agent-mgmt-rollback = "agent_management.rollback:main"
+agent-mgmt-metrics = "agent_management.compute_metrics:main"
+agent-mgmt-render-eval = "agent_management.render_eval_templates:main"
+agent-mgmt-detect-drift = "agent_management.detect_drift:main"
+agent-mgmt-check-sv-eval = "agent_management.check_sv_eval:main"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["agent_management*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100

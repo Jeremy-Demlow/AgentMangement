@@ -1,0 +1,19 @@
+ticket_type_id,ticket_name,ticket_category,duration_days,access_level,price,blackout_dates
+TKT001,Adult Day Pass,day_pass,1,Full,129,None
+TKT002,Child Day Pass,day_pass,1,Full,79,None
+TKT003,Senior Day Pass,day_pass,1,Full,99,None
+TKT004,Adult Half Day,half_day,1,Full,89,None
+TKT005,3-Day Pass,multi_day,3,Full,297,None
+TKT006,5-Day Pass,multi_day,5,Full,450,None
+TKT007,7-Day Pass,multi_day,7,Full,580,None
+TKT008,Season Pass - Full,season_pass,180,Full,899,None
+TKT009,Season Pass - Limited,season_pass,180,Limited,699,Weekends/Holidays
+TKT010,Season Pass - Senior,season_pass,180,Full,699,None
+TKT011,Season Pass - College,season_pass,180,Full,499,None
+TKT012,Season Pass - Military,season_pass,180,Full,499,None
+TKT013,Season Pass - Child,season_pass,180,Full,399,None
+TKT014,Early Bird Season,season_pass,180,Full,699,None
+TKT015,Family 4-Pack Day,day_pass,1,Full,400,None
+TKT016,Beginner Package,day_pass,1,Limited,99,Beginner Area Only
+TKT017,Night Skiing,half_day,1,Limited,49,Specific Lifts Only
+TKT018,Spring Pass,season_pass,60,Full,299,Mar-Apr Only

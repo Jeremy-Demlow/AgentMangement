@@ -1,0 +1,217 @@
+name: sem_daily_summary
+description: Executive daily summary KPIs for ski resort. Aggregates key metrics across
+  ticket sales, lift operations, weather, and food & beverage into a unified daily
+  view for executive dashboards and high-level trend analysis.
+tables:
+  - name: FACT_TICKET_SALES
+    base_table:
+      database: AM_SKI_RESORT_QA
+      schema: MARTS
+      table: FACT_TICKET_SALES
+    dimensions:
+      - name: SALE_KEY
+        expr: SALE_KEY
+        data_type: VARCHAR
+      - name: PURCHASE_DATE_KEY
+        expr: PURCHASE_DATE_KEY
+        data_type: NUMBER
+      - name: PAYMENT_METHOD
+        expr: PAYMENT_METHOD
+        data_type: VARCHAR
+      - name: PURCHASE_CHANNEL
+        expr: PURCHASE_CHANNEL
+        data_type: VARCHAR
+      - name: TICKET_CATEGORY
+        expr: TICKET_CATEGORY
+        data_type: VARCHAR
+    time_dimensions:
+      - name: PURCHASE_DATE
+        expr: PURCHASE_DATE
+        data_type: DATE
+    facts:
+      - name: PURCHASE_AMOUNT
+        expr: PURCHASE_AMOUNT
+        data_type: NUMBER
+      - name: DISCOUNT_AMOUNT
+        expr: DISCOUNT_AMOUNT
+        data_type: NUMBER
+    metrics:
+      - name: DAILY_TICKET_REVENUE
+        description: "Total daily ticket revenue"
+        expr: SUM(PURCHASE_AMOUNT)
+        access_modifier: public_access
+      - name: DAILY_TICKETS_SOLD
+        description: "Total tickets sold per day"
+        expr: COUNT(SALE_KEY)
+        access_modifier: public_access
+  - name: FACT_LIFT_SCANS
+    base_table:
+      database: AM_SKI_RESORT_QA
+      schema: MARTS
+      table: FACT_LIFT_SCANS
+    dimensions:
+      - name: SCAN_KEY
+        expr: SCAN_KEY
+        data_type: VARCHAR
+      - name: DATE_KEY
+        expr: DATE_KEY
+        data_type: NUMBER
+    time_dimensions:
+      - name: SCAN_TIMESTAMP
+        expr: SCAN_TIMESTAMP
+        data_type: TIMESTAMP_NTZ
+    facts:
+      - name: WAIT_TIME_MINUTES
+        expr: WAIT_TIME_MINUTES
+        data_type: NUMBER
+  - name: FACT_FOOD_BEVERAGE
+    base_table:
+      database: AM_SKI_RESORT_QA
+      schema: MARTS
+      table: FACT_FOOD_BEVERAGE
+    dimensions:
+      - name: TRANSACTION_KEY
+        expr: TRANSACTION_KEY
+        data_type: VARCHAR
+      - name: TRANSACTION_DATE_KEY
+        expr: TRANSACTION_DATE_KEY
+        data_type: NUMBER
+    time_dimensions:
+      - name: TRANSACTION_DATE
+        expr: TRANSACTION_DATE
+        data_type: DATE
+    facts:
+      - name: TOTAL_AMOUNT
+        expr: TOTAL_AMOUNT
+        data_type: NUMBER
+      - name: QUANTITY
+        expr: QUANTITY
+        data_type: NUMBER
+  - name: FACT_WEATHER
+    base_table:
+      database: AM_SKI_RESORT_QA
+      schema: MARTS
+      table: FACT_WEATHER
+    dimensions:
+      - name: WEATHER_KEY
+        expr: WEATHER_KEY
+        data_type: VARCHAR
+      - name: DATE_KEY
+        expr: DATE_KEY
+        data_type: NUMBER
+      - name: SNOW_CONDITION
+        expr: SNOW_CONDITION
+        data_type: VARCHAR
+      - name: IS_POWDER_DAY
+        expr: IS_POWDER_DAY
+        data_type: BOOLEAN
+    time_dimensions:
+      - name: WEATHER_DATE
+        expr: WEATHER_DATE
+        data_type: DATE
+    facts:
+      - name: SNOWFALL_INCHES
+        expr: SNOWFALL_INCHES
+        data_type: FLOAT
+      - name: TEMP_HIGH_F
+        expr: TEMP_HIGH_F
+        data_type: FLOAT
+      - name: TEMP_LOW_F
+        expr: TEMP_LOW_F
+        data_type: FLOAT
+  - name: DIM_DATE
+    base_table:
+      database: AM_SKI_RESORT_QA
+      schema: MARTS
+      table: DIM_DATE
+    primary_key:
+      columns:
+        - DATE_KEY
+    dimensions:
+      - name: DATE_KEY
+        expr: DATE_KEY
+        data_type: NUMBER
+      - name: DAY_NAME
+        expr: DAY_NAME
+        data_type: VARCHAR
+      - name: DAY_OF_WEEK
+        expr: DAY_OF_WEEK
+        data_type: NUMBER
+      - name: MONTH_NUM
+        expr: MONTH_NUM
+        data_type: NUMBER
+      - name: MONTH_NAME
+        expr: MONTH_NAME
+        data_type: VARCHAR
+      - name: QUARTER_NUM
+        expr: QUARTER_NUM
+        data_type: NUMBER
+      - name: CALENDAR_YEAR
+        expr: CALENDAR_YEAR
+        data_type: NUMBER
+      - name: SKI_SEASON
+        expr: SKI_SEASON
+        data_type: VARCHAR
+      - name: IS_WEEKEND
+        expr: IS_WEEKEND
+        data_type: BOOLEAN
+      - name: IS_HOLIDAY
+        expr: IS_HOLIDAY
+        data_type: BOOLEAN
+      - name: IS_OPERATING
+        expr: IS_OPERATING
+        data_type: BOOLEAN
+    time_dimensions:
+      - name: FULL_DATE
+        expr: FULL_DATE
+        data_type: DATE
+relationships:
+  - name: FACT_TICKET_SALES_TO_DIM_DATE
+    left_table: FACT_TICKET_SALES
+    right_table: DIM_DATE
+    join_type: inner
+    relationship_type: many_to_one
+    relationship_columns:
+      - left_column: PURCHASE_DATE_KEY
+        right_column: DATE_KEY
+  - name: FACT_LIFT_SCANS_TO_DIM_DATE
+    left_table: FACT_LIFT_SCANS
+    right_table: DIM_DATE
+    join_type: inner
+    relationship_type: many_to_one
+    relationship_columns:
+      - left_column: DATE_KEY
+        right_column: DATE_KEY
+  - name: FACT_FOOD_BEVERAGE_TO_DIM_DATE
+    left_table: FACT_FOOD_BEVERAGE
+    right_table: DIM_DATE
+    join_type: inner
+    relationship_type: many_to_one
+    relationship_columns:
+      - left_column: TRANSACTION_DATE_KEY
+        right_column: DATE_KEY
+  - name: FACT_WEATHER_TO_DIM_DATE
+    left_table: FACT_WEATHER
+    right_table: DIM_DATE
+    join_type: inner
+    relationship_type: many_to_one
+    relationship_columns:
+      - left_column: DATE_KEY
+        right_column: DATE_KEY
+verified_queries:
+  - name: daily_kpis
+    question: What are the daily KPIs including ticket revenue, lift scans, food revenue, and weather?
+    sql: >-
+      SELECT d.FULL_DATE, d.DAY_NAME, d.SKI_SEASON,
+      SUM(ts.PURCHASE_AMOUNT) AS ticket_revenue, COUNT(DISTINCT ts.SALE_KEY) AS tickets_sold,
+      COUNT(DISTINCT ls.SCAN_KEY) AS total_lift_scans, AVG(ls.WAIT_TIME_MINUTES) AS avg_wait_time,
+      SUM(fb.TOTAL_AMOUNT) AS food_bev_revenue
+      FROM dim_date AS d
+      LEFT JOIN fact_ticket_sales AS ts ON ts.PURCHASE_DATE_KEY = d.DATE_KEY
+      LEFT JOIN fact_lift_scans AS ls ON ls.DATE_KEY = d.DATE_KEY
+      LEFT JOIN fact_food_beverage AS fb ON fb.TRANSACTION_DATE_KEY = d.DATE_KEY
+      WHERE d.IS_OPERATING = TRUE
+      GROUP BY d.FULL_DATE, d.DAY_NAME, d.SKI_SEASON
+      ORDER BY d.FULL_DATE
+    verified_at: 1774650000
+    verified_by: SADM Generator

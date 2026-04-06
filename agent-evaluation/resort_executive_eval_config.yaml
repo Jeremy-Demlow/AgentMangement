@@ -1,0 +1,22 @@
+dataset:
+  dataset_type: "CORTEX AGENT"
+  table_name: "{{ eval.source_database }}.{{ eval.agents_schema }}.RESORT_EXECUTIVE_EVAL_DATA"
+  dataset_name: "{{ eval.source_database }}.{{ eval.agents_schema }}.RESORT_EXECUTIVE_EVAL_DS_{{ eval.run_date }}"
+  column_mapping:
+    query_text: "INPUT_QUERY"
+    ground_truth: "OUTPUT"
+
+evaluation:
+  agent_params:
+    agent_name: "{{ eval.source_database }}.{{ eval.agents_schema }}.RESORT_EXECUTIVE"
+    agent_type: "CORTEX AGENT"
+  run_params:
+    label: "RESORT_EXECUTIVE evaluation"
+    description: "Answer correctness + logical consistency across all 11 tools"
+  source_metadata:
+    type: "dataset"
+    dataset_name: "{{ eval.source_database }}.{{ eval.agents_schema }}.RESORT_EXECUTIVE_EVAL_DS_{{ eval.run_date }}"
+
+metrics:
+  - "answer_correctness"
+  - "logical_consistency"

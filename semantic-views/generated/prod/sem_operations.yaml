@@ -1,0 +1,238 @@
+name: sem_operations
+description: Lift operations analytics for ski resort. Tracks lift scan volumes, wait
+  times, weather conditions at scan time, and lift utilization by lift type, terrain,
+  and time period.
+tables:
+  - name: FACT_LIFT_SCANS
+    base_table:
+      database: AM_SKI_RESORT_PROD
+      schema: MARTS
+      table: FACT_LIFT_SCANS
+    dimensions:
+      - name: SCAN_KEY
+        expr: SCAN_KEY
+        data_type: VARCHAR
+      - name: DATE_KEY
+        expr: DATE_KEY
+        data_type: NUMBER
+      - name: CUSTOMER_KEY
+        expr: CUSTOMER_KEY
+        data_type: VARCHAR
+      - name: LIFT_KEY
+        expr: LIFT_KEY
+        data_type: VARCHAR
+      - name: SCAN_ID
+        expr: SCAN_ID
+        data_type: VARCHAR
+      - name: CUSTOMER_ID
+        expr: CUSTOMER_ID
+        data_type: VARCHAR
+      - name: LIFT_ID
+        expr: LIFT_ID
+        data_type: VARCHAR
+      - name: TEMPERATURE_F
+        expr: TEMPERATURE_F
+        data_type: NUMBER
+      - name: WEATHER_CONDITION
+        expr: WEATHER_CONDITION
+        data_type: VARCHAR
+      - name: SCAN_HOUR
+        expr: SCAN_HOUR
+        data_type: NUMBER
+      - name: DAY_OF_WEEK
+        expr: DAY_OF_WEEK
+        data_type: NUMBER
+    time_dimensions:
+      - name: SCAN_TIMESTAMP
+        expr: SCAN_TIMESTAMP
+        data_type: TIMESTAMP_NTZ
+    facts:
+      - name: WAIT_TIME_MINUTES
+        expr: WAIT_TIME_MINUTES
+        data_type: NUMBER
+    metrics:
+      - name: TOTAL_LIFT_SCANS
+        description: "Total number of lift scans recorded"
+        expr: COUNT(SCAN_KEY)
+        access_modifier: public_access
+      - name: AVG_WAIT_TIME
+        description: "Average wait time in minutes at lifts"
+        expr: AVG(WAIT_TIME_MINUTES)
+        access_modifier: public_access
+      - name: MAX_WAIT_TIME
+        description: "Maximum wait time in minutes recorded"
+        expr: MAX(WAIT_TIME_MINUTES)
+        access_modifier: public_access
+      - name: UNIQUE_RIDERS
+        description: "Count of distinct customers who rode lifts"
+        expr: COUNT(DISTINCT CUSTOMER_KEY)
+        access_modifier: public_access
+  - name: DIM_LIFT
+    base_table:
+      database: AM_SKI_RESORT_PROD
+      schema: MARTS
+      table: DIM_LIFT
+    primary_key:
+      columns:
+        - LIFT_KEY
+    dimensions:
+      - name: LIFT_KEY
+        expr: LIFT_KEY
+        data_type: VARCHAR
+      - name: LIFT_ID
+        expr: LIFT_ID
+        data_type: VARCHAR
+      - name: LIFT_NAME
+        expr: LIFT_NAME
+        data_type: VARCHAR
+      - name: LIFT_TYPE
+        expr: LIFT_TYPE
+        data_type: VARCHAR
+      - name: CAPACITY_PER_HOUR
+        expr: CAPACITY_PER_HOUR
+        data_type: NUMBER
+      - name: VERTICAL_FEET
+        expr: VERTICAL_FEET
+        data_type: NUMBER
+      - name: TERRAIN_TYPE
+        expr: TERRAIN_TYPE
+        data_type: VARCHAR
+      - name: BASE_ELEVATION
+        expr: BASE_ELEVATION
+        data_type: NUMBER
+      - name: TOP_ELEVATION
+        expr: TOP_ELEVATION
+        data_type: NUMBER
+      - name: DIFFICULTY_ACCESS
+        expr: DIFFICULTY_ACCESS
+        data_type: VARCHAR
+  - name: DIM_DATE
+    base_table:
+      database: AM_SKI_RESORT_PROD
+      schema: MARTS
+      table: DIM_DATE
+    primary_key:
+      columns:
+        - DATE_KEY
+    dimensions:
+      - name: DATE_KEY
+        expr: DATE_KEY
+        data_type: NUMBER
+      - name: DAY_NAME
+        expr: DAY_NAME
+        data_type: VARCHAR
+      - name: DAY_OF_WEEK
+        expr: DAY_OF_WEEK
+        data_type: NUMBER
+      - name: WEEK_OF_YEAR
+        expr: WEEK_OF_YEAR
+        data_type: NUMBER
+      - name: MONTH_NUM
+        expr: MONTH_NUM
+        data_type: NUMBER
+      - name: MONTH_NAME
+        expr: MONTH_NAME
+        data_type: VARCHAR
+      - name: QUARTER_NUM
+        expr: QUARTER_NUM
+        data_type: NUMBER
+      - name: CALENDAR_YEAR
+        expr: CALENDAR_YEAR
+        data_type: NUMBER
+      - name: SKI_SEASON
+        expr: SKI_SEASON
+        data_type: VARCHAR
+      - name: WEEK_OF_SEASON
+        expr: WEEK_OF_SEASON
+        data_type: NUMBER
+      - name: IS_WEEKEND
+        expr: IS_WEEKEND
+        data_type: BOOLEAN
+      - name: IS_HOLIDAY
+        expr: IS_HOLIDAY
+        data_type: BOOLEAN
+      - name: HOLIDAY_NAME
+        expr: HOLIDAY_NAME
+        data_type: VARCHAR
+      - name: SNOW_CONDITION
+        expr: SNOW_CONDITION
+        data_type: VARCHAR
+      - name: IS_OPERATING
+        expr: IS_OPERATING
+        data_type: BOOLEAN
+    time_dimensions:
+      - name: FULL_DATE
+        expr: FULL_DATE
+        data_type: DATE
+  - name: DIM_CUSTOMER
+    base_table:
+      database: AM_SKI_RESORT_PROD
+      schema: MARTS
+      table: DIM_CUSTOMER
+    primary_key:
+      columns:
+        - CUSTOMER_KEY
+    dimensions:
+      - name: CUSTOMER_KEY
+        expr: CUSTOMER_KEY
+        data_type: VARCHAR
+      - name: CUSTOMER_ID
+        expr: CUSTOMER_ID
+        data_type: VARCHAR
+      - name: CUSTOMER_NAME
+        expr: CUSTOMER_NAME
+        data_type: VARCHAR
+      - name: AGE_GROUP
+        expr: AGE_GROUP
+        data_type: VARCHAR
+      - name: CUSTOMER_SEGMENT
+        expr: CUSTOMER_SEGMENT
+        data_type: VARCHAR
+      - name: IS_PASS_HOLDER
+        expr: IS_PASS_HOLDER
+        data_type: BOOLEAN
+      - name: PASS_TYPE
+        expr: PASS_TYPE
+        data_type: VARCHAR
+relationships:
+  - name: FACT_LIFT_SCANS_TO_DIM_DATE
+    left_table: FACT_LIFT_SCANS
+    right_table: DIM_DATE
+    join_type: inner
+    relationship_type: many_to_one
+    relationship_columns:
+      - left_column: DATE_KEY
+        right_column: DATE_KEY
+  - name: FACT_LIFT_SCANS_TO_DIM_LIFT
+    left_table: FACT_LIFT_SCANS
+    right_table: DIM_LIFT
+    join_type: inner
+    relationship_type: many_to_one
+    relationship_columns:
+      - left_column: LIFT_KEY
+        right_column: LIFT_KEY
+  - name: FACT_LIFT_SCANS_TO_DIM_CUSTOMER
+    left_table: FACT_LIFT_SCANS
+    right_table: DIM_CUSTOMER
+    join_type: inner
+    relationship_type: many_to_one
+    relationship_columns:
+      - left_column: CUSTOMER_KEY
+        right_column: CUSTOMER_KEY
+verified_queries:
+  - name: busiest_lifts
+    question: What are the busiest lifts by total scans and average wait time?
+    sql: >-
+      SELECT l.LIFT_NAME, l.LIFT_TYPE, COUNT(*) AS total_scans, AVG(ls.WAIT_TIME_MINUTES)
+      AS avg_wait_time FROM fact_lift_scans AS ls JOIN dim_lift AS l ON ls.LIFT_KEY
+      = l.LIFT_KEY GROUP BY l.LIFT_NAME, l.LIFT_TYPE ORDER BY total_scans DESC
+    verified_at: 1774649726
+    verified_by: Semantic Model Generator
+  - name: daily_scan_trend
+    question: What is the daily lift scan volume and average wait time trend?
+    sql: >-
+      SELECT d.FULL_DATE, d.DAY_NAME, COUNT(*) AS daily_scans, AVG(ls.WAIT_TIME_MINUTES)
+      AS avg_wait FROM fact_lift_scans AS ls JOIN dim_date AS d ON ls.DATE_KEY = d.DATE_KEY
+      GROUP BY d.FULL_DATE, d.DAY_NAME ORDER BY d.FULL_DATE
+    verified_at: 1774649726
+    verified_by: Semantic Model Generator

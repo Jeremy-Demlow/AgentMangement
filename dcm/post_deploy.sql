@@ -1,0 +1,11 @@
+-- post_deploy.sql
+-- Run after: snow dcm deploy
+--
+-- Semantic views and Cortex Agents are NOT managed by DCM.
+-- They are deployed by the CI/CD pipeline:
+--   - Semantic Views: dbt (Path A) or deploy_semantic_views.py (Path B)
+--   - Agents: deploy_agents.py (ALTER AGENT / CREATE AGENT)
+--
+-- This file is reserved for objects that depend on DCM-created schemas
+-- but are not supported by DEFINE (streams, external stages, semantic views).
+-- Currently empty — all DCM-manageable objects are in sources/definitions/.

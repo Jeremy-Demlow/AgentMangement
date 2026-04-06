@@ -1,0 +1,648 @@
+name: sem_revenue
+description: 'Revenue analytics semantic model for ski resort operations. Covers three
+  revenue streams: ticket sales, equipment rentals, and food & beverage transactions.
+  Joins to date, customer, location, ticket type, and product dimensions for comprehensive
+  revenue analysis by time period, customer segment, location, and product.'
+tables:
+  - name: FACT_TICKET_SALES
+    base_table:
+      database: {{ env.database }}
+      schema: MARTS
+      table: FACT_TICKET_SALES
+    dimensions:
+      - name: SALE_KEY
+        expr: SALE_KEY
+        data_type: VARCHAR
+      - name: PURCHASE_DATE_KEY
+        expr: PURCHASE_DATE_KEY
+        data_type: NUMBER
+      - name: CUSTOMER_KEY
+        expr: CUSTOMER_KEY
+        data_type: VARCHAR
+      - name: LOCATION_KEY
+        expr: LOCATION_KEY
+        data_type: VARCHAR
+      - name: TICKET_TYPE_KEY
+        expr: TICKET_TYPE_KEY
+        data_type: VARCHAR
+      - name: SALE_ID
+        expr: SALE_ID
+        data_type: VARCHAR
+      - name: CUSTOMER_ID
+        expr: CUSTOMER_ID
+        data_type: VARCHAR
+      - name: TICKET_TYPE_ID
+        expr: TICKET_TYPE_ID
+        data_type: VARCHAR
+      - name: LOCATION_ID
+        expr: LOCATION_ID
+        data_type: VARCHAR
+      - name: PURCHASE_HOUR
+        expr: PURCHASE_HOUR
+        data_type: NUMBER
+      - name: DAYS_UNTIL_VALID
+        expr: DAYS_UNTIL_VALID
+        data_type: NUMBER
+      - name: PAYMENT_METHOD
+        expr: PAYMENT_METHOD
+        data_type: VARCHAR
+      - name: PURCHASE_CHANNEL
+        expr: PURCHASE_CHANNEL
+        data_type: VARCHAR
+      - name: IS_ADVANCE_PURCHASE
+        expr: IS_ADVANCE_PURCHASE
+        data_type: BOOLEAN
+      - name: TICKET_CATEGORY
+        expr: TICKET_CATEGORY
+        data_type: VARCHAR
+      - name: ACCESS_LEVEL
+        expr: ACCESS_LEVEL
+        data_type: VARCHAR
+    time_dimensions:
+      - name: PURCHASE_TIMESTAMP
+        expr: PURCHASE_TIMESTAMP
+        data_type: TIMESTAMP_NTZ
+      - name: PURCHASE_DATE
+        expr: PURCHASE_DATE
+        data_type: DATE
+      - name: VALID_FROM_DATE
+        expr: VALID_FROM_DATE
+        data_type: DATE
+      - name: VALID_TO_DATE
+        expr: VALID_TO_DATE
+        data_type: DATE
+    facts:
+      - name: PURCHASE_AMOUNT
+        expr: PURCHASE_AMOUNT
+        data_type: NUMBER
+      - name: LIST_PRICE
+        expr: LIST_PRICE
+        data_type: NUMBER
+      - name: DISCOUNT_AMOUNT
+        expr: DISCOUNT_AMOUNT
+        data_type: NUMBER
+    metrics:
+      - name: TOTAL_TICKET_REVENUE
+        description: "Total revenue from ticket sales"
+        expr: SUM(PURCHASE_AMOUNT)
+        access_modifier: public_access
+      - name: TOTAL_TICKETS_SOLD
+        description: "Total number of tickets sold"
+        expr: COUNT(SALE_KEY)
+        access_modifier: public_access
+      - name: AVG_TICKET_PRICE
+        description: "Average ticket purchase amount"
+        expr: AVG(PURCHASE_AMOUNT)
+        access_modifier: public_access
+      - name: TOTAL_TICKET_DISCOUNTS
+        description: "Total discount amount on ticket sales"
+        expr: SUM(DISCOUNT_AMOUNT)
+        access_modifier: public_access
+      - name: UNIQUE_TICKET_CUSTOMERS
+        description: "Count of distinct customers who purchased tickets"
+        expr: COUNT(DISTINCT CUSTOMER_KEY)
+        access_modifier: public_access
+  - name: FACT_RENTALS
+    base_table:
+      database: {{ env.database }}
+      schema: MARTS
+      table: FACT_RENTALS
+    dimensions:
+      - name: RENTAL_KEY
+        expr: RENTAL_KEY
+        data_type: VARCHAR
+      - name: RENTAL_DATE_KEY
+        expr: RENTAL_DATE_KEY
+        data_type: NUMBER
+      - name: RETURN_DATE_KEY
+        expr: RETURN_DATE_KEY
+        data_type: NUMBER
+      - name: CUSTOMER_KEY
+        expr: CUSTOMER_KEY
+        data_type: VARCHAR
+      - name: LOCATION_KEY
+        expr: LOCATION_KEY
+        data_type: VARCHAR
+      - name: PRODUCT_KEY
+        expr: PRODUCT_KEY
+        data_type: VARCHAR
+      - name: RENTAL_ID
+        expr: RENTAL_ID
+        data_type: VARCHAR
+      - name: CUSTOMER_ID
+        expr: CUSTOMER_ID
+        data_type: VARCHAR
+      - name: LOCATION_ID
+        expr: LOCATION_ID
+        data_type: VARCHAR
+      - name: PRODUCT_ID
+        expr: PRODUCT_ID
+        data_type: VARCHAR
+      - name: RENTAL_HOUR
+        expr: RENTAL_HOUR
+        data_type: NUMBER
+      - name: RETURN_HOUR
+        expr: RETURN_HOUR
+        data_type: NUMBER
+      - name: RETURNED_SAME_DAY
+        expr: RETURNED_SAME_DAY
+        data_type: BOOLEAN
+      - name: PRODUCT_CATEGORY
+        expr: PRODUCT_CATEGORY
+        data_type: VARCHAR
+      - name: PRODUCT_TYPE
+        expr: PRODUCT_TYPE
+        data_type: VARCHAR
+    time_dimensions:
+      - name: RENTAL_TIMESTAMP
+        expr: RENTAL_TIMESTAMP
+        data_type: TIMESTAMP_NTZ
+      - name: RENTAL_DATE
+        expr: RENTAL_DATE
+        data_type: DATE
+      - name: RETURN_TIMESTAMP
+        expr: RETURN_TIMESTAMP
+        data_type: TIMESTAMP_NTZ
+      - name: RETURN_DATE
+        expr: RETURN_DATE
+        data_type: DATE
+    facts:
+      - name: RENTAL_DURATION_HOURS
+        expr: RENTAL_DURATION_HOURS
+        data_type: NUMBER
+      - name: RENTAL_AMOUNT
+        expr: RENTAL_AMOUNT
+        data_type: NUMBER
+      - name: LIST_PRICE
+        expr: LIST_PRICE
+        data_type: NUMBER
+      - name: RENTAL_MARKUP
+        expr: RENTAL_MARKUP
+        data_type: NUMBER
+    metrics:
+      - name: TOTAL_RENTAL_REVENUE
+        description: "Total revenue from equipment rentals"
+        expr: SUM(RENTAL_AMOUNT)
+        access_modifier: public_access
+      - name: TOTAL_RENTALS
+        description: "Total number of equipment rentals"
+        expr: COUNT(RENTAL_KEY)
+        access_modifier: public_access
+      - name: AVG_RENTAL_DURATION
+        description: "Average rental duration in hours"
+        expr: AVG(RENTAL_DURATION_HOURS)
+        access_modifier: public_access
+      - name: AVG_RENTAL_AMOUNT
+        description: "Average rental transaction amount"
+        expr: AVG(RENTAL_AMOUNT)
+        access_modifier: public_access
+      - name: TOTAL_RENTAL_MARKUP
+        description: "Total markup amount on rentals vs list price"
+        expr: SUM(RENTAL_MARKUP)
+        access_modifier: public_access
+  - name: FACT_FOOD_BEVERAGE
+    base_table:
+      database: {{ env.database }}
+      schema: MARTS
+      table: FACT_FOOD_BEVERAGE
+    dimensions:
+      - name: TRANSACTION_KEY
+        expr: TRANSACTION_KEY
+        data_type: VARCHAR
+      - name: TRANSACTION_DATE_KEY
+        expr: TRANSACTION_DATE_KEY
+        data_type: NUMBER
+      - name: CUSTOMER_KEY
+        expr: CUSTOMER_KEY
+        data_type: VARCHAR
+      - name: LOCATION_KEY
+        expr: LOCATION_KEY
+        data_type: VARCHAR
+      - name: PRODUCT_KEY
+        expr: PRODUCT_KEY
+        data_type: VARCHAR
+      - name: TRANSACTION_ID
+        expr: TRANSACTION_ID
+        data_type: VARCHAR
+      - name: CUSTOMER_ID
+        expr: CUSTOMER_ID
+        data_type: VARCHAR
+      - name: LOCATION_ID
+        expr: LOCATION_ID
+        data_type: VARCHAR
+      - name: PRODUCT_ID
+        expr: PRODUCT_ID
+        data_type: VARCHAR
+      - name: TRANSACTION_HOUR
+        expr: TRANSACTION_HOUR
+        data_type: NUMBER
+      - name: QUANTITY
+        expr: QUANTITY
+        data_type: NUMBER
+      - name: PAYMENT_METHOD
+        expr: PAYMENT_METHOD
+        data_type: VARCHAR
+      - name: PRODUCT_CATEGORY
+        expr: PRODUCT_CATEGORY
+        data_type: VARCHAR
+      - name: PRODUCT_TYPE
+        expr: PRODUCT_TYPE
+        data_type: VARCHAR
+    time_dimensions:
+      - name: TRANSACTION_TIMESTAMP
+        expr: TRANSACTION_TIMESTAMP
+        data_type: TIMESTAMP_NTZ
+      - name: TRANSACTION_DATE
+        expr: TRANSACTION_DATE
+        data_type: DATE
+    facts:
+      - name: UNIT_PRICE
+        expr: UNIT_PRICE
+        data_type: NUMBER
+      - name: TOTAL_AMOUNT
+        expr: TOTAL_AMOUNT
+        data_type: NUMBER
+      - name: LIST_PRICE
+        expr: LIST_PRICE
+        data_type: NUMBER
+      - name: UPSELL_AMOUNT
+        expr: UPSELL_AMOUNT
+        data_type: NUMBER
+    metrics:
+      - name: TOTAL_FB_REVENUE
+        description: "Total food and beverage revenue"
+        expr: SUM(TOTAL_AMOUNT)
+        access_modifier: public_access
+      - name: TOTAL_FB_TRANSACTIONS
+        description: "Total number of food and beverage transactions"
+        expr: COUNT(TRANSACTION_KEY)
+        access_modifier: public_access
+      - name: AVG_FB_TRANSACTION
+        description: "Average food and beverage transaction amount"
+        expr: AVG(TOTAL_AMOUNT)
+        access_modifier: public_access
+      - name: TOTAL_ITEMS_SOLD
+        description: "Total quantity of food and beverage items sold"
+        expr: SUM(QUANTITY)
+        access_modifier: public_access
+      - name: TOTAL_UPSELL_REVENUE
+        description: "Total upsell revenue from food and beverage"
+        expr: SUM(UPSELL_AMOUNT)
+        access_modifier: public_access
+  - name: DIM_DATE
+    base_table:
+      database: {{ env.database }}
+      schema: MARTS
+      table: DIM_DATE
+    primary_key:
+      columns:
+        - DATE_KEY
+    dimensions:
+      - name: DATE_KEY
+        expr: DATE_KEY
+        data_type: NUMBER
+      - name: DAY_NAME
+        expr: DAY_NAME
+        data_type: VARCHAR
+      - name: DAY_OF_WEEK
+        expr: DAY_OF_WEEK
+        data_type: NUMBER
+      - name: DAY_OF_MONTH
+        expr: DAY_OF_MONTH
+        data_type: NUMBER
+      - name: DAY_OF_YEAR
+        expr: DAY_OF_YEAR
+        data_type: NUMBER
+      - name: WEEK_OF_YEAR
+        expr: WEEK_OF_YEAR
+        data_type: NUMBER
+      - name: MONTH_NUM
+        expr: MONTH_NUM
+        data_type: NUMBER
+      - name: MONTH_NAME
+        expr: MONTH_NAME
+        data_type: VARCHAR
+      - name: QUARTER_NUM
+        expr: QUARTER_NUM
+        data_type: NUMBER
+      - name: CALENDAR_YEAR
+        expr: CALENDAR_YEAR
+        data_type: NUMBER
+      - name: SKI_SEASON
+        expr: SKI_SEASON
+        data_type: VARCHAR
+      - name: SEASON_MONTH
+        expr: SEASON_MONTH
+        data_type: NUMBER
+      - name: WEEK_OF_SEASON
+        expr: WEEK_OF_SEASON
+        data_type: NUMBER
+      - name: IS_WEEKEND
+        expr: IS_WEEKEND
+        data_type: BOOLEAN
+      - name: IS_HOLIDAY
+        expr: IS_HOLIDAY
+        data_type: BOOLEAN
+      - name: HOLIDAY_NAME
+        expr: HOLIDAY_NAME
+        data_type: VARCHAR
+      - name: SNOW_CONDITION
+        expr: SNOW_CONDITION
+        data_type: VARCHAR
+      - name: IS_OPERATING
+        expr: IS_OPERATING
+        data_type: BOOLEAN
+    time_dimensions:
+      - name: FULL_DATE
+        expr: FULL_DATE
+        data_type: DATE
+      - name: MONTH_START_DATE
+        expr: MONTH_START_DATE
+        data_type: DATE
+      - name: QUARTER_START_DATE
+        expr: QUARTER_START_DATE
+        data_type: DATE
+  - name: DIM_CUSTOMER
+    base_table:
+      database: {{ env.database }}
+      schema: MARTS
+      table: DIM_CUSTOMER
+    primary_key:
+      columns:
+        - CUSTOMER_KEY
+    dimensions:
+      - name: CUSTOMER_KEY
+        expr: CUSTOMER_KEY
+        data_type: VARCHAR
+      - name: CUSTOMER_ID
+        expr: CUSTOMER_ID
+        data_type: VARCHAR
+      - name: CUSTOMER_NAME
+        expr: CUSTOMER_NAME
+        data_type: VARCHAR
+      - name: EMAIL
+        expr: EMAIL
+        data_type: VARCHAR
+      - name: AGE
+        expr: AGE
+        data_type: NUMBER
+      - name: AGE_GROUP
+        expr: AGE_GROUP
+        data_type: VARCHAR
+      - name: CUSTOMER_SEGMENT
+        expr: CUSTOMER_SEGMENT
+        data_type: VARCHAR
+      - name: IS_PASS_HOLDER
+        expr: IS_PASS_HOLDER
+        data_type: BOOLEAN
+      - name: PASS_TYPE
+        expr: PASS_TYPE
+        data_type: VARCHAR
+      - name: HOME_ZIP_CODE
+        expr: HOME_ZIP_CODE
+        data_type: VARCHAR
+      - name: STATE
+        expr: STATE
+        data_type: VARCHAR
+    time_dimensions:
+      - name: FIRST_VISIT_DATE
+        expr: FIRST_VISIT_DATE
+        data_type: DATE
+  - name: DIM_LOCATION
+    base_table:
+      database: {{ env.database }}
+      schema: MARTS
+      table: DIM_LOCATION
+    primary_key:
+      columns:
+        - LOCATION_KEY
+    dimensions:
+      - name: LOCATION_KEY
+        expr: LOCATION_KEY
+        data_type: VARCHAR
+      - name: LOCATION_ID
+        expr: LOCATION_ID
+        data_type: VARCHAR
+      - name: LOCATION_NAME
+        expr: LOCATION_NAME
+        data_type: VARCHAR
+      - name: LOCATION_TYPE
+        expr: LOCATION_TYPE
+        data_type: VARCHAR
+      - name: VENUE_SIZE
+        expr: VENUE_SIZE
+        data_type: VARCHAR
+      - name: SEATING_CAPACITY
+        expr: SEATING_CAPACITY
+        data_type: NUMBER
+      - name: ELEVATION_ZONE
+        expr: ELEVATION_ZONE
+        data_type: VARCHAR
+  - name: DIM_TICKET_TYPE
+    base_table:
+      database: {{ env.database }}
+      schema: MARTS
+      table: DIM_TICKET_TYPE
+    primary_key:
+      columns:
+        - TICKET_TYPE_KEY
+    dimensions:
+      - name: TICKET_TYPE_KEY
+        expr: TICKET_TYPE_KEY
+        data_type: VARCHAR
+      - name: TICKET_TYPE_ID
+        expr: TICKET_TYPE_ID
+        data_type: VARCHAR
+      - name: TICKET_NAME
+        expr: TICKET_NAME
+        data_type: VARCHAR
+      - name: TICKET_CATEGORY
+        expr: TICKET_CATEGORY
+        data_type: VARCHAR
+      - name: DURATION_DAYS
+        expr: DURATION_DAYS
+        data_type: NUMBER
+      - name: ACCESS_LEVEL
+        expr: ACCESS_LEVEL
+        data_type: VARCHAR
+    facts:
+      - name: PRICE
+        expr: PRICE
+        data_type: NUMBER
+  - name: DIM_PRODUCT
+    base_table:
+      database: {{ env.database }}
+      schema: MARTS
+      table: DIM_PRODUCT
+    primary_key:
+      columns:
+        - PRODUCT_KEY
+    dimensions:
+      - name: PRODUCT_KEY
+        expr: PRODUCT_KEY
+        data_type: VARCHAR
+      - name: PRODUCT_ID
+        expr: PRODUCT_ID
+        data_type: VARCHAR
+      - name: PRODUCT_NAME
+        expr: PRODUCT_NAME
+        data_type: VARCHAR
+      - name: PRODUCT_CATEGORY
+        expr: PRODUCT_CATEGORY
+        data_type: VARCHAR
+      - name: PRODUCT_TYPE
+        expr: PRODUCT_TYPE
+        data_type: VARCHAR
+    facts:
+      - name: PRICE
+        expr: PRICE
+        data_type: NUMBER
+relationships:
+  # FACT_FOOD_BEVERAGE relationships
+  - name: FACT_FOOD_BEVERAGE_TO_DIM_DATE
+    left_table: FACT_FOOD_BEVERAGE
+    right_table: DIM_DATE
+    join_type: inner
+    relationship_type: many_to_one
+    relationship_columns:
+      - left_column: TRANSACTION_DATE_KEY
+        right_column: DATE_KEY
+  - name: FACT_FOOD_BEVERAGE_TO_DIM_LOCATION
+    left_table: FACT_FOOD_BEVERAGE
+    right_table: DIM_LOCATION
+    join_type: inner
+    relationship_type: many_to_one
+    relationship_columns:
+      - left_column: LOCATION_KEY
+        right_column: LOCATION_KEY
+  - name: FACT_FOOD_BEVERAGE_TO_DIM_CUSTOMER
+    left_table: FACT_FOOD_BEVERAGE
+    right_table: DIM_CUSTOMER
+    join_type: inner
+    relationship_type: many_to_one
+    relationship_columns:
+      - left_column: CUSTOMER_KEY
+        right_column: CUSTOMER_KEY
+  - name: FACT_FOOD_BEVERAGE_TO_DIM_PRODUCT
+    left_table: FACT_FOOD_BEVERAGE
+    right_table: DIM_PRODUCT
+    join_type: inner
+    relationship_type: many_to_one
+    relationship_columns:
+      - left_column: PRODUCT_KEY
+        right_column: PRODUCT_KEY
+  # FACT_RENTALS relationships
+  - name: FACT_RENTALS_TO_DIM_DATE
+    left_table: FACT_RENTALS
+    right_table: DIM_DATE
+    join_type: inner
+    relationship_type: many_to_one
+    relationship_columns:
+      - left_column: RENTAL_DATE_KEY
+        right_column: DATE_KEY
+  - name: FACT_RENTALS_TO_DIM_PRODUCT
+    left_table: FACT_RENTALS
+    right_table: DIM_PRODUCT
+    join_type: inner
+    relationship_type: many_to_one
+    relationship_columns:
+      - left_column: PRODUCT_KEY
+        right_column: PRODUCT_KEY
+  - name: FACT_RENTALS_TO_DIM_CUSTOMER
+    left_table: FACT_RENTALS
+    right_table: DIM_CUSTOMER
+    join_type: inner
+    relationship_type: many_to_one
+    relationship_columns:
+      - left_column: CUSTOMER_KEY
+        right_column: CUSTOMER_KEY
+  - name: FACT_RENTALS_TO_DIM_LOCATION
+    left_table: FACT_RENTALS
+    right_table: DIM_LOCATION
+    join_type: inner
+    relationship_type: many_to_one
+    relationship_columns:
+      - left_column: LOCATION_KEY
+        right_column: LOCATION_KEY
+  # FACT_TICKET_SALES relationships
+  - name: FACT_TICKET_SALES_TO_DIM_CUSTOMER
+    left_table: FACT_TICKET_SALES
+    right_table: DIM_CUSTOMER
+    join_type: inner
+    relationship_type: many_to_one
+    relationship_columns:
+      - left_column: CUSTOMER_KEY
+        right_column: CUSTOMER_KEY
+  - name: FACT_TICKET_SALES_TO_DIM_DATE
+    left_table: FACT_TICKET_SALES
+    right_table: DIM_DATE
+    join_type: inner
+    relationship_type: many_to_one
+    relationship_columns:
+      - left_column: PURCHASE_DATE_KEY
+        right_column: DATE_KEY
+  - name: FACT_TICKET_SALES_TO_DIM_TICKET_TYPE
+    left_table: FACT_TICKET_SALES
+    right_table: DIM_TICKET_TYPE
+    join_type: inner
+    relationship_type: many_to_one
+    relationship_columns:
+      - left_column: TICKET_TYPE_KEY
+        right_column: TICKET_TYPE_KEY
+  - name: FACT_TICKET_SALES_TO_DIM_LOCATION
+    left_table: FACT_TICKET_SALES
+    right_table: DIM_LOCATION
+    join_type: inner
+    relationship_type: many_to_one
+    relationship_columns:
+      - left_column: LOCATION_KEY
+        right_column: LOCATION_KEY
+verified_queries:
+  - name: revenue_by_month
+    question: What is the total revenue by month broken down by ticket sales, rentals, and food and beverage?
+    sql: >-
+      SELECT d.CALENDAR_YEAR, d.MONTH_NAME, SUM(ts.PURCHASE_AMOUNT) AS ticket_revenue,
+      SUM(r.RENTAL_AMOUNT) AS rental_revenue, SUM(fb.TOTAL_AMOUNT) AS food_beverage_revenue
+      FROM fact_ticket_sales AS ts JOIN dim_date AS d ON ts.PURCHASE_DATE_KEY = d.DATE_KEY
+      LEFT JOIN fact_rentals AS r ON r.RENTAL_DATE_KEY = d.DATE_KEY LEFT JOIN fact_food_beverage
+      AS fb ON fb.TRANSACTION_DATE_KEY = d.DATE_KEY GROUP BY d.CALENDAR_YEAR, d.MONTH_NAME
+      ORDER BY d.CALENDAR_YEAR, d.MONTH_NAME
+    verified_at: 1774649498
+    verified_by: Semantic Model Generator
+  - name: ticket_revenue_by_segment
+    question: What is the ticket revenue by customer segment and age group?
+    sql: >-
+      SELECT c.CUSTOMER_SEGMENT, c.AGE_GROUP, COUNT(DISTINCT ts.CUSTOMER_KEY) AS
+      unique_customers, SUM(ts.PURCHASE_AMOUNT) AS total_ticket_spend FROM fact_ticket_sales
+      AS ts JOIN dim_customer AS c ON ts.CUSTOMER_KEY = c.CUSTOMER_KEY GROUP BY c.CUSTOMER_SEGMENT,
+      c.AGE_GROUP ORDER BY total_ticket_spend DESC
+    verified_at: 1774649498
+    verified_by: Semantic Model Generator
+  - name: food_bev_by_location
+    question: What is the food and beverage revenue performance by location, including total items sold and average pricing?
+    sql: >-
+      SELECT l.LOCATION_NAME, l.LOCATION_TYPE, SUM(fb.TOTAL_AMOUNT) AS food_bev_revenue,
+      SUM(fb.QUANTITY) AS total_items_sold, AVG(fb.UNIT_PRICE) AS avg_unit_price FROM
+      fact_food_beverage AS fb JOIN dim_location AS l ON fb.LOCATION_KEY = l.LOCATION_KEY
+      GROUP BY l.LOCATION_NAME, l.LOCATION_TYPE ORDER BY food_bev_revenue DESC
+    verified_at: 1774649498
+    verified_by: Semantic Model Generator
+  - name: top_ticket_types
+    question: What are the top selling ticket types by revenue?
+    sql: >-
+      SELECT tt.TICKET_NAME, tt.TICKET_CATEGORY, tt.ACCESS_LEVEL, COUNT(*) AS tickets_sold,
+      SUM(ts.PURCHASE_AMOUNT) AS total_revenue, AVG(ts.DISCOUNT_AMOUNT) AS avg_discount
+      FROM fact_ticket_sales AS ts JOIN dim_ticket_type AS tt ON ts.TICKET_TYPE_KEY
+      = tt.TICKET_TYPE_KEY GROUP BY tt.TICKET_NAME, tt.TICKET_CATEGORY, tt.ACCESS_LEVEL
+      ORDER BY total_revenue DESC
+    verified_at: 1774649498
+    verified_by: Semantic Model Generator
+  - name: rental_by_product
+    question: What is the rental performance by equipment category and type, including revenue, volume, and average rental duration?
+    sql: >-
+      SELECT p.PRODUCT_CATEGORY, p.PRODUCT_TYPE, COUNT(*) AS rental_count, SUM(r.RENTAL_AMOUNT)
+      AS rental_revenue, AVG(r.RENTAL_DURATION_HOURS) AS avg_duration_hours FROM fact_rentals
+      AS r JOIN dim_product AS p ON r.PRODUCT_KEY = p.PRODUCT_KEY GROUP BY p.PRODUCT_CATEGORY,
+      p.PRODUCT_TYPE ORDER BY rental_revenue DESC
+    verified_at: 1774649498
+    verified_by: Semantic Model Generator

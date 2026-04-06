@@ -1,0 +1,51 @@
+# Ski Resort Analytics DBT Project
+# Kimball dimensional model with semantic views for Snowflake agents
+
+name: 'dbt_ski_resort'
+version: '1.0.0'
+config-version: 2
+
+# Project profile for Snowflake connection
+profile: 'dbt_ski_resort'
+
+# Directories
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+  - "logs"
+
+# Model configurations
+# All models deploy to target schema (MARTS) from profiles.yml
+models:
+  dbt_ski_resort:
+    # Staging models - views for type safety
+    staging:
+      +materialized: view
+
+    # Marts - dimensional model
+    marts:
+      dimensions:
+        +materialized: table
+      facts:
+        +materialized: incremental
+        +on_schema_change: append_new_columns
+      # Semantic views use custom materialization
+      semantic:
+        +materialized: semantic_view
+
+# Seeds configuration
+seeds:
+  dbt_ski_resort: {}
+
+# Tests configuration
+tests:
+  dbt_ski_resort:
+    +store_failures: true

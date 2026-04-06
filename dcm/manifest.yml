@@ -1,0 +1,87 @@
+manifest_version: 2
+type: DCM_PROJECT
+default_target: 'DEV'
+
+# ---------------------------------------------------------------------------
+# TWO DEPLOYMENT PATTERNS
+#
+# Pattern A — CROSS-ACCOUNT (recommended for production):
+#   Each target deploys to a separate Snowflake account. All object names
+#   are identical across environments (AM_SKI_RESORT, AM_DEPLOY_ROLE, etc.)
+#   because each account is its own namespace. Change account_identifier
+#   per target; remove env suffixes from db, deploy_role, wh_name, wh_role.
+#
+# Pattern B — SINGLE-ACCOUNT (dev/demo, shown here):
+#   All targets share one Snowflake account. DCM enforces single-project
+#   ownership, so every account-level object (database, role, warehouse)
+#   must be env-suffixed to avoid conflicts between projects.
+# ---------------------------------------------------------------------------
+
+targets:
+  DEV:
+    account_identifier: TRB65519
+    project_name: 'DCM.AM.AM_SKI_RESORT_DEV'
+    project_owner: ACCOUNTADMIN
+    templating_config: 'DEV'
+  QA:
+    account_identifier: TRB65519
+    project_name: 'DCM.AM.AM_SKI_RESORT_QA'
+    project_owner: ACCOUNTADMIN
+    templating_config: 'QA'
+  PROD:
+    account_identifier: TRB65519
+    project_name: 'DCM.AM.AM_SKI_RESORT'
+    project_owner: ACCOUNTADMIN
+    templating_config: 'PROD'
+
+templating:
+  defaults:
+    db: 'AM_SKI_RESORT'
+    deploy_role: 'AM_DEPLOY_ROLE'
+    wh_name: 'AM_SKI_RESORT_WH'
+    wh_role: 'AM_SKI_RESORT_WH_USER'
+    wh_size: 'SMALL'
+    wh_min_clusters: 1
+    wh_max_clusters: 5
+    wh_scaling_policy: 'STANDARD'
+    wh_auto_suspend: 300
+    wh_queued_timeout: 600
+    wh_statement_timeout: 1800
+    semantic_schema_suffix: ''
+    agents_schema_suffix: ''
+    users:
+      - 'JDEMLOW'
+  configurations:
+    DEV:
+      db: 'AM_SKI_RESORT_DEV'
+      deploy_role: 'AM_DEPLOY_ROLE_DEV'
+      wh_name: 'AM_SKI_RESORT_WH_DEV'
+      wh_role: 'AM_SKI_RESORT_WH_USER_DEV'
+      wh_size: 'SMALL'
+      wh_min_clusters: 1
+      wh_max_clusters: 5
+      semantic_schema_suffix: ''
+      agents_schema_suffix: ''
+    QA:
+      db: 'AM_SKI_RESORT_QA'
+      deploy_role: 'AM_DEPLOY_ROLE_QA'
+      wh_name: 'AM_SKI_RESORT_WH_QA'
+      wh_role: 'AM_SKI_RESORT_WH_USER_QA'
+      wh_size: 'SMALL'
+      wh_min_clusters: 1
+      wh_max_clusters: 5
+      semantic_schema_suffix: ''
+      agents_schema_suffix: ''
+    PROD:
+      db: 'AM_SKI_RESORT_PROD'
+      deploy_role: 'AM_DEPLOY_ROLE_PROD'
+      wh_name: 'AM_SKI_RESORT_WH_PROD'
+      wh_role: 'AM_SKI_RESORT_WH_USER_PROD'
+      wh_size: 'SMALL'
+      wh_min_clusters: 1
+      wh_max_clusters: 5
+      wh_auto_suspend: 120
+      wh_queued_timeout: 300
+      wh_statement_timeout: 3600
+      semantic_schema_suffix: ''
+      agents_schema_suffix: ''

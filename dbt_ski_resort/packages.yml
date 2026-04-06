@@ -1,0 +1,11 @@
+# DBT Packages for Ski Resort Analytics
+
+packages:
+  # Snowflake Labs semantic view package for creating semantic views
+  # These views enable Snowflake Cortex Analyst to understand the data model
+  - package: Snowflake-Labs/dbt_semantic_view
+    version: [">=1.0.0", "<2.0.0"]
+
+  # DBT utils for common macros like surrogate keys
+  - package: dbt-labs/dbt_utils
+    version: 1.2.0

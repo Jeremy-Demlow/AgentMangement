@@ -1,0 +1,95 @@
+name: sem_customer_satisfaction
+description: Customer satisfaction and feedback analysis
+tables:
+  - name: FACT_FEEDBACK
+    synonyms:
+      - customer_feedback
+      - satisfaction
+      - nps
+    description: Customer feedback and satisfaction scores
+    base_table:
+      database: AM_SKI_RESORT_QA
+      schema: MARTS
+      table: FACT_FEEDBACK
+    primary_key:
+      columns:
+        - FEEDBACK_ID
+    dimensions:
+      - name: CATEGORY
+        synonyms:
+          - feedback_category
+        description: Feedback category
+        expr: CATEGORY
+        data_type: VARCHAR(50)
+      - name: CUSTOMER_SEGMENT
+        description: Customer segment
+        expr: CUSTOMER_SEGMENT
+        data_type: VARCHAR(50)
+      - name: FEEDBACK_DATE
+        description: Date feedback was submitted
+        expr: FEEDBACK_DATE
+        data_type: DATE
+      - name: FEEDBACK_TYPE
+        description: Type of feedback
+        expr: FEEDBACK_TYPE
+        data_type: VARCHAR(30)
+      - name: RESOLVED
+        description: Whether resolved
+        expr: RESOLVED
+        data_type: BOOLEAN
+      - name: SENTIMENT
+        description: Sentiment classification
+        expr: SENTIMENT
+        data_type: VARCHAR(20)
+    facts:
+      - name: LIKELIHOOD_TO_RECOMMEND
+        description: Likelihood to recommend rating
+        expr: LIKELIHOOD_TO_RECOMMEND
+        data_type: "NUMBER(38,0)"
+        access_modifier: public_access
+      - name: LIKELIHOOD_TO_RETURN
+        description: Likelihood to return rating
+        expr: LIKELIHOOD_TO_RETURN
+        data_type: "NUMBER(38,0)"
+        access_modifier: public_access
+      - name: NPS_SCORE
+        description: Net Promoter Score (0-10)
+        expr: NPS_SCORE
+        data_type: "NUMBER(38,0)"
+        access_modifier: public_access
+      - name: RATING
+        description: Customer satisfaction rating
+        expr: RATING
+        data_type: FLOAT
+        access_modifier: public_access
+      - name: RESPONSE_TIME_DAYS
+        description: Days to respond to feedback
+        expr: RESPONSE_TIME_DAYS
+        data_type: "NUMBER(9,0)"
+        access_modifier: public_access
+      - name: SENTIMENT_SCORE
+        description: Sentiment score
+        expr: SENTIMENT_SCORE
+        data_type: FLOAT
+        access_modifier: public_access
+    metrics:
+      - name: AVERAGE_NPS
+        description: Average Net Promoter Score
+        expr: AVG(FACT_FEEDBACK.NPS_SCORE)
+        access_modifier: public_access
+      - name: AVERAGE_RATING
+        description: Average satisfaction rating
+        expr: AVG(FACT_FEEDBACK.RATING)
+        access_modifier: public_access
+      - name: NEGATIVE_FEEDBACK_COUNT
+        description: Count of negative feedback
+        expr: COUNT(CASE WHEN FACT_FEEDBACK.SENTIMENT = 'Negative' THEN 1 END)
+        access_modifier: public_access
+      - name: POSITIVE_FEEDBACK_COUNT
+        description: Count of positive feedback
+        expr: COUNT(CASE WHEN FACT_FEEDBACK.SENTIMENT = 'Positive' THEN 1 END)
+        access_modifier: public_access
+      - name: TOTAL_FEEDBACK
+        description: Total feedback submissions
+        expr: COUNT(FACT_FEEDBACK.FEEDBACK_ID)
+        access_modifier: public_access

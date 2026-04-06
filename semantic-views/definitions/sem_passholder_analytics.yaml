@@ -1,0 +1,208 @@
+name: sem_passholder_analytics
+description: "Pass holder analytics semantic view for utilization, retention, and revenue insights"
+tables:
+  - name: DIM_CUSTOMER
+    synonyms:
+      - passholders
+      - customers
+    description: Customer dimension with pass attributes and personas
+    base_table:
+      database: {{ env.database }}
+      schema: MARTS
+      table: DIM_CUSTOMER
+    primary_key:
+      columns:
+        - CUSTOMER_KEY
+    dimensions:
+      - name: CUSTOMER_SEGMENT
+        description: Customer persona classification
+        expr: CUSTOMER_SEGMENT
+        data_type: VARCHAR(50)
+      - name: IS_PASS_HOLDER
+        description: Indicates pass ownership
+        expr: IS_PASS_HOLDER
+        data_type: BOOLEAN
+      - name: PASS_TYPE
+        description: Pass product currently held
+        expr: PASS_TYPE
+        data_type: VARCHAR(20)
+      - name: STATE
+        description: Customer home state
+        expr: STATE
+        data_type: VARCHAR(10)
+  - name: DIM_DATE
+    synonyms:
+      - calendar
+    description: Calendar dimension used for pass activity
+    base_table:
+      database: {{ env.database }}
+      schema: MARTS
+      table: DIM_DATE
+    primary_key:
+      columns:
+        - DATE_KEY
+    dimensions:
+      - name: FULL_DATE
+        synonyms:
+          - activity_date
+        description: Date of pass usage or sale
+        expr: FULL_DATE
+        data_type: DATE
+      - name: SKI_SEASON
+        description: Ski season identifier
+        expr: SKI_SEASON
+        data_type: VARCHAR(16777216)
+  - name: DIM_TICKET_TYPE
+    synonyms:
+      - pass_catalog
+    description: Ticket type catalog including season pass products
+    base_table:
+      database: {{ env.database }}
+      schema: MARTS
+      table: DIM_TICKET_TYPE
+    primary_key:
+      columns:
+        - TICKET_TYPE_KEY
+    dimensions:
+      - name: TICKET_CATEGORY
+        description: "Pass product category (e.g., Season Pass, Flex Pass)"
+        expr: TICKET_CATEGORY
+        data_type: VARCHAR(50)
+  - name: FACT_PASS_USAGE
+    synonyms:
+      - pass_usage
+    description: Daily pass usage fact table with lift rides and time on mountain
+    base_table:
+      database: {{ env.database }}
+      schema: MARTS
+      table: FACT_PASS_USAGE
+    primary_key:
+      columns:
+        - USAGE_KEY
+    facts:
+      - name: HOURS_ON_MOUNTAIN
+        description: Time on mountain for the pass visit (hours)
+        expr: HOURS_ON_MOUNTAIN
+        data_type: "NUMBER(5,2)"
+        access_modifier: public_access
+      - name: TOTAL_LIFT_RIDES
+        description: Lift rides taken during the pass holder visit
+        expr: TOTAL_LIFT_RIDES
+        data_type: "NUMBER(38,0)"
+        access_modifier: public_access
+    metrics:
+      - name: ACTIVE_PASS_HOLDERS
+        description: Distinct pass holders with recent activity
+        expr: COUNT(DISTINCT CASE WHEN DIM_CUSTOMER.IS_PASS_HOLDER THEN FACT_PASS_USAGE.CUSTOMER_KEY END)
+        access_modifier: public_access
+      - name: AVERAGE_PASS_SESSION_HOURS
+        description: Average hours on mountain per pass visit
+        expr: |-
+          DIV0(
+                  SUM(CASE WHEN DIM_CUSTOMER.IS_PASS_HOLDER THEN FACT_PASS_USAGE.HOURS_ON_MOUNTAIN END),
+                  NULLIF(COUNT(CASE WHEN DIM_CUSTOMER.IS_PASS_HOLDER THEN FACT_PASS_USAGE.USAGE_KEY END), 0)
+              )
+        access_modifier: public_access
+      - name: PASS_HOLDER_VISITS
+        description: Number of pass holder visit days
+        expr: COUNT(CASE WHEN DIM_CUSTOMER.IS_PASS_HOLDER THEN FACT_PASS_USAGE.USAGE_KEY END)
+        access_modifier: public_access
+      - name: PASS_HOURS_TOTAL
+        description: Total hours on mountain for pass holders
+        expr: SUM(CASE WHEN DIM_CUSTOMER.IS_PASS_HOLDER THEN FACT_PASS_USAGE.HOURS_ON_MOUNTAIN END)
+        access_modifier: public_access
+      - name: PASS_LIFT_RIDES_TOTAL
+        description: Total lift rides taken by pass holders
+        expr: SUM(CASE WHEN DIM_CUSTOMER.IS_PASS_HOLDER THEN FACT_PASS_USAGE.TOTAL_LIFT_RIDES END)
+        access_modifier: public_access
+      - name: PASS_USAGE_PER_HOLDER
+        description: Average visits per active pass holder
+        expr: |-
+          DIV0(
+                  COUNT(CASE WHEN DIM_CUSTOMER.IS_PASS_HOLDER THEN FACT_PASS_USAGE.USAGE_KEY END),
+                  NULLIF(COUNT(DISTINCT CASE WHEN DIM_CUSTOMER.IS_PASS_HOLDER THEN FACT_PASS_USAGE.CUSTOMER_KEY END), 0)
+              )
+        access_modifier: public_access
+  - name: FACT_TICKET_SALES
+    synonyms:
+      - pass_sales
+      - ticket_sales
+    description: Ticket sales fact including pass purchases and revenue
+    base_table:
+      database: {{ env.database }}
+      schema: MARTS
+      table: FACT_TICKET_SALES
+    primary_key:
+      columns:
+        - SALE_KEY
+    facts:
+      - name: IS_ADVANCE_PURCHASE
+        description: Indicates pass purchase was made prior to validity start
+        expr: IS_ADVANCE_PURCHASE
+        data_type: BOOLEAN
+        access_modifier: public_access
+      - name: PURCHASE_AMOUNT
+        description: Revenue collected from pass product sales
+        expr: PURCHASE_AMOUNT
+        data_type: "NUMBER(10,2)"
+        access_modifier: public_access
+      - name: PURCHASE_CHANNEL
+        description: Channel used to acquire or renew the pass
+        expr: PURCHASE_CHANNEL
+        data_type: VARCHAR(50)
+        access_modifier: public_access
+    metrics:
+      - name: ADVANCE_PASS_SHARE_PCT
+        description: Percent of pass sales booked in advance
+        expr: |-
+          DIV0(
+                  COUNT(CASE WHEN DIM_TICKET_TYPE.TICKET_CATEGORY ILIKE '%Pass%' AND FACT_TICKET_SALES.IS_ADVANCE_PURCHASE THEN 1 END),
+                  NULLIF(COUNT(CASE WHEN DIM_TICKET_TYPE.TICKET_CATEGORY ILIKE '%Pass%' THEN FACT_TICKET_SALES.SALE_KEY END), 0)
+              ) * 100
+        access_modifier: public_access
+      - name: AVERAGE_PASS_PRICE
+        description: Average selling price for pass products
+        expr: |-
+          DIV0(
+                  SUM(CASE WHEN DIM_TICKET_TYPE.TICKET_CATEGORY ILIKE '%Pass%' THEN FACT_TICKET_SALES.PURCHASE_AMOUNT END),
+                  NULLIF(COUNT(CASE WHEN DIM_TICKET_TYPE.TICKET_CATEGORY ILIKE '%Pass%' THEN FACT_TICKET_SALES.SALE_KEY END), 0)
+              )
+        access_modifier: public_access
+      - name: PASS_REVENUE_TOTAL
+        description: Revenue from pass product sales
+        expr: SUM(CASE WHEN DIM_TICKET_TYPE.TICKET_CATEGORY ILIKE '%Pass%' THEN FACT_TICKET_SALES.PURCHASE_AMOUNT END)
+        access_modifier: public_access
+relationships:
+  - name: PASS_USAGE_TO_CUSTOMER
+    left_table: FACT_PASS_USAGE
+    right_table: DIM_CUSTOMER
+    relationship_columns:
+      - left_column: CUSTOMER_KEY
+        right_column: CUSTOMER_KEY
+  - name: PASS_USAGE_TO_DATE
+    left_table: FACT_PASS_USAGE
+    right_table: DIM_DATE
+    relationship_columns:
+      - left_column: DATE_KEY
+        right_column: DATE_KEY
+  - name: PASS_SALES_TO_CUSTOMER
+    left_table: FACT_TICKET_SALES
+    right_table: DIM_CUSTOMER
+    relationship_columns:
+      - left_column: CUSTOMER_KEY
+        right_column: CUSTOMER_KEY
+  - name: PASS_SALES_TO_DATE
+    left_table: FACT_TICKET_SALES
+    right_table: DIM_DATE
+    relationship_columns:
+      - left_column: PURCHASE_DATE_KEY
+        right_column: DATE_KEY
+  - name: PASS_SALES_TO_TICKET_TYPE
+    left_table: FACT_TICKET_SALES
+    right_table: DIM_TICKET_TYPE
+    relationship_columns:
+      - left_column: TICKET_TYPE_KEY
+        right_column: TICKET_TYPE_KEY
+module_custom_instructions:
+  sql_generation: "Anchor time filters with DIM_DATE.SKI_SEASON or DIM_DATE.FULL_DATE; use DATE_TRUNC for season-to-date comparisons. Aggregate utilization metrics exclusively from FACT_PASS_USAGE and revenue metrics from FACT_TICKET_SALES; wrap ratios with DIV0(...). Filter pass-specific cohorts with DIM_CUSTOMER.IS_PASS_HOLDER = TRUE and refine by PASS_TYPE when requested. When analyzing sales channels, rely on FACT_TICKET_SALES.PURCHASE_CHANNEL and group by DIM_TICKET_TYPE.TICKET_CATEGORY as needed. Exclude day-ticket categories when the question targets pass-only behavior to prevent double counting."
+  question_categorization: "Route lift wait time or terrain utilization topics to {{ env.database }}.SEMANTIC.SEM_OPERATIONS. Route broad revenue mix, pricing, or channel analyses that include non-pass sales to {{ env.database }}.SEMANTIC.SEM_REVENUE. Route general customer segmentation or visitation cadence questions to {{ env.database }}.SEMANTIC.SEM_CUSTOMER_BEHAVIOR. If a user references a pass without identifying PASS_TYPE or TICKET_CATEGORY, ask for clarification before proceeding. Confirm whether the user needs active pass holders, historical pass owners, or all customers when the population is ambiguous."

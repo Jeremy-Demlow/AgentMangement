@@ -1,0 +1,32 @@
+product_id,product_name,product_category,product_type,price
+PROD001,Demo Skis - Premium,rental,ski,65
+PROD002,Performance Skis,rental,ski,55
+PROD003,Standard Skis,rental,ski,45
+PROD004,Beginner Skis,rental,ski,40
+PROD005,Demo Snowboard,rental,snowboard,60
+PROD006,Standard Snowboard,rental,snowboard,50
+PROD007,Beginner Snowboard,rental,snowboard,45
+PROD008,Ski Boots - Performance,rental,boots,25
+PROD009,Ski Boots - Standard,rental,boots,20
+PROD010,Snowboard Boots,rental,boots,22
+PROD011,Helmet - Adult,rental,safety,15
+PROD012,Helmet - Child,rental,safety,12
+PROD013,Poles,rental,accessory,10
+PROD014,Burger,food,meal,12
+PROD015,Pizza Slice,food,meal,8
+PROD016,Salad,food,meal,10
+PROD017,Chicken Tenders,food,meal,11
+PROD018,Sandwich,food,meal,9
+PROD019,Hot Dog,food,meal,6
+PROD020,Nachos,food,snack,7
+PROD021,Fries,food,snack,5
+PROD022,Coffee - Regular,beverage,hot,4
+PROD023,Coffee - Specialty,beverage,hot,6
+PROD024,Hot Chocolate,beverage,hot,5
+PROD025,Soda,beverage,cold,3
+PROD026,Water,beverage,cold,3
+PROD027,Energy Drink,beverage,cold,5
+PROD028,Beer - Domestic,beverage,alcohol,7
+PROD029,Beer - Craft,beverage,alcohol,9
+PROD030,Wine - Glass,beverage,alcohol,10
+PROD031,Mixed Drink,beverage,alcohol,12

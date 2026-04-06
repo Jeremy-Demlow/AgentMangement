@@ -1,0 +1,194 @@
+name: Validate PR
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'agents/specs/**'
+      - 'semantic-views/definitions/**'
+      - 'scripts/**'
+      - 'environments/**'
+      - 'tests/**'
+      - 'dbt_ski_resort/**'
+
+env:
+  SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+  SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+  SNOWFLAKE_PRIVATE_KEY_PATH: /tmp/snowflake_key.p8
+  SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+  SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+  PYTHONPATH: ${{ github.workspace }}
+  FDBT_VERSION: "1.0.48"
+
+jobs:
+  lint-and-unit:
+    name: Lint & Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pyyaml jinja2 snowflake-connector-python cryptography pytest
+
+      - name: Run smoke tests
+        run: pytest tests/test_smoke.py tests/test_templates.py -v
+
+  validate-specs:
+    name: Validate Specs (local)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install pyyaml jinja2 snowflake-connector-python cryptography
+
+      - name: Validate all specs for dev
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -m agent_management.validate_specs --env dev
+
+      - name: Validate all specs for qa
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -m agent_management.validate_specs --env qa
+
+      - name: Validate all specs for prod
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -m agent_management.validate_specs --env prod
+
+  dbt-quality-gate:
+    name: dbt Quality Gate (fdbt)
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dbt
+        run: |
+          pip install --upgrade pip
+          pip install dbt-snowflake
+
+      - name: Install fdbt
+        run: |
+          curl -sSfL https://github.com/Snowflake-Labs/fdbt/releases/download/v${FDBT_VERSION}/fdbt-linux-x86_64 -o /usr/local/bin/fdbt || true
+          chmod +x /usr/local/bin/fdbt || true
+
+      - name: Parse dbt manifest
+        working-directory: dbt_ski_resort
+        env:
+          FDBT_PATH: /usr/local/bin/fdbt
+        run: |
+          if command -v fdbt &> /dev/null || [ -f "$FDBT_PATH" ]; then
+            ${FDBT_PATH:-fdbt} build
+          else
+            echo "fdbt not available, falling back to dbt parse"
+            dbt parse --profiles-dir .
+          fi
+
+      - name: Check test coverage (>= 70%)
+        env:
+          FDBT_PATH: /usr/local/bin/fdbt
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -m agent_management.ci.check_test_coverage --project dbt_ski_resort --threshold 70
+
+      - name: Validate PK tests (not_null + unique)
+        env:
+          FDBT_PATH: /usr/local/bin/fdbt
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -m agent_management.ci.check_pk_tests --project dbt_ski_resort
+
+      - name: Generate lineage comment
+        if: always()
+        env:
+          FDBT_PATH: /usr/local/bin/fdbt
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -m agent_management.ci.generate_lineage_comment --project dbt_ski_resort --output /tmp/lineage_comment.md
+
+      - name: Post lineage comment on PR
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const commentFile = '/tmp/lineage_comment.md';
+            if (!fs.existsSync(commentFile)) return;
+            const body = fs.readFileSync(commentFile, 'utf8');
+            if (!body.trim()) return;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body.includes('dbt Model Impact Analysis'));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body,
+              });
+            }
+
+  validate-snowflake:
+    name: Validate Against Snowflake (dry-run)
+    runs-on: ubuntu-latest
+    needs: [lint-and-unit, validate-specs, dbt-quality-gate]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install pyyaml jinja2 snowflake-connector-python cryptography
+
+      - name: Write private key
+        run: echo "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/snowflake_key.p8
+
+      - name: Dry-run SV deploy (dev)
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -m agent_management.deploy_semantic_views --env dev --dry-run
+
+      - name: Dry-run agent deploy (dev)
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -m agent_management.deploy_agents --env dev --dry-run
+
+      - name: Schema drift check (dev)
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -m agent_management.detect_drift --env dev
+
+      - name: Cleanup
+        if: always()
+        run: rm -f /tmp/snowflake_key.p8

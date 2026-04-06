@@ -1,0 +1,19 @@
+lift_id,lift_name,lift_type,capacity_per_hour,vertical_feet,terrain_type,base_elevation,top_elevation,difficulty_access
+L001,Summit Express,Gondola,2500,1800,Mixed,8200,10000,Advanced
+L002,Eagle Ridge,Chair - 6 Pack,1500,1200,Advanced,8500,9700,Expert
+L003,Blue Sky,Chair - 4 Pack,1200,800,Intermediate,8200,9000,Intermediate
+L004,Family Fun,Chair - 4 Pack,1200,600,Beginner,8200,8800,Beginner
+L005,Powder Peak,Chair - 2 Pack,600,1400,Advanced,8600,10000,Expert
+L006,Sunshine,Chair - 4 Pack,1200,900,Intermediate,8300,9200,Intermediate
+L007,Beginner Bowl,Magic Carpet,800,200,Beginner,8200,8400,Beginner
+L008,Kids Zone,Magic Carpet,800,150,Beginner,8200,8350,Beginner
+L009,Terrain Park Express,Chair - 4 Pack,1000,700,Park,8400,9100,Intermediate
+L010,Mid Mountain,Chair - 4 Pack,1200,800,Intermediate,8500,9300,Intermediate
+L011,North Face,Chair - 2 Pack,600,1300,Advanced,8700,10000,Expert
+L012,West Bowl,Chair - 3 Pack,900,1000,Advanced,8600,9600,Advanced
+L013,East Side,Chair - 4 Pack,1200,850,Intermediate,8300,9150,Intermediate
+L014,South Ridge,Chair - 4 Pack,1200,750,Intermediate,8400,9150,Intermediate
+L015,Backcountry Access,Chair - 2 Pack,600,1500,Backcountry,8800,10300,Expert
+L016,Learners Lift,Chair - 3 Pack,900,400,Beginner,8200,8600,Beginner
+L017,Cruiser,Chair - 6 Pack,1500,1100,Intermediate,8300,9400,Intermediate
+L018,Trees & Glades,Chair - 4 Pack,1000,950,Advanced,8500,9450,Advanced

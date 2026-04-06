@@ -1,0 +1,434 @@
+# RESORT_EXECUTIVE - Agent Evaluation Questions (Dynamic Ground Truth)
+#
+# Test questions for AM_SKI_RESORT_DEV.AGENTS.RESORT_EXECUTIVE
+# Tools: DailySummaryKPIs, RevenueAnalytics, WeatherAnalytics, LiftOperations,
+#        StaffingAnalytics, MarketingAnalytics, CustomerSatisfaction,
+#        SafetyIncidents, SkiSchoolAnalytics, PassholderAnalytics, CustomerAnalytics
+#
+# Ground Truth Strategy:
+#   - validation_query: SQL executed at eval time to generate fresh ground truth
+#   - answer_template: Python format string that combines query results into NL ground truth
+#   - ground_truth: Static fallback (used only when no validation_query)
+#
+# Time Anchoring:
+#   Questions use relative references ("most recent complete season", "current season")
+#   so the same eval set works across seasons without manual updates.
+#   See references/dynamic-ground-truth.md for patterns.
+
+questions:
+  # ===========================================================================
+  # REVENUE — Season Totals (RevenueAnalytics / DailySummaryKPIs)
+  # ===========================================================================
+  - question: "What was our total ticket revenue for the most recent complete season?"
+    expected_tools: ["DailySummaryKPIs", "RevenueAnalytics"]
+    category: revenue
+    tags: [tickets, season_total, dynamic]
+    test_type: in_scope
+    validation_query: |
+      WITH current_season AS (
+        SELECT SKI_SEASON FROM AM_SKI_RESORT_DEV.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE()
+      ),
+      most_recent_complete AS (
+        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT_DEV.MARTS.DIM_DATE
+        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM current_season)
+      )
+      SELECT d.SKI_SEASON AS season,
+             ROUND(SUM(t.PURCHASE_AMOUNT), 2) AS total_revenue,
+             COUNT(*) AS ticket_count,
+             ROUND(AVG(t.PURCHASE_AMOUNT), 2) AS avg_price
+      FROM AM_SKI_RESORT_DEV.MARTS.FACT_TICKET_SALES t
+      JOIN AM_SKI_RESORT_DEV.MARTS.DIM_DATE d ON t.PURCHASE_DATE_KEY = d.DATE_KEY
+      WHERE d.SKI_SEASON = (SELECT season FROM most_recent_complete)
+      GROUP BY d.SKI_SEASON
+    answer_template: >-
+      Total ticket revenue for the {season} season was approximately
+      ${total_revenue:,.0f} from {ticket_count:,} tickets sold,
+      with an average ticket price of ${avg_price:,.2f}.
+
+  - question: "How did food and beverage revenue perform during the most recent complete season?"
+    expected_tools: ["RevenueAnalytics"]
+    category: revenue
+    tags: [fnb, season_total, dynamic]
+    test_type: in_scope
+    validation_query: |
+      WITH most_recent_complete AS (
+        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT_DEV.MARTS.DIM_DATE
+        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM AM_SKI_RESORT_DEV.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
+      )
+      SELECT d.SKI_SEASON AS season,
+             ROUND(SUM(fb.TOTAL_AMOUNT), 0) AS total_revenue,
+             COUNT(*) AS transaction_count
+      FROM AM_SKI_RESORT_DEV.MARTS.FACT_FOOD_BEVERAGE fb
+      JOIN AM_SKI_RESORT_DEV.MARTS.DIM_DATE d ON fb.TRANSACTION_DATE_KEY = d.DATE_KEY
+      WHERE d.SKI_SEASON = (SELECT season FROM most_recent_complete)
+      GROUP BY d.SKI_SEASON
+    answer_template: >-
+      Food and beverage revenue for the {season} season was approximately
+      ${total_revenue:,.0f} from {transaction_count:,} transactions.
+
+  - question: "What was the total rental revenue for the most recent complete season?"
+    expected_tools: ["RevenueAnalytics"]
+    category: revenue
+    tags: [rentals, season_total, dynamic]
+    test_type: in_scope
+    validation_query: |
+      WITH most_recent_complete AS (
+        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT_DEV.MARTS.DIM_DATE
+        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM AM_SKI_RESORT_DEV.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
+      )
+      SELECT d.SKI_SEASON AS season,
+             ROUND(SUM(r.RENTAL_AMOUNT), 0) AS total_revenue,
+             COUNT(*) AS rental_count,
+             ROUND(AVG(r.RENTAL_AMOUNT), 2) AS avg_rental
+      FROM AM_SKI_RESORT_DEV.MARTS.FACT_RENTALS r
+      JOIN AM_SKI_RESORT_DEV.MARTS.DIM_DATE d ON r.RENTAL_DATE_KEY = d.DATE_KEY
+      WHERE d.SKI_SEASON = (SELECT season FROM most_recent_complete)
+      GROUP BY d.SKI_SEASON
+    answer_template: >-
+      Total rental revenue for the {season} season was approximately
+      ${total_revenue:,.0f} from {rental_count:,} rentals,
+      with an average rental amount of ${avg_rental:,.2f}.
+
+  # ===========================================================================
+  # REVENUE — Year-over-Year (YoY) Comparison
+  # ===========================================================================
+  - question: "How does the current season's ticket revenue compare to the same point last season?"
+    expected_tools: ["DailySummaryKPIs", "RevenueAnalytics"]
+    category: revenue
+    tags: [tickets, yoy, dynamic]
+    test_type: in_scope
+    validation_query: |
+      WITH current_season AS (
+        SELECT SKI_SEASON FROM AM_SKI_RESORT_DEV.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE()
+      ),
+      prior_season AS (
+        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT_DEV.MARTS.DIM_DATE
+        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM current_season)
+      ),
+      current_rev AS (
+        SELECT d.SKI_SEASON AS current_season,
+               ROUND(SUM(t.PURCHASE_AMOUNT), 0) AS current_revenue,
+               COUNT(*) AS current_tickets
+        FROM AM_SKI_RESORT_DEV.MARTS.FACT_TICKET_SALES t
+        JOIN AM_SKI_RESORT_DEV.MARTS.DIM_DATE d ON t.PURCHASE_DATE_KEY = d.DATE_KEY
+        WHERE d.SKI_SEASON = (SELECT SKI_SEASON FROM current_season) AND d.FULL_DATE <= CURRENT_DATE()
+        GROUP BY d.SKI_SEASON
+      ),
+      prior_rev AS (
+        SELECT d.SKI_SEASON AS prior_season,
+               ROUND(SUM(t.PURCHASE_AMOUNT), 0) AS prior_revenue,
+               COUNT(*) AS prior_tickets
+        FROM AM_SKI_RESORT_DEV.MARTS.FACT_TICKET_SALES t
+        JOIN AM_SKI_RESORT_DEV.MARTS.DIM_DATE d ON t.PURCHASE_DATE_KEY = d.DATE_KEY
+        WHERE d.SKI_SEASON = (SELECT season FROM prior_season)
+          AND d.WEEK_OF_SEASON <= (
+            SELECT MAX(WEEK_OF_SEASON) FROM AM_SKI_RESORT_DEV.MARTS.DIM_DATE
+            WHERE FULL_DATE <= CURRENT_DATE()
+              AND SKI_SEASON = (SELECT SKI_SEASON FROM current_season)
+          )
+        GROUP BY d.SKI_SEASON
+      )
+      SELECT c.current_season, c.current_revenue, c.current_tickets,
+             p.prior_season, p.prior_revenue, p.prior_tickets,
+             ROUND((c.current_revenue - p.prior_revenue) / NULLIF(p.prior_revenue, 0) * 100, 1) AS yoy_pct
+      FROM current_rev c, prior_rev p
+    answer_template: >-
+      {current_season} ticket revenue is ${current_revenue:,.0f} ({current_tickets:,} tickets)
+      compared to ${prior_revenue:,.0f} ({prior_tickets:,} tickets) through the same point
+      in {prior_season}, a {yoy_pct}% year-over-year change.
+
+  # ===========================================================================
+  # WEATHER (WeatherAnalytics)
+  # ===========================================================================
+  - question: "How much total snowfall did we receive during the most recent complete season and how many powder days?"
+    expected_tools: ["WeatherAnalytics"]
+    category: weather
+    tags: [snowfall, powder_days, season_total, dynamic]
+    test_type: in_scope
+    validation_query: |
+      WITH most_recent_complete AS (
+        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT_DEV.MARTS.DIM_DATE
+        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM AM_SKI_RESORT_DEV.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
+      )
+      SELECT d.SKI_SEASON AS season,
+             ROUND(SUM(w.SNOWFALL_INCHES), 1) AS total_snowfall,
+             SUM(CASE WHEN w.IS_POWDER_DAY THEN 1 ELSE 0 END) AS powder_days,
+             ROUND(AVG(w.TEMP_HIGH_F), 1) AS avg_high,
+             ROUND(AVG(w.TEMP_LOW_F), 1) AS avg_low
+      FROM AM_SKI_RESORT_DEV.MARTS.FACT_WEATHER w
+      JOIN AM_SKI_RESORT_DEV.MARTS.DIM_DATE d ON w.DATE_KEY = d.DATE_KEY
+      WHERE d.SKI_SEASON = (SELECT season FROM most_recent_complete)
+      GROUP BY d.SKI_SEASON
+    answer_template: >-
+      The resort received {total_snowfall:,.1f} inches of total snowfall during the
+      {season} season with {powder_days} powder days.
+      Average high temperature was {avg_high}F and average low was {avg_low}F.
+
+  # ===========================================================================
+  # LIFT OPERATIONS (LiftOperations)
+  # ===========================================================================
+  - question: "What was the average lift wait time for the most recent complete season and how many total scans were recorded?"
+    expected_tools: ["LiftOperations"]
+    category: operations
+    tags: [wait_time, lift_scans, season_total, dynamic]
+    test_type: in_scope
+    validation_query: |
+      WITH most_recent_complete AS (
+        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT_DEV.MARTS.DIM_DATE
+        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM AM_SKI_RESORT_DEV.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
+      )
+      SELECT d.SKI_SEASON AS season,
+             COUNT(*) AS total_scans,
+             ROUND(AVG(ls.WAIT_TIME_MINUTES), 1) AS avg_wait
+      FROM AM_SKI_RESORT_DEV.MARTS.FACT_LIFT_SCANS ls
+      JOIN AM_SKI_RESORT_DEV.MARTS.DIM_DATE d ON ls.DATE_KEY = d.DATE_KEY
+      WHERE d.SKI_SEASON = (SELECT season FROM most_recent_complete)
+      GROUP BY d.SKI_SEASON
+    answer_template: >-
+      Average lift wait time for the {season} season was {avg_wait} minutes
+      with {total_scans:,} total lift scans recorded.
+
+  - question: "Which days of the week had the most lift activity during the most recent complete season?"
+    expected_tools: ["LiftOperations"]
+    category: operations
+    tags: [day_of_week, lift_scans, ranking, dynamic]
+    test_type: in_scope
+    validation_query: |
+      WITH most_recent_complete AS (
+        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT_DEV.MARTS.DIM_DATE
+        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM AM_SKI_RESORT_DEV.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
+      )
+      SELECT d.DAY_NAME AS day1, COUNT(*) AS count1
+      FROM AM_SKI_RESORT_DEV.MARTS.FACT_LIFT_SCANS ls
+      JOIN AM_SKI_RESORT_DEV.MARTS.DIM_DATE d ON ls.DATE_KEY = d.DATE_KEY
+      WHERE d.SKI_SEASON = (SELECT season FROM most_recent_complete)
+      GROUP BY d.DAY_NAME
+      ORDER BY count1 DESC
+      LIMIT 1
+    answer_template: >-
+      {day1} was the busiest day with {count1:,} lift scans during the most recent complete season.
+    ground_truth: ""
+
+  # ===========================================================================
+  # STAFFING (StaffingAnalytics)
+  # ===========================================================================
+  - question: "What was the average staffing coverage ratio during the most recent complete season and how many understaffed shifts occurred?"
+    expected_tools: ["StaffingAnalytics"]
+    category: staffing
+    tags: [coverage, understaffed, season_total, dynamic]
+    test_type: in_scope
+    validation_query: |
+      WITH most_recent_complete AS (
+        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT_DEV.MARTS.DIM_DATE
+        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM AM_SKI_RESORT_DEV.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
+      )
+      SELECT d.SKI_SEASON AS season,
+             ROUND(AVG(s.COVERAGE_RATIO), 2) AS avg_coverage,
+             SUM(CASE WHEN s.IS_UNDERSTAFFED THEN 1 ELSE 0 END) AS understaffed_shifts
+      FROM AM_SKI_RESORT_DEV.MARTS.FACT_STAFFING s
+      JOIN AM_SKI_RESORT_DEV.MARTS.DIM_DATE d ON s.DATE_KEY = d.DATE_KEY
+      WHERE d.SKI_SEASON = (SELECT season FROM most_recent_complete)
+      GROUP BY d.SKI_SEASON
+    answer_template: >-
+      Average staffing coverage ratio was {avg_coverage} during the {season} season
+      with {understaffed_shifts} understaffed shifts.
+
+  # ===========================================================================
+  # MARKETING (MarketingAnalytics)
+  # ===========================================================================
+  - question: "Which marketing campaign had the highest conversion rate during the most recent complete season?"
+    expected_tools: ["MarketingAnalytics"]
+    category: marketing
+    tags: [conversion, campaign, ranking, dynamic]
+    test_type: in_scope
+    validation_query: |
+      WITH most_recent_complete AS (
+        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT_DEV.MARTS.DIM_DATE
+        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM AM_SKI_RESORT_DEV.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
+      )
+      SELECT m.CAMPAIGN_NAME AS top_campaign,
+             m.CAMPAIGN_CHANNEL AS channel,
+             ROUND(m.CONVERSION_RATE * 100, 1) AS conversion_pct
+      FROM AM_SKI_RESORT_DEV.MARTS.FACT_MARKETING m
+      JOIN AM_SKI_RESORT_DEV.MARTS.DIM_DATE d ON m.SEND_DATE_KEY = d.DATE_KEY
+      WHERE d.SKI_SEASON = (SELECT season FROM most_recent_complete)
+      ORDER BY m.CONVERSION_RATE DESC
+      LIMIT 1
+    answer_template: >-
+      {top_campaign} via {channel} had the highest conversion rate
+      at approximately {conversion_pct}% during the most recent complete season.
+
+  # ===========================================================================
+  # CUSTOMER SATISFACTION (CustomerSatisfaction)
+  # ===========================================================================
+  - question: "What was our average NPS score and customer rating during the most recent complete season?"
+    expected_tools: ["CustomerSatisfaction"]
+    category: satisfaction
+    tags: [nps, rating, season_total, dynamic]
+    test_type: in_scope
+    validation_query: |
+      WITH most_recent_complete AS (
+        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT_DEV.MARTS.DIM_DATE
+        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM AM_SKI_RESORT_DEV.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
+      )
+      SELECT d.SKI_SEASON AS season,
+             ROUND(AVG(f.NPS_SCORE), 1) AS avg_nps,
+             ROUND(AVG(f.RATING), 2) AS avg_rating,
+             COUNT(*) AS feedback_count
+      FROM AM_SKI_RESORT_DEV.MARTS.FACT_FEEDBACK f
+      JOIN AM_SKI_RESORT_DEV.MARTS.DIM_DATE d ON f.FEEDBACK_DATE = d.FULL_DATE
+      WHERE d.SKI_SEASON = (SELECT season FROM most_recent_complete)
+      GROUP BY d.SKI_SEASON
+    answer_template: >-
+      Average NPS score was {avg_nps} and average customer rating was {avg_rating}
+      out of 5 during the {season} season, based on {feedback_count:,} feedback submissions.
+
+  # ===========================================================================
+  # SAFETY (SafetyIncidents)
+  # ===========================================================================
+  - question: "How many safety incidents occurred during the most recent complete season and what was the average patrol response time?"
+    expected_tools: ["SafetyIncidents"]
+    category: safety
+    tags: [incidents, response_time, season_total, dynamic]
+    test_type: in_scope
+    validation_query: |
+      WITH most_recent_complete AS (
+        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT_DEV.MARTS.DIM_DATE
+        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM AM_SKI_RESORT_DEV.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
+      )
+      SELECT d.SKI_SEASON AS season,
+             COUNT(*) AS incident_count,
+             ROUND(AVG(i.SEVERITY_SCORE), 2) AS avg_severity,
+             ROUND(AVG(i.PATROL_RESPONSE_MINUTES), 1) AS avg_response_time
+      FROM AM_SKI_RESORT_DEV.MARTS.FACT_INCIDENTS i
+      JOIN AM_SKI_RESORT_DEV.MARTS.DIM_DATE d ON i.INCIDENT_DATE = d.FULL_DATE
+      WHERE d.SKI_SEASON = (SELECT season FROM most_recent_complete)
+      GROUP BY d.SKI_SEASON
+    answer_template: >-
+      There were {incident_count} safety incidents during the {season} season
+      with an average severity score of {avg_severity} and
+      average patrol response time of {avg_response_time} minutes.
+
+  # ===========================================================================
+  # SKI SCHOOL (SkiSchoolAnalytics)
+  # ===========================================================================
+  - question: "How did ski school perform during the most recent complete season in terms of lessons and revenue?"
+    expected_tools: ["SkiSchoolAnalytics"]
+    category: ski_school
+    tags: [lessons, revenue, season_total, dynamic]
+    test_type: in_scope
+    validation_query: |
+      WITH most_recent_complete AS (
+        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT_DEV.MARTS.DIM_DATE
+        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM AM_SKI_RESORT_DEV.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
+      )
+      SELECT d.SKI_SEASON AS season,
+             COUNT(*) AS lesson_count,
+             ROUND(SUM(l.TOTAL_LESSON_REVENUE), 0) AS total_revenue,
+             ROUND(AVG(l.STUDENT_RATING), 2) AS avg_rating
+      FROM AM_SKI_RESORT_DEV.MARTS.FACT_LESSONS l
+      JOIN AM_SKI_RESORT_DEV.MARTS.DIM_DATE d ON l.LESSON_DATE = d.FULL_DATE
+      WHERE d.SKI_SEASON = (SELECT season FROM most_recent_complete)
+      GROUP BY d.SKI_SEASON
+    answer_template: >-
+      Ski school delivered {lesson_count:,} lessons during the {season} season
+      generating approximately ${total_revenue:,.0f} in total lesson revenue.
+      Average student rating was {avg_rating} out of 5.
+
+  # ===========================================================================
+  # PASSHOLDER (PassholderAnalytics)
+  # ===========================================================================
+  - question: "How many season passes were sold for the most recent complete season and what was the total pass revenue?"
+    expected_tools: ["PassholderAnalytics"]
+    category: passholders
+    tags: [passes, revenue, season_total, dynamic]
+    test_type: in_scope
+    validation_query: |
+      WITH most_recent_complete AS (
+        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT_DEV.MARTS.DIM_DATE
+        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM AM_SKI_RESORT_DEV.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
+      )
+      SELECT (SELECT season FROM most_recent_complete) AS season,
+             COUNT(*) AS passes_sold,
+             ROUND(SUM(sp.PURCHASE_AMOUNT), 0) AS total_revenue,
+             ROUND(AVG(sp.PURCHASE_AMOUNT), 2) AS avg_price,
+             SUM(CASE WHEN sp.IS_RENEWAL THEN 1 ELSE 0 END) AS renewals
+      FROM AM_SKI_RESORT_DEV.MARTS.FACT_SEASON_PASS_SALES sp
+      WHERE sp.VALID_SEASON = (SELECT season FROM most_recent_complete)
+    answer_template: >-
+      {passes_sold:,} season passes were sold for the {season} season
+      generating approximately ${total_revenue:,.0f} in revenue,
+      with an average pass price of ${avg_price:,.2f}. {renewals:,} were renewals.
+
+  # ===========================================================================
+  # CUSTOMER SEGMENTS (CustomerAnalytics) — Static (dimension data, not time-dependent)
+  # ===========================================================================
+  - question: "What are the largest customer segments at the resort by number of customers?"
+    expected_tools: ["CustomerAnalytics"]
+    category: customers
+    tags: [segments, ranking]
+    test_type: in_scope
+    validation_query: |
+      SELECT LISTAGG(seg || ' (' || cnt || ')', ', ') WITHIN GROUP (ORDER BY cnt DESC) AS segment_summary
+      FROM (
+        SELECT CUSTOMER_SEGMENT AS seg, COUNT(*) AS cnt
+        FROM AM_SKI_RESORT_DEV.MARTS.DIM_CUSTOMER
+        GROUP BY CUSTOMER_SEGMENT
+        ORDER BY cnt DESC
+      )
+    answer_template: >-
+      The largest customer segments are {segment_summary}.
+
+  # ===========================================================================
+  # CROSS-DOMAIN — Current Season to Date (tests agent's ability to handle partial season)
+  # ===========================================================================
+  - question: "Give me a summary of the current season to date: total ticket revenue, total snowfall, and number of safety incidents."
+    expected_tools: ["DailySummaryKPIs", "RevenueAnalytics", "WeatherAnalytics", "SafetyIncidents"]
+    category: cross_domain
+    tags: [season_to_date, multi_tool, dynamic]
+    test_type: in_scope
+    validation_query: |
+      WITH current_season AS (
+        SELECT SKI_SEASON FROM AM_SKI_RESORT_DEV.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE()
+      ),
+      tickets AS (
+        SELECT ROUND(SUM(t.PURCHASE_AMOUNT), 0) AS ticket_rev
+        FROM AM_SKI_RESORT_DEV.MARTS.FACT_TICKET_SALES t
+        JOIN AM_SKI_RESORT_DEV.MARTS.DIM_DATE d ON t.PURCHASE_DATE_KEY = d.DATE_KEY
+        WHERE d.SKI_SEASON = (SELECT SKI_SEASON FROM current_season) AND d.FULL_DATE <= CURRENT_DATE()
+      ),
+      weather AS (
+        SELECT ROUND(SUM(w.SNOWFALL_INCHES), 1) AS snowfall
+        FROM AM_SKI_RESORT_DEV.MARTS.FACT_WEATHER w
+        JOIN AM_SKI_RESORT_DEV.MARTS.DIM_DATE d ON w.DATE_KEY = d.DATE_KEY
+        WHERE d.SKI_SEASON = (SELECT SKI_SEASON FROM current_season) AND d.FULL_DATE <= CURRENT_DATE()
+      ),
+      safety AS (
+        SELECT COUNT(*) AS incidents
+        FROM AM_SKI_RESORT_DEV.MARTS.FACT_INCIDENTS i
+        JOIN AM_SKI_RESORT_DEV.MARTS.DIM_DATE d ON i.INCIDENT_DATE = d.FULL_DATE
+        WHERE d.SKI_SEASON = (SELECT SKI_SEASON FROM current_season) AND d.FULL_DATE <= CURRENT_DATE()
+      )
+      SELECT (SELECT SKI_SEASON FROM current_season) AS season,
+             t.ticket_rev, w.snowfall, s.incidents
+      FROM tickets t, weather w, safety s
+    answer_template: >-
+      Current {season} season to date: ticket revenue is ${ticket_rev:,.0f},
+      total snowfall is {snowfall:,.1f} inches, and there have been {incidents} safety incidents.
+
+  # ===========================================================================
+  # OUT-OF-SCOPE QUERIES (agent should decline) — Static ground truth
+  # ===========================================================================
+  # - question: "What is the stock price of Vail Resorts?"
+  #   expected_tools: []
+  #   category: boundary
+  #   tags: [out_of_scope, financial]
+  #   test_type: out_of_scope
+  #   ground_truth: "Agent should decline — stock price data is outside its domain."
+
+  # - question: "Book me a hotel room for next weekend"
+  #   expected_tools: []
+  #   category: boundary
+  #   tags: [out_of_scope, booking]
+  #   test_type: out_of_scope
+  #   ground_truth: "Agent should decline — it cannot make reservations."

@@ -1,0 +1,160 @@
+name: sem_weather_analytics
+description: Weather analytics semantic view for analyzing conditions and their impact
+tables:
+  - name: DATES
+    synonyms:
+      - calendar
+      - day_attributes
+    description: Calendar dimension with ski-season attributes
+    base_table:
+      database: AM_SKI_RESORT_PROD
+      schema: MARTS
+      table: DIM_DATE
+    primary_key:
+      columns:
+        - DATE_KEY
+    dimensions:
+      - name: DAY_NAME
+        description: Day of week name
+        expr: DAY_NAME
+        data_type: VARCHAR(3)
+      - name: FULL_DATE
+        synonyms:
+          - date
+          - weather_date
+        description: Date of weather observation
+        expr: FULL_DATE
+        data_type: DATE
+      - name: IS_HOLIDAY
+        description: Holiday indicator
+        expr: IS_HOLIDAY
+        data_type: BOOLEAN
+      - name: IS_WEEKEND
+        description: Weekend indicator
+        expr: IS_WEEKEND
+        data_type: BOOLEAN
+      - name: MONTH_NAME
+        description: Month name
+        expr: MONTH_NAME
+        data_type: VARCHAR(3)
+      - name: SKI_SEASON
+        synonyms:
+          - season
+        description: Ski season identifier
+        expr: SKI_SEASON
+        data_type: VARCHAR(16777216)
+  - name: WEATHER
+    synonyms:
+      - conditions
+      - snow_report
+    description: Daily weather conditions by mountain zone
+    base_table:
+      database: AM_SKI_RESORT_PROD
+      schema: MARTS
+      table: FACT_WEATHER
+    primary_key:
+      columns:
+        - WEATHER_KEY
+    dimensions:
+      - name: MOUNTAIN_ZONE
+        synonyms:
+          - zone
+          - area
+        description: "Mountain zone (Summit Peak, North Ridge, etc)"
+        expr: MOUNTAIN_ZONE
+        data_type: VARCHAR(100)
+      - name: SNOW_CONDITION
+        synonyms:
+          - surface
+          - conditions
+        description: Snow surface condition
+        expr: SNOW_CONDITION
+        data_type: VARCHAR(50)
+    facts:
+      - name: BASE_DEPTH_INCHES
+        description: Snow base depth in inches
+        expr: BASE_DEPTH_INCHES
+        data_type: FLOAT
+        access_modifier: public_access
+      - name: SNOWFALL_INCHES
+        description: New snowfall in inches
+        expr: SNOWFALL_INCHES
+        data_type: FLOAT
+        access_modifier: public_access
+      - name: TEMP_HIGH_F
+        description: High temperature (Fahrenheit)
+        expr: TEMP_HIGH_F
+        data_type: FLOAT
+        access_modifier: public_access
+      - name: TEMP_LOW_F
+        description: Low temperature (Fahrenheit)
+        expr: TEMP_LOW_F
+        data_type: FLOAT
+        access_modifier: public_access
+      - name: WIND_SPEED_MPH
+        description: Wind speed in MPH
+        expr: WIND_SPEED_MPH
+        data_type: FLOAT
+        access_modifier: public_access
+    metrics:
+      - name: AVG_SNOWFALL
+        description: Average snowfall per observation
+        expr: AVG(WEATHER.SNOWFALL_INCHES)
+        access_modifier: public_access
+      - name: HIGH_WIND_COUNT
+        description: Count of high wind days (25+ mph)
+        expr: COUNT(CASE WHEN WEATHER.IS_HIGH_WIND THEN 1 END)
+        access_modifier: public_access
+      - name: MAX_BASE_DEPTH
+        synonyms:
+          - deepest_base
+        description: Maximum base depth observed
+        expr: MAX(WEATHER.BASE_DEPTH_INCHES)
+        access_modifier: public_access
+      - name: MAX_SNOWFALL
+        description: Maximum single-day snowfall
+        expr: MAX(WEATHER.SNOWFALL_INCHES)
+        access_modifier: public_access
+      - name: MAX_TEMP
+        description: Maximum temperature observed (F)
+        expr: MAX(WEATHER.TEMP_HIGH_F)
+        access_modifier: public_access
+      - name: MAX_WIND
+        description: Maximum wind speed observed (MPH)
+        expr: MAX(WEATHER.WIND_SPEED_MPH)
+        access_modifier: public_access
+      - name: MIN_TEMP
+        description: Minimum temperature observed (F)
+        expr: MIN(WEATHER.TEMP_LOW_F)
+        access_modifier: public_access
+      - name: OBSERVATION_COUNT
+        description: Number of weather observations
+        expr: COUNT(WEATHER.WEATHER_KEY)
+        access_modifier: public_access
+      - name: POWDER_DAY_COUNT
+        synonyms:
+          - powder_days
+        description: Count of powder days (6+ inches new snow)
+        expr: COUNT(CASE WHEN WEATHER.IS_POWDER_DAY THEN 1 END)
+        access_modifier: public_access
+      - name: STORM_COUNT
+        description: Count of storm warning days
+        expr: COUNT(CASE WHEN WEATHER.STORM_WARNING THEN 1 END)
+        access_modifier: public_access
+      - name: TOTAL_SNOWFALL
+        synonyms:
+          - new_snow
+          - fresh_snow
+        description: Total new snowfall in inches
+        expr: SUM(WEATHER.SNOWFALL_INCHES)
+        access_modifier: public_access
+relationships:
+  - name: WEATHER_TO_DATE
+    left_table: WEATHER
+    right_table: DATES
+    relationship_columns:
+      - left_column: DATE_KEY
+        right_column: DATE_KEY
+module_custom_instructions:
+  sql_generation: Group by MOUNTAIN_ZONE for zone-specific analysis. Use DATES.SKI_SEASON for seasonal comparisons. Filter on IS_POWDER_DAY for powder day analysis. Use DATE_TRUNC for time-based aggregations.
+  question_categorization: "Use this view for weather-related questions: snowfall, temperature, wind, powder days, and conditions analysis. For attendance impact correlation, join with pass_usage or lift_scans data."

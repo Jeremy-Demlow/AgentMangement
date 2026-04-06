@@ -1,0 +1,38 @@
+dbt_ski_resort:
+  target: "{{ env_var('DBT_TARGET', 'dev') }}"
+  outputs:
+    dev:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT', 'trb65519') }}"
+      user: "{{ env_var('SNOWFLAKE_USER', 'JDEMLOW') }}"
+      private_key_path: "{{ env_var('SNOWFLAKE_PRIVATE_KEY_PATH', '/Users/jdemlow/.snowflake/keys/snowflake_tf_key.p8') }}"
+      database: "{{ env_var('SNOWFLAKE_DATABASE', 'AM_SKI_RESORT_DEV') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'AM_SKI_RESORT_WH_DEV') }}"
+      schema: MARTS
+      role: "{{ env_var('SNOWFLAKE_ROLE', 'ACCOUNTADMIN') }}"
+      threads: 4
+      client_session_keep_alive: False
+
+    qa:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT', 'trb65519') }}"
+      user: "{{ env_var('SNOWFLAKE_USER', 'JDEMLOW') }}"
+      private_key_path: "{{ env_var('SNOWFLAKE_PRIVATE_KEY_PATH', '/Users/jdemlow/.snowflake/keys/snowflake_tf_key.p8') }}"
+      database: "{{ env_var('SNOWFLAKE_DATABASE', 'AM_SKI_RESORT_QA') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'AM_SKI_RESORT_WH_QA') }}"
+      schema: MARTS
+      role: "{{ env_var('SNOWFLAKE_ROLE', 'AM_DEPLOY_ROLE_QA') }}"
+      threads: 4
+      client_session_keep_alive: False
+
+    prod:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT', 'trb65519') }}"
+      user: "{{ env_var('SNOWFLAKE_USER', 'JDEMLOW') }}"
+      private_key_path: "{{ env_var('SNOWFLAKE_PRIVATE_KEY_PATH', '/Users/jdemlow/.snowflake/keys/snowflake_tf_key.p8') }}"
+      database: "{{ env_var('SNOWFLAKE_DATABASE', 'AM_SKI_RESORT_PROD') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'AM_SKI_RESORT_WH_PROD') }}"
+      schema: MARTS
+      role: "{{ env_var('SNOWFLAKE_ROLE', 'AM_DEPLOY_ROLE_PROD') }}"
+      threads: 4
+      client_session_keep_alive: False

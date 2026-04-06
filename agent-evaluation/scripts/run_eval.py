@@ -1,0 +1,776 @@
+#!/usr/bin/env python3
+"""
+Run a Cortex Agent evaluation end-to-end.
+
+Reads a config YAML, loads questions (from YAML or CSV) into Snowflake,
+generates the Snowflake evaluation YAML, uploads it to a stage, and starts the run.
+Polls until complete, checks thresholds, and saves JSON results.
+
+Supports two question formats:
+  - YAML (recommended): datasets/agent_eval.yaml  (structured: expected_tools, category, tags, validation_query)
+  - CSV  (simple):      datasets/agent_eval.csv   (flat: target_tool, question, ground_truth, test_type)
+
+Usage:
+    python scripts/run_eval.py configs/resort_executive.yaml --dry-run
+
+    python scripts/run_eval.py configs/resort_executive.yaml --connection myconn
+
+    python scripts/run_eval.py configs/resort_executive.yaml --no-wait --connection myconn
+
+    python scripts/run_eval.py configs/resort_executive.yaml --env dev --connection myconn
+
+    python scripts/run_eval.py configs/resort_executive.yaml --status --connection myconn
+
+    python scripts/run_eval.py configs/resort_executive.yaml --results --connection myconn
+
+    python scripts/run_eval.py configs/resort_executive.yaml --results --connection myconn --category revenue
+"""
+
+import argparse
+import csv
+import json
+import os
+import sys
+import time
+import tomllib
+from datetime import datetime
+from decimal import Decimal
+from pathlib import Path
+
+import snowflake.connector
+
+try:
+    import yaml
+except ImportError:
+    print("PyYAML is required. Install with: uv add pyyaml")
+    sys.exit(1)
+
+POLL_INTERVAL_SECONDS = 30
+MAX_POLL_ATTEMPTS = 60
+
+
+def load_config(config_path: str) -> dict:
+    with open(config_path) as f:
+        return yaml.safe_load(f)
+
+
+def resolve_dataset_path(config_path: str, relative_path: str) -> str:
+    config_dir = Path(config_path).parent.parent
+    return str(config_dir / relative_path)
+
+
+def load_questions(dataset_path: str, category: str = None, tags: list = None) -> list[dict]:
+    path = Path(dataset_path)
+
+    if path.suffix in (".yaml", ".yml"):
+        with open(path) as f:
+            data = yaml.safe_load(f)
+        questions = []
+        for q in data.get("questions", []):
+            if not q.get("question", "").strip():
+                continue
+            questions.append({
+                "question": q["question"].strip(),
+                "ground_truth": q.get("ground_truth", "").strip(),
+                "expected_tools": q.get("expected_tools", []),
+                "category": q.get("category", ""),
+                "tags": q.get("tags", []),
+                "test_type": q.get("test_type", "in_scope"),
+                "validation_query": q.get("validation_query", "").strip(),
+                "answer_template": q.get("answer_template", "").strip(),
+            })
+    elif path.suffix == ".csv":
+        questions = []
+        with open(path, "r", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                if not row.get("question", "").strip():
+                    continue
+                questions.append({
+                    "question": row["question"].strip(),
+                    "ground_truth": row.get("ground_truth", "").strip(),
+                    "expected_tools": [row["target_tool"]] if row.get("target_tool") else [],
+                    "category": row.get("category", ""),
+                    "tags": [],
+                    "test_type": row.get("test_type", "in_scope"),
+                    "validation_query": "",
+                })
+    else:
+        print(f"Error: Unsupported dataset format: {path.suffix} (use .yaml or .csv)")
+        sys.exit(1)
+
+    if category:
+        questions = [q for q in questions if q["category"] == category]
+    if tags:
+        tag_set = set(tags)
+        questions = [q for q in questions if tag_set.intersection(q["tags"])]
+
+    return questions
+
+
+def resolve_dynamic_ground_truth(cursor, questions: list[dict]) -> list[dict]:
+    resolved = 0
+    failed = 0
+    for q in questions:
+        vq = q.get("validation_query", "").strip()
+        tmpl = q.get("answer_template", "").strip()
+        if not vq or not tmpl:
+            continue
+        try:
+            cursor.execute(vq)
+            cols = [desc[0].lower() for desc in cursor.description]
+            row = cursor.fetchone()
+            if row:
+                row_dict = {}
+                for col, val in zip(cols, row):
+                    if isinstance(val, Decimal):
+                        row_dict[col] = float(val)
+                    elif isinstance(val, (int, float)):
+                        row_dict[col] = val
+                    else:
+                        row_dict[col] = str(val) if val is not None else ""
+                q["ground_truth"] = tmpl.format_map(row_dict)
+                resolved += 1
+            else:
+                print(f"    WARN: validation_query returned no rows for: {q['question'][:60]}")
+                failed += 1
+        except Exception as e:
+            print(f"    WARN: validation_query failed for: {q['question'][:60]}")
+            print(f"           {e}")
+            failed += 1
+
+    empty_gt = [q for q in questions if not q.get("ground_truth", "").strip()]
+    if empty_gt:
+        print(f"    WARN: {len(empty_gt)} question(s) have empty ground_truth (will score 0% on answer_correctness)")
+        for q in empty_gt:
+            print(f"           - {q['question'][:70]}")
+
+    print(f"  Dynamic ground truth: {resolved} resolved, {failed} failed, {len(questions) - resolved - failed} static")
+    return questions
+
+
+def load_questions_to_snowflake(cursor, questions: list[dict], target_table: str):
+    print(f"  Questions: {len(questions)} loaded")
+
+    cursor.execute(f"""
+        CREATE OR REPLACE TABLE {target_table} (
+            input_query VARCHAR,
+            output VARIANT
+        )
+    """)
+
+    for q in questions:
+        q_escaped = q["question"].replace("'", "''")
+        gt = q["ground_truth"]
+        gt_escaped = (
+            gt.replace("\\", "\\\\")
+            .replace("'", "\\'")
+            .replace('"', '\\"')
+        )
+        cursor.execute(f"""
+            INSERT INTO {target_table} (input_query, output)
+            SELECT
+                '{q_escaped}',
+                PARSE_JSON('{{"ground_truth_output": "{gt_escaped}"}}')
+        """)
+
+    cursor.execute(f"SELECT COUNT(*) FROM {target_table}")
+    count = cursor.fetchone()[0]
+    print(f"  Table: {target_table} ({count} rows)")
+    return count
+
+
+def generate_snowflake_yaml(config: dict, dataset_name: str) -> str:
+    agent = config["agent"]
+    fq_agent = f'{agent["database"]}.{agent["schema"]}.{agent["name"]}'
+    fq_table = config["dataset"]["snowflake_table"]
+    eval_cfg = config.get("evaluation", {})
+
+    metrics_section = []
+    for m in config.get("metrics", []):
+        if isinstance(m, str):
+            metrics_section.append(f'  - "{m}"')
+        elif isinstance(m, dict):
+            metrics_section.append(f'  - name: "{m["name"]}"')
+            if "score_ranges" in m:
+                metrics_section.append("    score_ranges:")
+                for k, v in m["score_ranges"].items():
+                    metrics_section.append(f"      {k}: {v}")
+            if "prompt" in m:
+                metrics_section.append("    prompt: |")
+                for line in m["prompt"].rstrip().split("\n"):
+                    metrics_section.append(f"      {line}")
+
+    return f"""dataset:
+  dataset_type: "CORTEX AGENT"
+  table_name: "{fq_table}"
+  dataset_name: "{dataset_name}"
+  column_mapping:
+    query_text: "INPUT_QUERY"
+    ground_truth: "OUTPUT"
+
+evaluation:
+  agent_params:
+    agent_name: "{fq_agent}"
+    agent_type: "CORTEX AGENT"
+  run_params:
+    label: "{eval_cfg.get('label', f'{agent["name"]} evaluation')}"
+    description: "{eval_cfg.get('description', 'Automated evaluation')}"
+  source_metadata:
+    type: "dataset"
+    dataset_name: "{dataset_name}"
+
+metrics:
+{chr(10).join(metrics_section)}
+"""
+
+
+def ensure_stage(cursor, config: dict):
+    sf = config["snowflake"]
+    stage = sf["stage"]
+    ff = sf["file_format"]
+
+    cursor.execute(f"""
+        CREATE FILE FORMAT IF NOT EXISTS {ff}
+          TYPE = 'CSV'
+          FIELD_DELIMITER = NONE
+          RECORD_DELIMITER = '\\n'
+          SKIP_HEADER = 0
+          FIELD_OPTIONALLY_ENCLOSED_BY = NONE
+          ESCAPE_UNENCLOSED_FIELD = NONE
+    """)
+
+    cursor.execute(f"""
+        CREATE STAGE IF NOT EXISTS {stage}
+          FILE_FORMAT = {ff}
+    """)
+    print(f"  Stage: {stage}")
+
+
+def upload_yaml(cursor, yaml_content: str, stage: str, filename: str):
+    escaped = yaml_content.replace("'", "''")
+    cursor.execute(f"""
+        COPY INTO @{stage}/{filename}
+        FROM (SELECT '{escaped}')
+        FILE_FORMAT = (TYPE = 'CSV' FIELD_DELIMITER = NONE RECORD_DELIMITER = NONE COMPRESSION = NONE)
+        SINGLE = TRUE
+        OVERWRITE = TRUE
+    """)
+    print(f"  Uploaded: @{stage}/{filename}")
+
+
+def start_eval(cursor, run_name: str, stage: str, filename: str):
+    cursor.execute(f"""
+        CALL EXECUTE_AI_EVALUATION(
+            'START',
+            OBJECT_CONSTRUCT('run_name', '{run_name}'),
+            '@{stage}/{filename}'
+        )
+    """)
+    print(f"  Run started: {run_name}")
+
+
+def check_status(cursor, run_name: str, stage: str, filename: str):
+    cursor.execute(f"""
+        CALL EXECUTE_AI_EVALUATION(
+            'STATUS',
+            OBJECT_CONSTRUCT('run_name', '{run_name}'),
+            '@{stage}/{filename}'
+        )
+    """)
+    row = cursor.fetchone()
+    print(f"  Run:    {row[0]}")
+    print(f"  Agent:  {row[1]}")
+    print(f"  Status: {row[3]}")
+    if row[4]:
+        print(f"  Detail: {row[4]}")
+    return row[3]
+
+
+def show_results(cursor, config: dict, run_name: str, category: str = None):
+    agent = config["agent"]
+
+    where_clause = ""
+    if category:
+        dataset_path = config["dataset"].get("questions", config["dataset"].get("local_csv", ""))
+        if dataset_path.endswith((".yaml", ".yml")):
+            base_dir = Path(config.get("_config_path", "")).parent.parent
+            questions = load_questions(str(base_dir / dataset_path), category=category)
+            q_list = [q["question"] for q in questions]
+            if q_list:
+                escaped = [q.replace("'", "''") for q in q_list]
+                in_clause = ", ".join(f"'{q}'" for q in escaped)
+                where_clause = f"WHERE INPUT IN ({in_clause})"
+                print(f"  Filtering to category: {category} ({len(q_list)} questions)")
+
+    cursor.execute(f"""
+        SELECT
+            METRIC_NAME,
+            ROUND(AVG(EVAL_AGG_SCORE), 4) AS avg_score,
+            COUNT(*) AS record_count,
+            SUM(CASE WHEN EVAL_AGG_SCORE >= 0.8 THEN 1 ELSE 0 END) AS high,
+            SUM(CASE WHEN EVAL_AGG_SCORE < 0.3 THEN 1 ELSE 0 END) AS low
+        FROM TABLE(SNOWFLAKE.LOCAL.GET_AI_EVALUATION_DATA(
+            '{agent["database"]}', '{agent["schema"]}', '{agent["name"]}',
+            'CORTEX AGENT', '{run_name}'
+        ))
+        {where_clause}
+        GROUP BY METRIC_NAME
+    """)
+
+    print(f"\n{'Metric':<25} {'Avg':>8} {'Count':>6} {'High':>6} {'Low':>6}")
+    print("-" * 55)
+    for row in cursor.fetchall():
+        score_pct = f"{row[1]*100:.1f}%" if row[1] is not None else "N/A"
+        print(f"{row[0]:<25} {score_pct:>8} {row[2]:>6} {row[3]:>6} {row[4]:>6}")
+
+    cursor.execute(f"""
+        SELECT
+            LEFT(INPUT, 70) AS question,
+            METRIC_NAME,
+            ROUND(EVAL_AGG_SCORE, 2) AS score
+        FROM TABLE(SNOWFLAKE.LOCAL.GET_AI_EVALUATION_DATA(
+            '{agent["database"]}', '{agent["schema"]}', '{agent["name"]}',
+            'CORTEX AGENT', '{run_name}'
+        ))
+        {where_clause}
+        ORDER BY METRIC_NAME, EVAL_AGG_SCORE ASC
+    """)
+
+    print(f"\n  {'Score':>5}  {'Metric':<22} Question")
+    print(f"  {'-----':>5}  {'------':<22} --------")
+    for row in cursor.fetchall():
+        score = f"{row[2]:.2f}" if row[2] is not None else "N/A"
+        print(f"  {score:>5}  {row[1]:<22} {row[0]}")
+
+    cursor.execute(
+        "SELECT LOWER(CURRENT_ORGANIZATION_NAME()), LOWER(CURRENT_ACCOUNT_NAME())"
+    )
+    org, account = cursor.fetchone()
+    url = (
+        f"https://app.snowflake.com/{org}/{account}/#/agents"
+        f"/database/{agent['database']}/schema/{agent['schema']}"
+        f"/agent/{agent['name']}/evaluations/{run_name}/records"
+    )
+    print(f"\nSnowsight: {url}")
+
+
+def poll_until_done(cursor, run_name: str, stage: str, filename: str, poll_interval: int = POLL_INTERVAL_SECONDS) -> str:
+    for attempt in range(1, MAX_POLL_ATTEMPTS + 1):
+        cursor.execute(f"""
+            CALL EXECUTE_AI_EVALUATION(
+                'STATUS',
+                OBJECT_CONSTRUCT('run_name', '{run_name}'),
+                '@{stage}/{filename}'
+            )
+        """)
+        rows = cursor.fetchall()
+        if rows:
+            col_names = [d[0].upper() for d in cursor.description]
+            if "STATUS" in col_names:
+                status_str = str(rows[0][col_names.index("STATUS")]).upper()
+            elif len(rows[0]) > 3:
+                status_str = str(rows[0][3]).upper()
+            else:
+                status_str = str(rows[0][0]).upper()
+
+            print(f"  [{attempt:02d}] Status: {status_str}")
+
+            if any(term in status_str for term in ("COMPLETED", "SUCCEEDED", "DONE")):
+                return "COMPLETED"
+            if any(term in status_str for term in ("FAILED", "ERROR", "CANCELLED")):
+                return f"FAILED: {status_str}"
+
+        time.sleep(poll_interval)
+
+    return "TIMEOUT"
+
+
+def fetch_results(cursor, agent: dict, run_name: str) -> list[dict]:
+    cursor.execute(f"""
+        SELECT * FROM TABLE(SNOWFLAKE.LOCAL.GET_AI_EVALUATION_DATA(
+            '{agent["database"]}', '{agent["schema"]}', '{agent["name"]}',
+            'CORTEX AGENT', '{run_name}'
+        ))
+    """)
+    columns = [d[0].lower() for d in cursor.description]
+    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
+def fetch_errors(cursor, agent: dict, run_name: str) -> list[dict]:
+    cursor.execute(f"""
+        SELECT * FROM TABLE(SNOWFLAKE.LOCAL.GET_AI_OBSERVABILITY_LOGS(
+            '{agent["database"]}', '{agent["schema"]}', '{agent["name"]}',
+            'CORTEX AGENT'
+        ))
+        WHERE record:"severity_text" IN ('ERROR', 'WARN')
+          AND record_attributes:"snow.ai.observability.run.name" = '{run_name}'
+    """)
+    columns = [d[0].lower() for d in cursor.description]
+    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
+def compute_summary(results: list[dict]) -> dict[str, dict]:
+    metrics: dict[str, list[float]] = {}
+    for row in results:
+        metric_name = row.get("metric_name")
+        score = row.get("eval_agg_score")
+        if metric_name and score is not None:
+            try:
+                metrics.setdefault(metric_name, []).append(float(score))
+            except (TypeError, ValueError):
+                pass
+    return {
+        name: {"avg": sum(scores) / len(scores), "n": len(scores)}
+        for name, scores in metrics.items()
+    }
+
+
+def check_thresholds(summary: dict[str, dict], thresholds: dict[str, float]) -> bool:
+    passed = True
+    for metric, threshold in thresholds.items():
+        if metric not in summary:
+            continue
+        avg = summary[metric]["avg"]
+        ok = avg >= threshold
+        status = "PASS" if ok else "FAIL"
+        print(f"  {metric:25s} {avg:.3f}  (threshold: {threshold:.2f})  [{status}]")
+        if not ok:
+            passed = False
+    return passed
+
+
+def save_results_json(config: dict, run_name: str, summary: dict, results: list[dict], thresholds: dict, passed: bool) -> Path:
+    results_dir = Path(config.get("_config_path", ".")).parent.parent / "results"
+    results_dir.mkdir(exist_ok=True)
+    agent_name = config["agent"]["name"].lower()
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_file = results_dir / f"{agent_name}_{ts}.json"
+    output_file.write_text(
+        json.dumps(
+            {
+                "agent": config["agent"]["name"],
+                "run_name": run_name,
+                "timestamp": ts,
+                "summary": summary,
+                "thresholds": thresholds,
+                "passed": passed,
+                "total_records": len(results),
+                "results": results,
+            },
+            indent=2,
+            default=str,
+        )
+        + "\n"
+    )
+    return output_file
+
+
+def load_env_config(env: str) -> dict:
+    path = Path("agents/environments") / f"{env}.yml"
+    if not path.exists():
+        raise FileNotFoundError(f"Environment config not found: {path}")
+    with open(path) as f:
+        return yaml.safe_load(f)
+
+
+def _connect(args, env_config: dict = None):
+    if args.account and args.user and args.private_key_path:
+        from cryptography.hazmat.primitives import serialization
+        key_path = os.path.expanduser(args.private_key_path)
+        key_data = Path(key_path).read_bytes()
+        private_key = serialization.load_pem_private_key(key_data, password=None)
+        pkb = private_key.private_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+        conn_kwargs = dict(account=args.account, user=args.user, private_key=pkb)
+        if env_config:
+            deploy = env_config.get("deployment", {})
+            conn_kwargs.update({
+                k: v for k, v in {
+                    "warehouse": deploy.get("warehouse"),
+                    "database": deploy.get("database"),
+                    "schema": deploy.get("schema"),
+                    "role": env_config.get("snowflake", {}).get("role"),
+                }.items() if v
+            })
+        return snowflake.connector.connect(**conn_kwargs)
+    elif args.connection:
+        toml_path = Path("~/.snowflake/connections.toml").expanduser()
+        if toml_path.exists():
+            with open(toml_path, "rb") as f:
+                connections = tomllib.load(f)
+            if args.connection in connections:
+                cfg = connections[args.connection]
+                key_path_raw = cfg.get("private_key_path", "")
+                if key_path_raw and "~" in key_path_raw:
+                    key_path = str(Path(key_path_raw).expanduser())
+                    conn_kwargs = dict(
+                        account=cfg["account"],
+                        user=cfg["user"],
+                        private_key_file=key_path,
+                    )
+                    if env_config:
+                        deploy = env_config.get("deployment", {})
+                        conn_kwargs.update({
+                            k: v for k, v in {
+                                "warehouse": deploy.get("warehouse"),
+                                "database": deploy.get("database"),
+                                "schema": deploy.get("schema"),
+                                "role": env_config.get("snowflake", {}).get("role"),
+                            }.items() if v
+                        })
+                    return snowflake.connector.connect(**conn_kwargs)
+        return snowflake.connector.connect(connection_name=args.connection)
+    else:
+        print("Error: --connection or (--account + --user + --private-key-path) required")
+        sys.exit(1)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Run a Cortex Agent evaluation")
+    parser.add_argument("config", help="Path to eval config YAML")
+    parser.add_argument(
+        "--connection",
+        default=os.getenv("SNOWFLAKE_CONNECTION_NAME"),
+        help="Snowflake connection name (from connections.toml)",
+    )
+    parser.add_argument(
+        "--account",
+        default=os.getenv("SNOWFLAKE_ACCOUNT"),
+        help="Snowflake account (alternative to --connection)",
+    )
+    parser.add_argument(
+        "--user",
+        default=os.getenv("SNOWFLAKE_USER"),
+        help="Snowflake user (used with --account)",
+    )
+    parser.add_argument(
+        "--private-key-path",
+        default=os.getenv("SNOWFLAKE_PRIVATE_KEY_PATH"),
+        help="Path to private key file (used with --account)",
+    )
+    parser.add_argument("--dry-run", action="store_true", help="Show plan without executing")
+    parser.add_argument("--resolve-only", action="store_true", help="Resolve dynamic ground truth and print results (no eval)")
+    parser.add_argument("--status", action="store_true", help="Check status of last run")
+    parser.add_argument("--results", action="store_true", help="Show results of last run")
+    parser.add_argument("--run-name", help="Override run name (default: auto-generated)")
+    parser.add_argument("--category", help="Filter questions by category")
+    parser.add_argument("--tag", action="append", dest="tags", help="Filter questions by tag (repeatable)")
+    parser.add_argument("--no-wait", action="store_true", help="Start evaluation and exit without polling")
+    parser.add_argument("--poll-interval", type=int, default=POLL_INTERVAL_SECONDS, help=f"Seconds between status polls (default: {POLL_INTERVAL_SECONDS})")
+    parser.add_argument("--env", choices=["dev", "staging", "prod"], help="Load environment config from agents/environments/<env>.yml")
+
+    args = parser.parse_args()
+    config = load_config(args.config)
+    config["_config_path"] = args.config
+
+    env_config = None
+    if args.env:
+        env_config = load_env_config(args.env)
+        deploy = env_config.get("deployment", {})
+        suffix = (env_config.get("agent", {}).get("name_suffix", "")
+                  or env_config.get("settings", {}).get("version_suffix", ""))
+        if deploy.get("database"):
+            config["agent"]["database"] = deploy["database"]
+        if deploy.get("schema"):
+            config["agent"]["schema"] = deploy["schema"]
+        if suffix:
+            base_name = config["agent"]["name"]
+            if not base_name.endswith(suffix.upper()):
+                config["agent"]["name"] = base_name + suffix.upper()
+        if deploy.get("warehouse"):
+            config.setdefault("snowflake", {})["warehouse"] = deploy["warehouse"]
+
+    agent = config["agent"]
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_name = args.run_name or f"{agent['name'].lower()}_eval_{timestamp}"
+    dataset_name = f"{agent['database']}.{agent['schema']}.{agent['name']}_EVAL_DS_{timestamp}"
+    stage = config["snowflake"]["stage"]
+    sf_yaml_filename = f"{agent['name'].lower()}_eval_{timestamp}.yaml"
+    thresholds = config.get("thresholds", {})
+
+    dataset_relative = config["dataset"].get("questions", config["dataset"].get("local_csv", ""))
+    dataset_path = resolve_dataset_path(args.config, dataset_relative)
+
+    questions = load_questions(dataset_path, category=args.category, tags=args.tags)
+
+    if args.dry_run:
+        print("=== DRY RUN ===\n")
+        print(f"Config:     {args.config}")
+        print(f"Agent:      {agent['database']}.{agent['schema']}.{agent['name']}")
+        print(f"Dataset:    {dataset_path}")
+        print(f"Table:      {config['dataset']['snowflake_table']}")
+        print(f"Stage:      {stage}")
+        print(f"Run name:   {run_name}")
+        print(f"SF Dataset: {dataset_name}")
+        print(f"Metrics:    {[m if isinstance(m, str) else m['name'] for m in config.get('metrics', [])]}")
+        if args.category:
+            print(f"Category:   {args.category}")
+        if args.tags:
+            print(f"Tags:       {args.tags}")
+
+        categories = {}
+        for q in questions:
+            cat = q.get("category", "uncategorized")
+            categories.setdefault(cat, []).append(q)
+
+        print(f"\nQuestions ({len(questions)}):")
+        dynamic_count = sum(1 for q in questions if q.get("validation_query"))
+        static_count = len(questions) - dynamic_count
+        print(f"  ({dynamic_count} dynamic via validation_query, {static_count} static)")
+        for cat, qs in sorted(categories.items()):
+            print(f"\n  [{cat}] ({len(qs)} questions)")
+            for i, q in enumerate(qs, 1):
+                tools = ", ".join(q.get("expected_tools", [])) or "—"
+                tt = q.get("test_type", "in_scope")
+                gt_type = "dynamic" if q.get("validation_query") else "static"
+                print(f"    {i}. [{tt}] [{gt_type}] {q['question'][:55]}")
+                print(f"       Tools: {tools}")
+
+        print("\nGenerated Snowflake YAML:")
+        print("-" * 40)
+        print(generate_snowflake_yaml(config, dataset_name))
+        return
+
+    conn = _connect(args, env_config=env_config)
+    cursor = conn.cursor()
+
+    try:
+        wh = config.get("snowflake", {}).get("warehouse")
+        if wh:
+            cursor.execute(f"USE WAREHOUSE {wh}")
+
+        if args.resolve_only:
+            cursor.execute(f"USE DATABASE {agent['database']}")
+            cursor.execute(f"USE SCHEMA {agent['schema']}")
+            print("=== RESOLVE DYNAMIC GROUND TRUTH ===\n")
+            questions = resolve_dynamic_ground_truth(cursor, questions)
+            for i, q in enumerate(questions, 1):
+                gt_type = "DYNAMIC" if q.get("validation_query") else "STATIC"
+                print(f"\n{i}. [{gt_type}] {q['question']}")
+                print(f"   Ground truth: {q['ground_truth'][:120]}")
+            return
+
+        if args.status:
+            cursor.execute(f"USE DATABASE {agent['database']}")
+            cursor.execute(f"USE SCHEMA {agent['schema']}")
+            cursor.execute(f"LIST @{stage}")
+            files = [r[0] for r in cursor.fetchall()]
+            yaml_files = [f for f in files if f.endswith(".yaml")]
+            if not yaml_files:
+                print("No evaluation configs found on stage.")
+                return
+            latest = sorted(yaml_files)[-1]
+            fname = latest.split("/")[-1]
+            rn = args.run_name or fname.replace(".yaml", "")
+            check_status(cursor, rn, stage, fname)
+            return
+
+        if args.results:
+            cursor.execute(f"USE DATABASE {agent['database']}")
+            cursor.execute(f"USE SCHEMA {agent['schema']}")
+            cursor.execute(f"LIST @{stage}")
+            files = [r[0] for r in cursor.fetchall()]
+            yaml_files = sorted([f for f in files if f.endswith(".yaml")])
+            if not yaml_files:
+                print("No evaluation configs found on stage.")
+                return
+            latest = yaml_files[-1]
+            fname = latest.split("/")[-1]
+            rn = args.run_name or fname.replace(".yaml", "")
+            show_results(cursor, config, rn, category=args.category)
+            return
+
+        if not questions:
+            print("Error: No questions found (check dataset path, category, or tag filters)")
+            sys.exit(1)
+
+        print(f"=== Evaluating {agent['name']} ===\n")
+
+        cursor.execute(f"USE DATABASE {agent['database']}")
+        cursor.execute(f"USE SCHEMA {agent['schema']}")
+
+        print("1. Resolving dynamic ground truth...")
+        questions = resolve_dynamic_ground_truth(cursor, questions)
+
+        print("\n2. Loading questions into Snowflake...")
+        load_questions_to_snowflake(
+            cursor, questions, config["dataset"]["snowflake_table"]
+        )
+
+        print("\n3. Setting up stage...")
+        ensure_stage(cursor, config)
+
+        print("\n4. Generating and uploading Snowflake YAML...")
+        sf_yaml = generate_snowflake_yaml(config, dataset_name)
+        upload_yaml(cursor, sf_yaml, stage, sf_yaml_filename)
+
+        print("\n5. Starting evaluation...")
+        start_eval(cursor, run_name, stage, sf_yaml_filename)
+
+        conn_args = ""
+        if args.connection:
+            conn_args = f"--connection {args.connection}"
+        elif args.account:
+            conn_args = f"--account {args.account} --user {args.user} --private-key-path {args.private_key_path}"
+
+        if args.no_wait:
+            print(f"\n  --no-wait: evaluation started. Check later with:")
+            print(f"  python scripts/run_eval.py {args.config} --status --run-name {run_name} {conn_args}")
+            return
+
+        print(f"\n6. Polling every {args.poll_interval}s (max {MAX_POLL_ATTEMPTS} attempts)...")
+        final_status = poll_until_done(cursor, run_name, stage, sf_yaml_filename, poll_interval=args.poll_interval)
+
+        if "FAILED" in final_status or "TIMEOUT" in final_status:
+            print(f"\n  Evaluation did not complete: {final_status}")
+            errors = fetch_errors(cursor, agent, run_name)
+            if errors:
+                print(f"\n  Errors/warnings ({len(errors)}):")
+                for e in errors[:5]:
+                    print(f"    {e}")
+            sys.exit(1)
+
+        print("\n7. Fetching results...")
+        results = fetch_results(cursor, agent, run_name)
+        summary = compute_summary(results)
+
+        n_records = len({r.get("record_id") for r in results if r.get("record_id")})
+        print(f"\n{'=' * 60}")
+        print(f"EVALUATION RESULTS — {agent['name']}")
+        print(f"Run: {run_name}  |  Records: {n_records}")
+        print(f"{'=' * 60}")
+        for metric, stats in sorted(summary.items()):
+            print(f"  {metric:25s} {stats['avg']:.3f}  (n={stats['n']:3d})")
+
+        errors = fetch_errors(cursor, agent, run_name)
+        if errors:
+            print(f"\n  Errors/warnings: {len(errors)}")
+            for e in errors[:3]:
+                print(f"    {e}")
+
+        passed = True
+        if thresholds:
+            print(f"\n{'=' * 60}")
+            print("THRESHOLD CHECK")
+            print(f"{'=' * 60}")
+            passed = check_thresholds(summary, thresholds)
+            overall = "PASSED" if passed else "FAILED"
+            print(f"\n  Overall: {overall}")
+
+        output_file = save_results_json(config, run_name, summary, results, thresholds, passed)
+        print(f"  Results saved: {output_file}")
+
+        show_results(cursor, config, run_name, category=args.category)
+
+        sys.exit(0 if passed else 1)
+
+    finally:
+        cursor.close()
+        conn.close()
+
+
+if __name__ == "__main__":
+    main()

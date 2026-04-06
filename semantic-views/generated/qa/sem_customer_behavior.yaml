@@ -1,0 +1,192 @@
+name: sem_customer_behavior
+description: "Customer behavior semantic view for visit cadence, persona mix, and loyalty analysis"
+tables:
+  - name: DIM_CUSTOMER
+    synonyms:
+      - customers
+      - guest_profiles
+    description: "Customer persona, geography, and pass attributes"
+    base_table:
+      database: AM_SKI_RESORT_QA
+      schema: MARTS
+      table: DIM_CUSTOMER
+    primary_key:
+      columns:
+        - CUSTOMER_KEY
+    dimensions:
+      - name: AGE_GROUP
+        description: Age group band
+        expr: AGE_GROUP
+        data_type: VARCHAR(11)
+      - name: CUSTOMER_SEGMENT
+        synonyms:
+          - persona
+        description: Customer persona classification
+        expr: CUSTOMER_SEGMENT
+        data_type: VARCHAR(50)
+      - name: IS_PASS_HOLDER
+        description: Indicates pass ownership
+        expr: IS_PASS_HOLDER
+        data_type: BOOLEAN
+      - name: PASS_TYPE
+        synonyms:
+          - product_code
+        description: Pass or ticket product held
+        expr: PASS_TYPE
+        data_type: VARCHAR(20)
+      - name: STATE
+        synonyms:
+          - home_state
+        description: Home state for the guest
+        expr: STATE
+        data_type: VARCHAR(10)
+  - name: DIM_DATE
+    synonyms:
+      - calendar
+      - ski_calendar
+    description: Calendar dimension with ski-season classifications
+    base_table:
+      database: AM_SKI_RESORT_QA
+      schema: MARTS
+      table: DIM_DATE
+    primary_key:
+      columns:
+        - DATE_KEY
+    dimensions:
+      - name: FULL_DATE
+        synonyms:
+          - date
+        description: Date of the visit
+        expr: FULL_DATE
+        data_type: DATE
+      - name: IS_HOLIDAY
+        description: Holiday indicator
+        expr: IS_HOLIDAY
+        data_type: BOOLEAN
+      - name: IS_WEEKEND
+        description: Weekend flag from the calendar dimension
+        expr: IS_WEEKEND
+        data_type: BOOLEAN
+      - name: SKI_SEASON
+        synonyms:
+          - season
+        description: Ski season identifier (YYYY-YYYY)
+        expr: SKI_SEASON
+        data_type: VARCHAR(16777216)
+      - name: SNOW_CONDITION
+        description: Snow surface quality classification
+        expr: SNOW_CONDITION
+        data_type: VARCHAR(9)
+      - name: WEEK_OF_SEASON
+        description: Week number within the ski season
+        expr: WEEK_OF_SEASON
+        data_type: "NUMBER(17,0)"
+  - name: FACT_PASS_USAGE
+    synonyms:
+      - pass_usage
+      - skier_days
+    description: Daily pass usage fact capturing lift activity and time on mountain
+    base_table:
+      database: AM_SKI_RESORT_QA
+      schema: MARTS
+      table: FACT_PASS_USAGE
+    primary_key:
+      columns:
+        - USAGE_KEY
+    facts:
+      - name: HOURS_ON_MOUNTAIN
+        description: Hours spent on mountain for the visit
+        expr: HOURS_ON_MOUNTAIN
+        data_type: "NUMBER(5,2)"
+        access_modifier: public_access
+      - name: IS_WEEKEND
+        description: Indicates if the visit fell on a weekend
+        expr: IS_WEEKEND
+        data_type: BOOLEAN
+        access_modifier: public_access
+      - name: TOTAL_LIFT_RIDES
+        description: Lift rides taken during the visit day
+        expr: TOTAL_LIFT_RIDES
+        data_type: "NUMBER(38,0)"
+        access_modifier: public_access
+    metrics:
+      - name: AVERAGE_HOURS_PER_VISIT
+        description: Average hours on mountain per visit
+        expr: |-
+          DIV0(
+                  SUM(FACT_PASS_USAGE.HOURS_ON_MOUNTAIN),
+                  NULLIF(COUNT(FACT_PASS_USAGE.USAGE_KEY), 0)
+              )
+        access_modifier: public_access
+      - name: AVERAGE_LIFT_RIDES_PER_VISIT
+        description: Average lift rides per visit
+        expr: |-
+          DIV0(
+                  SUM(FACT_PASS_USAGE.TOTAL_LIFT_RIDES),
+                  NULLIF(COUNT(FACT_PASS_USAGE.USAGE_KEY), 0)
+              )
+        access_modifier: public_access
+      - name: PASS_HOLDER_VISITS
+        description: Visits attributable to pass holders
+        expr: COUNT(CASE WHEN DIM_CUSTOMER.IS_PASS_HOLDER THEN 1 END)
+        access_modifier: public_access
+      - name: PASS_HOURS_TOTAL
+        description: Total hours on mountain for all visits
+        expr: SUM(FACT_PASS_USAGE.HOURS_ON_MOUNTAIN)
+        access_modifier: public_access
+      - name: PASS_RETENTION_PCT
+        description: Share of active customers who are pass holders (%)
+        expr: |-
+          DIV0(
+                  COUNT(DISTINCT CASE WHEN DIM_CUSTOMER.IS_PASS_HOLDER THEN FACT_PASS_USAGE.CUSTOMER_KEY END),
+                  NULLIF(COUNT(DISTINCT FACT_PASS_USAGE.CUSTOMER_KEY), 0)
+              ) * 100
+        access_modifier: public_access
+      - name: TOTAL_LIFT_RIDES_SUM
+        description: Total lift rides taken across visits
+        expr: SUM(FACT_PASS_USAGE.TOTAL_LIFT_RIDES)
+        access_modifier: public_access
+      - name: TOTAL_VISITS
+        description: Total visit days recorded
+        expr: COUNT(FACT_PASS_USAGE.USAGE_KEY)
+        access_modifier: public_access
+      - name: UNIQUE_CUSTOMERS
+        description: Unique customers with activity
+        expr: COUNT(DISTINCT FACT_PASS_USAGE.CUSTOMER_KEY)
+        access_modifier: public_access
+      - name: VISITS_PER_CUSTOMER
+        description: Average visits per active customer
+        expr: |-
+          DIV0(
+                  COUNT(FACT_PASS_USAGE.USAGE_KEY),
+                  NULLIF(COUNT(DISTINCT FACT_PASS_USAGE.CUSTOMER_KEY), 0)
+              )
+        access_modifier: public_access
+      - name: WEEKEND_SHARE_PCT
+        description: Percent of visits occurring on weekends
+        expr: |-
+          DIV0(
+                  COUNT(CASE WHEN DIM_DATE.IS_WEEKEND THEN 1 END),
+                  NULLIF(COUNT(FACT_PASS_USAGE.USAGE_KEY), 0)
+              ) * 100
+        access_modifier: public_access
+      - name: WEEKEND_VISITS
+        description: Visits occurring on weekends
+        expr: COUNT(CASE WHEN DIM_DATE.IS_WEEKEND THEN 1 END)
+        access_modifier: public_access
+relationships:
+  - name: PASS_USAGE_TO_CUSTOMER
+    left_table: FACT_PASS_USAGE
+    right_table: DIM_CUSTOMER
+    relationship_columns:
+      - left_column: CUSTOMER_KEY
+        right_column: CUSTOMER_KEY
+  - name: PASS_USAGE_TO_DATE
+    left_table: FACT_PASS_USAGE
+    right_table: DIM_DATE
+    relationship_columns:
+      - left_column: DATE_KEY
+        right_column: DATE_KEY
+module_custom_instructions:
+  sql_generation: "Filter seasonal analyses with DIM_DATE.SKI_SEASON; use DIM_DATE.FULL_DATE with DATE_TRUNC or DATEADD for calendar windows. Use DIM_DATE.IS_WEEKEND or FACT_PASS_USAGE.IS_WEEKEND to split weekend versus weekday behavior instead of recalculating flags. Aggregate visit metrics from FACT_PASS_USAGE and guard any division with DIV0(...). Break down personas with DIM_CUSTOMER.CUSTOMER_SEGMENT, STATE, and PASS_TYPE rather than ad-hoc string filters. When profiling specific cohorts, join only the declared tables and apply explicit filters (for example DIM_CUSTOMER.IS_PASS_HOLDER = TRUE) before aggregating."
+  question_categorization: "Route lift wait or terrain utilization questions to AM_SKI_RESORT_QA.SEMANTIC.SEM_OPERATIONS. Route revenue, pricing, or transaction questions to AM_SKI_RESORT_QA.SEMANTIC.SEM_REVENUE. Route pass value, ROI, or renewal questions to AM_SKI_RESORT_QA.SEMANTIC.SEM_PASSHOLDER_ANALYTICS. If a request references a specific guest without a CUSTOMER_ID or clear customer name, ask the user to supply that identifier before proceeding. Clarify whether the user wants day visitors, pass holders, or all guests when the persona scope is unclear. When no time frame is provided, default to the current SKI_SEASON and confirm with the user."

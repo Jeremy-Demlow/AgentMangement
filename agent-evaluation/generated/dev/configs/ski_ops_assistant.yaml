@@ -1,0 +1,28 @@
+# ============================================================================
+# SKI_OPS_ASSISTANT Evaluation Config
+# ============================================================================
+agent:
+  name: "SKI_OPS_ASSISTANT"
+  database: "AM_SKI_RESORT_DEV"
+  schema: "AGENTS"
+
+dataset:
+  questions: "datasets/ski_ops_assistant_eval.yaml"
+  snowflake_table: "AM_SKI_RESORT_DEV.AGENTS.SKI_OPS_ASSISTANT_EVAL_DATA"
+
+snowflake:
+  stage: "AM_SKI_RESORT_DEV.AGENTS.eval_config_stage"
+  file_format: "AM_SKI_RESORT_DEV.AGENTS.yaml_file_format"
+  warehouse: "AM_SKI_RESORT_WH_DEV"
+
+evaluation:
+  label: "SKI_OPS_ASSISTANT evaluation"
+  description: "Answer correctness + logical consistency across 4 operational tools"
+
+thresholds:
+  answer_correctness: 0.70
+  logical_consistency: 0.80
+
+metrics:
+  - "answer_correctness"
+  - "logical_consistency"

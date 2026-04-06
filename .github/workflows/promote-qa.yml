@@ -1,0 +1,175 @@
+name: Promote to QA
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_create:
+        description: 'Force CREATE OR REPLACE for agents (destroys eval history)'
+        required: false
+        default: 'false'
+        type: boolean
+      skip_eval:
+        description: 'Skip evaluation gate (emergency only)'
+        required: false
+        default: 'false'
+        type: boolean
+
+env:
+  SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+  SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+  SNOWFLAKE_PRIVATE_KEY_PATH: /tmp/snowflake_key.p8
+  SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+  SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+  PYTHONPATH: ${{ github.workspace }}
+
+jobs:
+  pre-flight:
+    name: Pre-flight Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install pyyaml jinja2 snowflake-connector-python cryptography
+
+      - name: Write private key
+        run: echo "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/snowflake_key.p8
+
+      - name: Validate specs for QA
+        run: python -m agent_management.validate_specs --env qa --remote
+
+      - name: Schema drift check
+        run: python -m agent_management.detect_drift --env qa
+
+      - name: Dry-run deployments
+        run: |
+          python -m agent_management.deploy_semantic_views --env qa --dry-run
+          python -m agent_management.deploy_agents --env qa --dry-run
+
+      - name: Cleanup
+        if: always()
+        run: rm -f /tmp/snowflake_key.p8
+
+  snapshot:
+    name: Snapshot QA State
+    runs-on: ubuntu-latest
+    needs: pre-flight
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install pyyaml jinja2 snowflake-connector-python cryptography
+
+      - name: Write private key
+        run: echo "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/snowflake_key.p8
+
+      - name: Snapshot current QA state
+        run: python -m agent_management.snapshot_state --env qa
+
+      - name: Upload snapshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-pre-deploy-snapshot
+          path: |
+            agents/snapshots/qa/
+            semantic-views/snapshots/qa/
+          retention-days: 90
+
+      - name: Cleanup
+        if: always()
+        run: rm -f /tmp/snowflake_key.p8
+
+  deploy:
+    name: Deploy to QA
+    runs-on: ubuntu-latest
+    needs: snapshot
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install pyyaml jinja2 snowflake-connector-python cryptography
+
+      - name: Write private key
+        run: echo "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/snowflake_key.p8
+
+      - name: Run dbt build (if dbt project exists)
+        if: hashFiles('dbt_ski_resort/dbt_project.yml') != ''
+        env:
+          DBT_TARGET: qa
+          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+        run: |
+          pip install dbt-snowflake
+          cd dbt_ski_resort
+          dbt deps
+          dbt build --target qa --select "marts.facts" --profiles-dir .
+          dbt build --target qa --select "marts.semantic" --profiles-dir .
+
+      - name: Deploy semantic views to QA
+        run: python -m agent_management.deploy_semantic_views --env qa
+
+      - name: Deploy agents to QA
+        run: |
+          FORCE_FLAG=""
+          if [ "${{ inputs.force_create }}" = "true" ]; then
+            FORCE_FLAG="--force-create"
+          fi
+          python -m agent_management.deploy_agents --env qa $FORCE_FLAG
+
+      - name: Cleanup
+        if: always()
+        run: rm -f /tmp/snowflake_key.p8
+
+  eval-gate:
+    name: Evaluation Gate
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: inputs.skip_eval != 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install pyyaml jinja2 snowflake-connector-python cryptography requests
+
+      - name: Write private key
+        run: echo "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/snowflake_key.p8
+
+      - name: Run agent evaluations
+        run: |
+          for config in agent-evaluation/configs/*.yaml; do
+            echo "=== Evaluating $(basename $config) ==="
+            python agent-evaluation/run_eval.py "$config" --env qa || true
+          done
+
+      - name: Check thresholds (strict)
+        run: python -m agent_management.compute_metrics --env qa --results-dir agent-evaluation/results/ --strict
+
+      - name: Upload evaluation results
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-evaluation-results
+          path: agent-evaluation/results/
+          retention-days: 90
+
+      - name: Cleanup
+        if: always()
+        run: rm -f /tmp/snowflake_key.p8

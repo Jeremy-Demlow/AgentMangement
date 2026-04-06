@@ -1,0 +1,22 @@
+location_id,location_name,location_type,venue_size,seating_capacity,elevation_zone
+LOC001,Base Lodge Rental,rental_shop,Large,0,Base
+LOC002,Mid Mountain Rental,rental_shop,Medium,0,Mid
+LOC003,West Village Rental,rental_shop,Large,0,Base
+LOC004,Summit Rental,rental_shop,Small,0,Summit
+LOC005,Kids Rental Center,rental_shop,Medium,0,Base
+LOC006,Performance Demo,rental_shop,Small,0,Base
+LOC007,Base Lodge Cafeteria,food_beverage,Large,400,Base
+LOC008,Summit Restaurant,food_beverage,Medium,150,Summit
+LOC009,Mid Mountain BBQ,food_beverage,Medium,200,Mid
+LOC010,West Village Grill,food_beverage,Medium,180,Base
+LOC011,Après Ski Bar,food_beverage,Small,80,Base
+LOC012,Summit Bar,food_beverage,Small,60,Summit
+LOC013,Quick Bites - Base,food_beverage,Small,50,Base
+LOC014,Quick Bites - Mid,food_beverage,Small,40,Mid
+LOC015,Coffee Hut - Base,food_beverage,Small,30,Base
+LOC016,Coffee Hut - Summit,food_beverage,Small,25,Summit
+LOC017,Main Ticket Window,ticket_window,Large,0,Base
+LOC018,West Ticket Window,ticket_window,Medium,0,Base
+LOC019,Online Sales,ticket_window,Virtual,0,Virtual
+LOC020,Kiosk - Parking,ticket_window,Small,0,Base
+LOC021,Group Sales Office,ticket_window,Medium,0,Base
