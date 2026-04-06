@@ -1,4 +1,4 @@
-"""Check semantic view evaluation results via GET_ANALYST_AI_EVALUATION_DATA.
+"""Check semantic view evaluation results via GET_AI_EVALUATION_DATA.
 
 Queries Snowflake for SV eval results, computes SQL correctness score,
 and checks against thresholds.
@@ -22,7 +22,7 @@ def get_sv_eval_data(cur, database: str, schema: str, sv_name: str, run_name: st
     try:
         cur.execute(f"""
             SELECT *
-            FROM TABLE(SNOWFLAKE.LOCAL.GET_ANALYST_AI_EVALUATION_DATA(
+            FROM TABLE(SNOWFLAKE.LOCAL.GET_AI_EVALUATION_DATA(
                 '{database}', '{schema}', '{sv_name}', 'SEMANTIC VIEW', '{run_name}'
             ))
         """)
