@@ -53,15 +53,24 @@ jobs:
     env:
       SNOWFLAKE_CONNECTIONS_DEFAULT_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
       SNOWFLAKE_CONNECTIONS_DEFAULT_USER: ${{ secrets.SNOWFLAKE_USER }}
-      SNOWFLAKE_CONNECTIONS_DEFAULT_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+      SNOWFLAKE_CONNECTIONS_DEFAULT_AUTHENTICATOR: SNOWFLAKE_JWT
+      SNOWFLAKE_CONNECTIONS_DEFAULT_PRIVATE_KEY_PATH: /tmp/snowflake_key.p8
       SNOWFLAKE_CONNECTIONS_DEFAULT_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
       SNOWFLAKE_CONNECTIONS_DEFAULT_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+      SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+      SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+      SNOWFLAKE_PRIVATE_KEY_PATH: /tmp/snowflake_key.p8
+      SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+      SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+
+      - name: Write private key
+        run: echo "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/snowflake_key.p8
 
       - name: Load Project Config
         id: config
@@ -257,7 +266,7 @@ jobs:
         env:
           SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
           SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
-          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+          SNOWFLAKE_PRIVATE_KEY_PATH: /tmp/snowflake_key.p8
           SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
           SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
           SNOWFLAKE_DATABASE: ${{ steps.config.outputs.prod_database }}
@@ -284,14 +293,10 @@ jobs:
 
       - name: Install DBT Dependencies
         working-directory: dbt_ski_resort
-        env:
-          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
         run: dbt deps
 
       - name: Run DBT Fact Tables
         working-directory: dbt_ski_resort
-        env:
-          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
         run: |
           if [ "${{ github.event.inputs.full_refresh }}" = "true" ]; then
             echo "Full refresh requested - rebuilding all fact tables..."
@@ -302,8 +307,6 @@ jobs:
 
       - name: Run DBT Semantic Views
         working-directory: dbt_ski_resort
-        env:
-          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
         run: dbt run --select "marts.semantic"
 
       # ─── Verification ───────────────────────────────────────────────────
@@ -380,3 +383,7 @@ jobs:
           echo "- \`rebuild_from_date\`: Regenerate from a specific date" >> $GITHUB_STEP_SUMMARY
           echo "- \`full_refresh\`: Rebuild all DBT fact tables" >> $GITHUB_STEP_SUMMARY
           echo "- \`clear_raw_data\`: Delete and regenerate raw data" >> $GITHUB_STEP_SUMMARY
+
+      - name: Cleanup
+        if: always()
+        run: rm -f /tmp/snowflake_key.p8

@@ -1,210 +1,154 @@
-# Daily Data Pipeline Setup
+# GitHub Actions Pipeline Setup
 
-This guide explains how to set up the automated daily data refresh pipeline.
+Complete setup guide for all CI/CD workflows in this repository.
 
-## Overview
+## Required GitHub Secrets
 
-The pipeline runs daily at **5am PST** and uses the **official Snowflake CLI GitHub Action** ([snowflakedb/snowflake-cli-action](https://github.com/snowflakedb/snowflake-cli-action)):
+Go to **Settings → Secrets and variables → Actions** and add these repository secrets:
 
-1. 🔧 Sets up Snowflake CLI (official action)
-2. 📊 Generates incremental ski resort data for the current date
-3. 🏗️ Runs DBT fact tables (incremental)
-4. 🎯 Refreshes semantic views
-5. ✅ Verifies the data was loaded correctly
+| Secret | Used By | Description | Example |
+|--------|---------|-------------|---------|
+| `SNOWFLAKE_ACCOUNT` | All workflows | Snowflake account identifier | `trb65519` |
+| `SNOWFLAKE_USER` | All workflows | Service account or user | `JDEMLOW` |
+| `SNOWFLAKE_PRIVATE_KEY` | All except dcm-deploy | PEM-encoded private key (the full file contents, including `-----BEGIN/END-----` headers) | See [Key Pair Auth](#key-pair-auth) |
+| `SNOWFLAKE_PRIVATE_KEY_RAW` | dcm-deploy | Same key but used by DCM actions (separate secret name required by the Snowflake DCM reusable actions) | Same value as `SNOWFLAKE_PRIVATE_KEY` |
+| `SNOWFLAKE_WAREHOUSE` | All except dcm-deploy | Default compute warehouse | `AM_SKI_RESORT_WH_PROD` |
+| `SNOWFLAKE_ROLE` | All except dcm-deploy | Role for CI/CD operations | `AM_DEPLOY_ROLE_PROD` |
 
-## GitHub Actions Secrets Required
+### Quick Setup via Scripts
 
-Go to **Settings → Secrets and variables → Actions** in your repository and add:
+Automated scripts live in `.github/scripts/`. Each script documents exactly what it creates and why.
 
-| Secret Name | Description | Example |
-|-------------|-------------|---------|
-| `SNOWFLAKE_ACCOUNT` | Snowflake account identifier | `trb65519` |
-| `SNOWFLAKE_USER` | Service account username | `jd_service_account_admin` |
-| `SNOWFLAKE_PASSWORD` | Password or PAT token | `eyJ...` |
-| `SNOWFLAKE_WAREHOUSE` | Compute warehouse | `COMPUTE_WH` |
-| `SNOWFLAKE_ROLE` | Role with write access | `SYSADMIN` |
-
-## Setting Up Secrets
-
-### Option 1: Via GitHub UI
-1. Go to your repository on GitHub
-2. Click **Settings** → **Secrets and variables** → **Actions**
-3. Click **New repository secret**
-4. Add each secret listed above
-
-### Option 2: Via GitHub CLI
 ```bash
-# Install gh CLI if needed: brew install gh
+# 1. Set all 6 secrets (account, user, key x2, warehouse, role)
+.github/scripts/setup_github_secrets.sh
 
-gh secret set SNOWFLAKE_ACCOUNT --body "trb65519"
-gh secret set SNOWFLAKE_USER --body "jd_service_account_admin"
-gh secret set SNOWFLAKE_PASSWORD --body "your-pat-or-password"
-gh secret set SNOWFLAKE_WAREHOUSE --body "COMPUTE_WH"
-gh secret set SNOWFLAKE_ROLE --body "SYSADMIN"
+# 2. Create all 4 GitHub environments (DEV, QA, PROD, production)
+.github/scripts/setup_github_environments.sh
 ```
 
-## Manual Trigger
+To tear everything down and start fresh:
 
-You can manually run the pipeline anytime:
-
-### Via GitHub UI
-1. Go to **Actions** → **Daily Data Refresh**
-2. Click **Run workflow**
-3. Optionally configure:
-   - **Days**: Number of days to generate (default: 1)
-   - **Full refresh**: Force rebuild of fact tables
-
-### Via GitHub CLI
 ```bash
-# Run with defaults
-gh workflow run daily_data_refresh.yml
-
-# Run with options
-gh workflow run daily_data_refresh.yml \
-  -f days=3 \
-  -f full_refresh=true
+.github/scripts/teardown.sh
 ```
 
-## Schedule
+#### What the scripts create
 
-- **Cron**: `0 13 * * *` (1pm UTC = 5am PST)
-- **Timezone Note**: GitHub Actions uses UTC
-  - PST (Nov-Mar): UTC-8 → 5am PST = 1pm UTC
-  - PDT (Mar-Nov): UTC-7 → 5am PDT = 12pm UTC
+| Script | What it does |
+|--------|-------------|
+| `setup_github_secrets.sh` | Sets 6 repo secrets: `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, `SNOWFLAKE_PRIVATE_KEY`, `SNOWFLAKE_PRIVATE_KEY_RAW`, `SNOWFLAKE_WAREHOUSE`, `SNOWFLAKE_ROLE`. Reads the private key from `~/.snowflake/keys/snowflake_tf_key.p8`. No password needed — all workflows use key-pair (JWT) auth. |
+| `setup_github_environments.sh` | Creates 4 GitHub environments: `DEV`, `QA`, `PROD` (no protection), `production` (requires repo owner approval before prod promote runs). |
+| `teardown.sh` | Deletes all 6 secrets and all 4 environments. Use to reset before re-running setup. |
 
-To change the schedule, edit `.github/workflows/daily_data_refresh.yml`:
+All scripts support overrides via environment variables (see script headers for details):
+
+```bash
+SNOWFLAKE_KEY_PATH=~/alt_key.p8 GH_REPO=myorg/myrepo .github/scripts/setup_github_secrets.sh
+```
+
+## Required GitHub Environments
+
+The `promote-prod.yml` and `dcm-deploy.yml` workflows use [GitHub Environments](https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment) for approval gates.
+
+Go to **Settings → Environments** and create:
+
+| Environment | Purpose | Recommended Settings |
+|-------------|---------|---------------------|
+| `DEV` | DCM deploys to dev | No protection rules needed |
+| `QA` | DCM deploys to QA | Optional: require reviewer |
+| `PROD` | DCM deploys to prod | Optional: require reviewer |
+| `production` | Prod promote pre-flight check | **Required reviewers** (1+), prevents accidental prod deploys |
+
+The `production` environment is referenced by `promote-prod.yml` → `pre-flight` job. Without it, the workflow will fail with a "deployment protection rule" error. If you don't want manual approval, create the environment with no protection rules.
+
+## Key Pair Auth
+
+All deploy/promote/validate workflows use key-pair (JWT) authentication. The workflow writes the key to a temp file, uses it, then cleans up:
+
 ```yaml
-on:
-  schedule:
-    - cron: '0 13 * * *'  # Change this
+- name: Write private key
+  run: echo "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/snowflake_key.p8
+
+- name: Cleanup
+  if: always()
+  run: rm -f /tmp/snowflake_key.p8
 ```
 
-## Monitoring
+To generate a key pair if you don't have one:
 
-### Check Run Status
-- Go to **Actions** tab in GitHub
-- View recent workflow runs
-- Check logs for any failures
-
-### Failure Notifications
-When the pipeline fails, it automatically:
-1. Creates a GitHub Issue with `bug` and `data-pipeline` labels
-2. Links to the failed run for debugging
-
-### View Job Summary
-Each successful run creates a summary with:
-- Timestamp
-- Steps completed
-- Data verification results
-
-## Troubleshooting
-
-### Common Issues
-
-**Authentication Failed**
-```
-Error: 250001 (08001): Failed to connect to DB
-```
-→ Check `SNOWFLAKE_PASSWORD` secret is correct
-
-**Permission Denied**
-```
-Error: SQL access control error
-```
-→ Verify `SNOWFLAKE_ROLE` has write access to `SKI_RESORT_DB.RAW`
-
-**DBT Model Fails**
-```
-SQL compilation error: cannot change column type
-```
-→ Run with `full_refresh=true` to rebuild tables
-
-### Debug Locally
 ```bash
-# Test data generation
-cd data_generation
-python generate_daily_increment.py --date $(date +%Y-%m-%d) --days 1
+# Generate unencrypted private key
+openssl genrsa 2048 | openssl pkcs8 -topk8 -inform PEM -out snowflake_tf_key.p8 -nocrypt
 
-# Test DBT
-cd dbt_ski_resort
-dbt run --select "marts.facts" --full-refresh
-dbt run --select "marts.semantic"
+# Extract public key
+openssl rsa -in snowflake_tf_key.p8 -pubout -out snowflake_tf_key.pub
+
+# Assign to Snowflake user
+# In Snowflake:
+#   ALTER USER JDEMLOW SET RSA_PUBLIC_KEY='<contents of .pub file without headers>';
 ```
 
-## Architecture
+The secret value should be the **entire file contents** of the `.p8` file, including the `-----BEGIN PRIVATE KEY-----` and `-----END PRIVATE KEY-----` lines.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    GitHub Actions                            │
-│                    (5am PST Daily)                           │
-└─────────────────────────────────────────────────────────────┘
-                           │
-                           ▼
-┌─────────────────────────────────────────────────────────────┐
-│  0. snowflakedb/snowflake-cli-action@v2.0                    │
-│     - Official Snowflake CLI installation                    │
-│     - Isolated, no dependency conflicts                      │
-│     → snow connection test -x                                │
-└─────────────────────────────────────────────────────────────┘
-                           │
-                           ▼
-┌─────────────────────────────────────────────────────────────┐
-│  1. generate_daily_increment.py                              │
-│     - Weather, Visitors, Lift Scans                          │
-│     - F&B, Rentals, Tickets                                  │
-│     - Lessons, Incidents, Feedback                           │
-│     → SKI_RESORT_DB.RAW.*                                    │
-└─────────────────────────────────────────────────────────────┘
-                           │
-                           ▼
-┌─────────────────────────────────────────────────────────────┐
-│  2. dbt run --select "marts.facts"                          │
-│     - 13 incremental fact tables                             │
-│     → SKI_RESORT_DB.MARTS.FACT_*                             │
-└─────────────────────────────────────────────────────────────┘
-                           │
-                           ▼
-┌─────────────────────────────────────────────────────────────┐
-│  3. dbt run --select "marts.semantic"                       │
-│     - 11 semantic views                                      │
-│     → SKI_RESORT_DB.SEMANTIC.SEM_*                           │
-└─────────────────────────────────────────────────────────────┘
-                           │
-                           ▼
-┌─────────────────────────────────────────────────────────────┐
-│  4. snow sql -q "..." -x (verify with official CLI)          │
-│     - Verify data loaded correctly                           │
-│     - Show recent visitor counts                             │
-└─────────────────────────────────────────────────────────────┘
-                           │
-                           ▼
-┌─────────────────────────────────────────────────────────────┐
-│  Ready for Cortex Agent Queries!                             │
-│  - Slack Bot                                                 │
-│  - Snowflake Intelligence                                    │
-│  - Email Alerts                                              │
-└─────────────────────────────────────────────────────────────┘
+## Workflow Overview
+
+| Workflow | File | Trigger | Secrets Used | Env Required |
+|----------|------|---------|-------------|-------------|
+| **Validate PR** | `validate-pr.yml` | PR to `main` | ACCOUNT, USER, KEY, WH, ROLE | — |
+| **Deploy Dev** | `deploy-dev.yml` | Push to `main` (agents/SVs/envs changed) | ACCOUNT, USER, KEY, WH, ROLE | — |
+| **Promote QA** | `promote-qa.yml` | Manual dispatch | ACCOUNT, USER, KEY, WH, ROLE | — |
+| **Promote Prod** | `promote-prod.yml` | Manual dispatch | ACCOUNT, USER, KEY, WH, ROLE | `production` |
+| **Rollback** | `rollback.yml` | Manual dispatch | ACCOUNT, USER, KEY, WH, ROLE | `production` (for prod) |
+| **Daily Data Refresh** | `daily_data_refresh.yml` | Cron (5am PST) or manual | ACCOUNT, USER, KEY, WH, ROLE | — |
+| **DCM Deploy** | `dcm-deploy.yml` | Push/PR to `main` (dcm/ changed) or manual | USER, KEY_RAW | DEV/QA/PROD |
+
+## Verifying Setup
+
+After setting all secrets, test with the simplest workflow first:
+
+```bash
+# 1. Test validate-pr (doesn't modify Snowflake, just lints)
+#    Open a PR to main — the workflow should run automatically
+
+# 2. Test DCM plan (read-only)
+gh workflow run dcm-deploy.yml -f target=DEV -f plan_only=true
+
+# 3. Test deploy-dev (makes changes)
+gh workflow run deploy-dev.yml
 ```
 
-## Why Official Snowflake CLI Action?
+## Common Failures
 
-Using [snowflakedb/snowflake-cli-action](https://github.com/snowflakedb/snowflake-cli-action):
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `Failed to connect to DB: 250001` | Bad account, user, or key | Verify `SNOWFLAKE_ACCOUNT` and `SNOWFLAKE_USER`. Test key locally: `snow connection test` |
+| `Private key is not in PKCS8 format` | Key format wrong | Re-export: `openssl pkcs8 -topk8 -inform PEM -in key.pem -out key.p8 -nocrypt` |
+| `SQL access control error` | Role lacks grants | Run DCM first to create roles/grants, or use `ACCOUNTADMIN` initially |
+| `Environment 'production' not found` | Missing GH environment | Create `production` environment in Settings → Environments |
+| `SNOWFLAKE_PRIVATE_KEY_RAW not set` | DCM secret missing | Set `SNOWFLAKE_PRIVATE_KEY_RAW` (same value as `SNOWFLAKE_PRIVATE_KEY`) |
+| `dbt deps fails` | Key not written to disk | Ensure the `Write private key` step runs before dbt steps |
 
-- ✅ **Official & Maintained** - By Snowflake
-- ✅ **Isolated Installation** - No dependency conflicts
-- ✅ **Automatic Config** - Sets up `~/.snowflake/` automatically
-- ✅ **Version Pinning** - Specify exact CLI version
-- ✅ **OIDC Support** - Passwordless auth option (v3.11+)
+## Per-Environment Role/Warehouse Strategy
 
-## Cost Considerations
+The workflows currently use a single set of secrets (`SNOWFLAKE_ROLE`, `SNOWFLAKE_WAREHOUSE`) for all environments. For production setups, you may want per-environment secrets:
 
-- **GitHub Actions**: Free for public repos, 2,000 min/month for private
-- **Snowflake Compute**: ~30 seconds of warehouse time per run
-- **Storage**: ~1MB per day of incremental data
+```
+SNOWFLAKE_ROLE_DEV=AM_DEPLOY_ROLE_DEV
+SNOWFLAKE_ROLE_QA=AM_DEPLOY_ROLE_QA
+SNOWFLAKE_ROLE_PROD=AM_DEPLOY_ROLE_PROD
 
-## Next Steps
+SNOWFLAKE_WAREHOUSE_DEV=AM_SKI_RESORT_WH_DEV
+SNOWFLAKE_WAREHOUSE_QA=AM_SKI_RESORT_WH_QA
+SNOWFLAKE_WAREHOUSE_PROD=AM_SKI_RESORT_WH_PROD
+```
 
-1. Set up the secrets in GitHub
-2. Run the workflow manually to test
-3. Monitor the first few automated runs
-4. Consider adding Slack notifications for failures
+This would require updating the workflow `env:` blocks to reference the correct secret per environment. The current setup works fine when using `ACCOUNTADMIN` or a role that has access to all three databases.
+
+## Optional: Two-Environment Setup (No QA)
+
+QA is optional. To run dev → prod only:
+
+1. Don't trigger `promote-qa.yml`
+2. Optionally remove `environments/qa.env.yml` and the `qa:` block from `project.yml`
+3. Consider making dev's eval gate stricter (change `continue-on-error: true` to `false` in `deploy-dev.yml` → `sv-eval-gate`)

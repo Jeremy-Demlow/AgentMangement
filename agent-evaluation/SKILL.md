@@ -90,7 +90,7 @@ The `agent_spec` column contains a JSON object with the full agent configuration
 ```sql
 DESC AGENT <DATABASE>.<SCHEMA>.<AGENT_NAME>;
 
-SELECT 
+SELECT
     f.value:tool_spec:name::STRING AS tool_name,
     f.value:tool_spec:type::STRING AS tool_type,
     LEFT(f.value:tool_spec:description::STRING, 250) AS tool_desc
@@ -259,7 +259,7 @@ Dynamic questions use `validation_query` to generate ground truth at eval time. 
 
 **Determine data range from underlying tables:**
 ```sql
-SELECT 
+SELECT
     MIN(timestamp_column) AS earliest_data,
     MAX(timestamp_column) AS latest_data,
     COUNT(*) AS total_records
@@ -425,7 +425,7 @@ CREATE OR REPLACE TABLE <DATABASE>.<SCHEMA>.<AGENT_NAME>_EVAL (
 );
 
 INSERT INTO <DATABASE>.<SCHEMA>.<AGENT_NAME>_EVAL (input_query)
-VALUES 
+VALUES
     ('What is the most popular product?'),
     ('Show me sales trends for last month');
 ```
@@ -1088,11 +1088,11 @@ CALL EXECUTE_AI_EVALUATION(...);
 When using `COPY INTO @stage` to upload YAML, you MUST use `RECORD_DELIMITER = NONE`:
 ```sql
 -- ❌ Wrong — adds backslash escaping
-COPY INTO @stage/file.yaml FROM (SELECT '...') 
+COPY INTO @stage/file.yaml FROM (SELECT '...')
 FILE_FORMAT = (TYPE = 'CSV' FIELD_DELIMITER = NONE COMPRESSION = NONE) SINGLE = TRUE;
 
 -- ✅ Correct — preserves YAML formatting
-COPY INTO @stage/file.yaml FROM (SELECT '...') 
+COPY INTO @stage/file.yaml FROM (SELECT '...')
 FILE_FORMAT = (TYPE = 'CSV' FIELD_DELIMITER = NONE RECORD_DELIMITER = NONE COMPRESSION = NONE) SINGLE = TRUE;
 ```
 

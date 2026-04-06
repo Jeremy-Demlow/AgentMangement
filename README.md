@@ -1,12 +1,64 @@
-# Agent Management — CI/CD Reference Framework
+# Agent Management — CI/CD Reference Framework for Snowflake Cortex Agents
 
-> **Status:** Complete (v0.5.0)
-> **Owner:** Jeremy Demlow
-> **Created:** April 2026
+A production-quality CI/CD framework for managing **Snowflake Cortex Agents**, **Semantic Views**, and **dbt** as code. Define agents and semantic views in YAML, deploy through environment-parameterized pipelines, evaluate with golden question sets, and rollback from snapshots when things break.
 
-A production-quality, pip-installable CI/CD framework for managing **Snowflake Cortex Agents**, **Semantic Views**, and **dbt** as code. Define agents and semantic views in YAML, deploy through environment-parameterized GitHub Actions, evaluate with golden question sets, and rollback from snapshots when things break.
+Built as a reference implementation — fork it, swap in your domain, ship it.
 
-Built as a reference implementation for a Medium article — fork it, swap in your domain, ship it.
+## What This Repo Does
+
+```
+RAW data (12 tables)
+  → dbt transforms (23 staging views → 6 dimensions → 13 facts)
+    → 11 Semantic Views (Cortex Analyst)
+      → 2 Cortex Agents (natural language interface)
+        → Automated Evaluations (answer_correctness, logical_consistency)
+```
+
+The framework manages the full lifecycle across three environments (DEV, QA, PROD), each in its own Snowflake database. Infrastructure is provisioned by DCM. Data flows from PROD (source of truth) to DEV/QA via zero-copy clones.
+
+## Architecture at a Glance
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Git Repository                                                 │
+│                                                                 │
+│  project.yml ─── Single source of truth for names/config        │
+│       │                                                         │
+│  environments/                                                  │
+│    dev.env.yml ── Database, role, warehouse, agent name_suffix  │
+│    qa.env.yml                                                   │
+│    prod.env.yml                                                 │
+│       │                                                         │
+│  ┌────┴──────────────────────────────────────────────────┐      │
+│  │  Deploy Pipeline (order matters)                       │      │
+│  │                                                        │      │
+│  │  1. DCM         → databases, schemas, roles, grants    │      │
+│  │  2. dbt build   → staging → dims → facts → semantic    │      │
+│  │  3. Deploy SVs  → SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML│      │
+│  │  4. Deploy Agents → ALTER AGENT / CREATE AGENT         │      │
+│  │  5. Evaluate    → EXECUTE_AI_EVALUATION + thresholds   │      │
+│  └────────────────────────────────────────────────────────┘      │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│  Snowflake (single account, 3 databases)                        │
+│                                                                 │
+│  AM_SKI_RESORT_DEV          AM_SKI_RESORT_QA                    │
+│    RAW (cloned from PROD)     RAW (cloned from PROD)            │
+│    STAGING                    STAGING                            │
+│    MARTS                      MARTS                             │
+│    SEMANTIC (11 SVs)          SEMANTIC (11 SVs)                 │
+│    AGENTS                     AGENTS                            │
+│      RESORT_EXECUTIVE_DEV       RESORT_EXECUTIVE_QA             │
+│      SKI_OPS_ASSISTANT_DEV      SKI_OPS_ASSISTANT_QA            │
+│                                                                 │
+│  AM_SKI_RESORT_PROD (source of truth)                           │
+│    RAW (real data)                                              │
+│    STAGING / MARTS / SEMANTIC / AGENTS                          │
+│      RESORT_EXECUTIVE           (no suffix — canonical)         │
+│      SKI_OPS_ASSISTANT                                          │
+└─────────────────────────────────────────────────────────────────┘
+```
 
 ## Quick Start
 
@@ -28,77 +80,128 @@ agent-mgmt-deploy-svs --env dev
 agent-mgmt-deploy-agents --env dev
 ```
 
-## Two Paths for Semantic Views
+## Repository Structure
 
-This framework supports **both** approaches to deploying semantic views. Use whichever fits your team, or both together.
+```
+AgentMangement/
+│
+├── project.yml                      # Central config: databases, schemas, deployment mode
+├── pyproject.toml                   # pip install -e . (agent-mgmt 0.5.0)
+│
+├── environments/                    # Per-env config (database, role, warehouse, name_suffix)
+│   ├── dev.env.yml
+│   ├── qa.env.yml
+│   └── prod.env.yml
+│
+├── agent_management/                # Core Python library (pip-installable)
+│   ├── deploy_agents.py             #   ALTER AGENT / CREATE AGENT
+│   ├── deploy_semantic_views.py     #   SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML
+│   ├── render_template.py           #   Jinja2 env substitution
+│   ├── snapshot_state.py            #   Pre-deploy state capture
+│   ├── rollback.py                  #   Restore from snapshot
+│   ├── validate_specs.py            #   YAML lint + dry-run
+│   ├── detect_drift.py              #   Git vs Snowflake diff
+│   ├── compute_metrics.py           #   F1/precision/recall from eval
+│   ├── check_sv_eval.py             #   SV eval quality gate
+│   ├── render_eval_templates.py     #   Render eval configs per env
+│   ├── ci/                          #   CI checks (test coverage, PK tests, lineage)
+│   └── utils/
+│       ├── config.py                #   Config loading, FQN helpers, suffix resolution
+│       └── snowflake_client.py      #   Snowflake connection wrapper
+│
+├── agents/                          # Cortex Agent definitions
+│   └── specs/                       #   Jinja2 YAML templates
+│       ├── resort_executive.yml
+│       └── ski_ops_assistant.yml
+│
+├── semantic-views/                  # Semantic View definitions (standalone path)
+│   └── definitions/                 #   11 Jinja2 YAML templates
+│
+├── agent-evaluation/                # Evaluation framework (separate README)
+│   ├── scripts/run_eval.py          #   End-to-end eval runner
+│   ├── configs/                     #   One config per agent
+│   ├── datasets/                    #   Golden question sets per agent
+│   ├── metrics/                     #   Custom LLM-judge metrics
+│   └── results/                     #   JSON results from runs
+│
+├── dbt_ski_resort/                  # dbt project (separate README)
+│   └── models/
+│       ├── staging/                 #   23 type-safe views
+│       ├── marts/dimensions/        #   6 dimension tables
+│       ├── marts/facts/             #   13 fact tables (incremental)
+│       └── marts/semantic/          #   11 semantic views (dbt materialization)
+│
+├── dcm/                             # Infrastructure as Code (separate README)
+│   ├── manifest.yml                 #   DEV/QA/PROD targets
+│   └── sources/                     #   Database, schemas, roles, grants
+│
+├── data_generation/                 # Synthetic ski resort data
+│
+├── .github/workflows/               # CI/CD pipelines
+│   ├── deploy-dev.yml               #   Deploy on merge to main
+│   ├── promote-qa.yml               #   Manual promote with eval gate
+│   ├── promote-prod.yml             #   Manual promote with approval
+│   ├── validate-pr.yml              #   Lint + validate on PR
+│   ├── rollback.yml                 #   Rollback any environment
+│   ├── daily_data_refresh.yml       #   Daily data pipeline
+│   └── dcm-deploy.yml              #   DCM infrastructure deploy
+│
+├── tests/                           # Python tests (smoke + template rendering)
+├── docs/                            # Architecture, data dictionary, dev notes
+├── requirements/                    # Traceable requirements (REQ-001..013)
+└── models/                          # Data model documentation
+```
+
+## Deployment Mode
+
+Configured in `project.yml` under `deployment.mode`:
+
+| Mode | Agent Naming | Use Case |
+|------|-------------|----------|
+| `single_account` | PROD: `RESORT_EXECUTIVE` (no suffix), DEV: `RESORT_EXECUTIVE_DEV`, QA: `RESORT_EXECUTIVE_QA` | All envs in one Snowflake account |
+| `cross_account` | Same name in every account (no suffix needed) | Separate Snowflake accounts per env |
+
+In single-account mode, `name_suffix` from each environment config is appended to agent names. The agent's `display_name` in Snowsight also gets a label (e.g., `[DEV]`) via `resolve_profile()`.
+
+## Data Flow Direction
+
+PROD is the source of truth. DEV and QA clone RAW tables from PROD using zero-copy clones:
+
+```
+PROD (real data)  ──clone──>  DEV (iterate on agents/SVs)
+                  ──clone──>  QA  (validate before promoting)
+```
+
+Configured via `deployment.data_source: prod` in `project.yml`.
+
+## Two Paths for Semantic Views
 
 ### Path A: dbt-native (recommended if you have dbt)
 
-Semantic views are defined as dbt models using the `dbt_semantic_view` materialization from `Snowflake-Labs/dbt_semantic_view`. They live alongside your facts and dimensions in the dbt DAG.
-
-```
-dbt_ski_resort/models/marts/semantic/
-  sem_operations.sql          <-- {{ config(materialized='semantic_view') }}
-  sem_revenue.sql
-  sem_customer_behavior.sql
-  ... (11 total)
-  _semantic.yml               <-- model configs
-```
-
-Each dbt target points at the corresponding environment database (`AM_SKI_RESORT_DEV`, `AM_SKI_RESORT_QA`, `AM_SKI_RESORT_PROD`). Semantic views always land in the `SEMANTIC` schema.
+Semantic views live in `dbt_ski_resort/models/marts/semantic/` using the `dbt_semantic_view` materialization. Each dbt target deploys to the corresponding environment database.
 
 ```bash
-# Dev: SVs land in AM_SKI_RESORT_DEV.SEMANTIC
-dbt run --target dev --select "marts.semantic"
-
-# QA: SVs land in AM_SKI_RESORT_QA.SEMANTIC
-dbt run --target qa --select "marts.semantic"
-
-# Prod: SVs land in AM_SKI_RESORT_PROD.SEMANTIC
-dbt run --target prod --select "marts.semantic"
+dbt run --target dev --select "marts.semantic"   # → AM_SKI_RESORT_DEV.SEMANTIC
+dbt run --target prod --select "marts.semantic"  # → AM_SKI_RESORT_PROD.SEMANTIC
 ```
-
-**Why choose dbt:** dependency graph, lineage, dbt tests, single source of truth for data + semantic layer.
 
 ### Path B: Python CI/CD (works without dbt)
 
-Semantic views are defined as standalone YAML files with Jinja2 environment placeholders. Deployed via `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML`.
+Standalone YAML definitions in `semantic-views/definitions/` with Jinja2 placeholders, deployed via `agent-mgmt-deploy-svs`.
+
+Both paths produce identical Snowflake objects and can coexist.
+
+## Agent Deploy Strategy
+
+Agents are deployed using ALTER (preserves eval history) by default:
 
 ```
-semantic-views/definitions/
-  sem_operations.yaml         <-- {{ env.database }}.MARTS.FACT_LIFT_SCANS
-  sem_revenue.yaml
-  sem_customer_behavior.yaml
-  ... (11 total)
+Agent exists?  ──yes──>  ALTER AGENT ... MODIFY LIVE VERSION SET SPECIFICATION
+     │
+     no ──> CREATE AGENT IF NOT EXISTS ...
+
+--force-create:  CREATE OR REPLACE (WARNING: destroys eval history)
 ```
-
-```bash
-agent-mgmt-deploy-svs --env dev       # -> AM_SKI_RESORT_DEV.SEMANTIC
-agent-mgmt-deploy-svs --env qa        # -> AM_SKI_RESORT_QA.SEMANTIC
-agent-mgmt-deploy-svs --env prod      # -> AM_SKI_RESORT_PROD.SEMANTIC
-```
-
-**Why choose this:** no dbt dependency, supports snapshot/rollback, dry-run validation, works for any team.
-
-### Using Both Together
-
-In the CI/CD workflows, dbt runs first (facts then semantic views), then the Python deployer handles any SVs not managed by dbt. The GitHub Actions workflows include conditional dbt steps:
-
-```yaml
-- name: Run dbt build (if dbt project exists)
-  if: hashFiles('dbt_ski_resort/dbt_project.yml') != ''
-  run: |
-    cd dbt_ski_resort
-    dbt build --target dev --select "marts.semantic"
-```
-
-## Deploy Order
-
-```
-dbt build (facts + semantic)  ->  Python SV deploy  ->  Agent deploy  ->  Evaluation
-```
-
-Each layer depends on the one before it. The workflows enforce this ordering.
 
 ## CLI Commands
 
@@ -106,9 +209,9 @@ After `pip install -e .`:
 
 | Command | Description |
 |---------|-------------|
-| `agent-mgmt-deploy-agents` | Deploy agents from YAML specs (ALTER if exists, CREATE if new) |
+| `agent-mgmt-deploy-agents` | Deploy agents from YAML specs |
 | `agent-mgmt-deploy-svs` | Deploy semantic views from YAML definitions |
-| `agent-mgmt-validate` | Validate YAML specs (lint + optional Snowflake dry-run) |
+| `agent-mgmt-validate` | Validate YAML specs (lint + optional dry-run) |
 | `agent-mgmt-snapshot` | Snapshot current agent/SV state for rollback |
 | `agent-mgmt-rollback` | Restore from a timestamped snapshot |
 | `agent-mgmt-metrics` | Compute F1/precision/recall from eval results |
@@ -116,56 +219,24 @@ After `pip install -e .`:
 | `agent-mgmt-detect-drift` | Detect Git vs Snowflake spec drift |
 | `agent-mgmt-check-sv-eval` | Check semantic view evaluation results |
 
-## Environment Strategy
+## Evaluations
 
-Separate databases per environment, managed by DCM:
+See [`agent-evaluation/README.md`](agent-evaluation/README.md) for the full evaluation framework. Quick version:
 
-```
-AM_SKI_RESORT_DEV   (dev)    AM_SKI_RESORT_QA   (qa)    AM_SKI_RESORT_PROD   (prod)
-  +-- RAW                      +-- RAW                    +-- RAW
-  +-- STAGING                  +-- STAGING                +-- STAGING
-  +-- MARTS                    +-- MARTS                  +-- MARTS
-  +-- SEMANTIC                 +-- SEMANTIC               +-- SEMANTIC
-  +-- AGENTS                   +-- AGENTS                 +-- AGENTS
-```
+```bash
+cd agent-evaluation && uv sync
 
-Configured in `project.yml` + `environments/*.env.yml`.
+# Dry run
+uv run python scripts/run_eval.py configs/resort_executive.yaml --dry-run
 
-## Repository Structure
-
-```
-AgentMangement/
-  project.yml                     # Single source of truth for names
-  pyproject.toml                  # pip install -e . (agent-mgmt 0.5.0)
-  agents/specs/                   # Agent YAML templates (Jinja2)
-  semantic-views/definitions/     # SV YAML templates (Jinja2)
-  scripts/                        # Deploy, eval, snapshot, rollback
-  agent-evaluation/               # Eval configs, datasets, metrics, results
-  data_generation/                # Synthetic ski resort data
-  dbt_ski_resort/                 # dbt project (23 staging, 6 dims, 13 facts, 11 SVs)
-  environments/                   # Per-env config (dev, qa, prod)
-  .github/workflows/             # CI/CD pipelines
-  requirements/                   # Traceable requirements (REQ-001..011)
-  docs/                           # Architecture, dev notes
-  tests/                          # 76 pytest tests
-```
-
-## Agent Deploy Strategy
-
-Agents are deployed using ALTER (preserves eval history) by default:
-
-```
-Agent exists?  --yes-->  ALTER AGENT ... MODIFY LIVE VERSION SET SPECIFICATION
-     |
-     no --> CREATE AGENT IF NOT EXISTS ...
-
---force-create flag:  CREATE OR REPLACE (WARNING: destroys eval history)
+# Full eval (polls, checks thresholds, saves JSON)
+uv run python scripts/run_eval.py configs/resort_executive.yaml --connection myconnection --env dev
 ```
 
 ## Adapting for Your Domain
 
-1. Edit `project.yml` — change database names, schemas, raw tables
-2. Edit `environments/*.env.yml` — change deployment targets
+1. Edit `project.yml` — change database names, schemas, raw tables, deployment mode
+2. Edit `environments/*.env.yml` — change deployment targets and name suffixes
 3. Write agent specs in `agents/specs/`
 4. Write SV definitions in `semantic-views/definitions/` and/or `dbt_*/models/marts/semantic/`
 5. Create eval datasets in `agent-evaluation/datasets/`
@@ -176,7 +247,6 @@ Agent exists?  --yes-->  ALTER AGENT ... MODIFY LIVE VERSION SET SPECIFICATION
 ```bash
 pip install -e ".[dev]"
 pytest tests/ -q
-# 76 passed
 ```
 
 ## Requirements
@@ -184,3 +254,4 @@ pytest tests/ -q
 - Python 3.11+
 - Snowflake account with Cortex Agents enabled
 - dbt-snowflake (optional, for dbt path)
+- Snowflake CLI 3.16+ (for DCM)

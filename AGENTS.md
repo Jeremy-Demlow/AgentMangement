@@ -60,10 +60,8 @@ These principles combine fast.ai's engineering philosophy with Snowflake-specifi
 AgentMangement/
 ├── AGENTS.md                              # This file — AI rules
 ├── README.md                              # Setup guide and runbook
-├── Makefile                               # Common operations
-├── requirements.txt                       # Python dependencies
-├── pyproject.toml                         # Project metadata
-├── .plans/                                # Execution plans
+├── project.yml                            # Central config: databases, schemas, deployment mode
+├── pyproject.toml                         # pip install -e . (agent-mgmt 0.5.0)
 ├── .gitignore
 │
 ├── .github/workflows/                     # CI/CD workflows
@@ -88,8 +86,7 @@ AgentMangement/
 ├── environments/                          # Per-environment configs
 │   ├── dev.env.yml
 │   ├── qa.env.yml
-│   ├── prod.env.yml
-│   └── _template.env.yml
+│   └── prod.env.yml
 │
 ├── agents/                                # Cortex Agent specs
 │   ├── specs/                             # YAML agent definitions (Jinja2)
@@ -118,7 +115,7 @@ AgentMangement/
 │   └── results/                           # Eval run results (JSON)
 │
 ├── agent_management/                      # Reusable library (pip installable)
-│   ├── __init__.py                        # Package root (version 0.6.0)
+│   ├── __init__.py                        # Package root (version 0.5.0)
 │   ├── deploy_semantic_views.py
 │   ├── deploy_agents.py
 │   ├── snapshot_state.py
@@ -135,7 +132,7 @@ AgentMangement/
 │   │   └── generate_lineage_comment.py    # Auto-comment lineage on PRs
 │   └── utils/
 │       ├── snowflake_client.py
-│       └── config.py
+│       └── config.py                      # Config loading, FQN helpers, suffix resolution
 │
 ├── requirements/                          # What to build
 │   ├── REQ-001_environment_config.md
@@ -166,7 +163,8 @@ AgentMangement/
     ├── test_cases.md                      # All test cases, linked to REQs
     ├── regression.md                      # Bug fixes that must stay fixed
     ├── test_data/
-    └── unit/                              # Python unit tests
+    ├── test_smoke.py                      # Config, FQN, and deploy logic tests
+    └── test_templates.py                  # Template rendering tests
 ```
 
 ## Snowflake-Specific Rules

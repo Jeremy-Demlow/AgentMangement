@@ -111,7 +111,6 @@ jobs:
         if: hashFiles('dbt_ski_resort/dbt_project.yml') != ''
         env:
           DBT_TARGET: qa
-          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
         run: |
           pip install dbt-snowflake
           cd dbt_ski_resort

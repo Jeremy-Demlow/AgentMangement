@@ -310,7 +310,7 @@ uv run python scripts/run_eval.py <config.yaml> [flags]
 | `--resolve-only` | Run `validation_query` SQL and print ground truth (no eval) |
 | `--no-wait` | Start the eval and exit without polling |
 | `--poll-interval N` | Seconds between status polls (default: 30) |
-| `--env {dev,staging,prod}` | Override db/schema/warehouse/role from `agents/environments/<env>.yml` |
+| `--env {dev,staging,prod}` | Override db/schema/warehouse/role from `environments/<env>.env.yml` |
 | `--status` | Check status of the last run |
 | `--results` | Print results of the last run |
 | `--run-name NAME` | Override auto-generated run name |
@@ -332,7 +332,7 @@ The Makefile uses `--connection myconnection` and `--env dev` by default. Overri
 
 ## Environment Configs
 
-The `--env` flag loads `agents/environments/<env>.yml` and overrides the agent's database, schema, warehouse, role, and name suffix. This lets a single config YAML target dev, staging, or prod:
+The `--env` flag loads `environments/<env>.env.yml` and overrides the agent's database, schema, warehouse, role, and name suffix. This lets a single config YAML target dev, staging, or prod:
 
 ```bash
 # Evaluate RESORT_EXECUTIVE_DEV in dev environment
@@ -342,18 +342,20 @@ uv run python scripts/run_eval.py configs/resort_executive.yaml --connection myc
 uv run python scripts/run_eval.py configs/resort_executive.yaml --connection myconnection --env prod
 ```
 
-Example env file (`agents/environments/dev.yml`):
+Example env file (`environments/dev.env.yml`):
 
 ```yaml
 environment: dev
 snowflake:
-  role: ACCOUNTADMIN
+  account: trb65519
+  role: AM_DEPLOY_ROLE_DEV
+  warehouse: AM_SKI_RESORT_WH_DEV
 deployment:
-  database: SADM_SKI_RESORT_DB
-  schema: AGENTS
-  warehouse: COMPUTE_WH
-settings:
-  version_suffix: _DEV    # RESORT_EXECUTIVE -> RESORT_EXECUTIVE_DEV
+  database: AM_SKI_RESORT_DEV
+  semantic_schema: SEMANTIC
+  agents_schema: AGENTS
+agent:
+  name_suffix: _DEV    # RESORT_EXECUTIVE -> RESORT_EXECUTIVE_DEV
 ```
 
 ## Understanding Results
@@ -510,11 +512,11 @@ agent-evaluation/
 | YAML corrupted after stage upload | Stage file format must use `FIELD_DELIMITER = NONE` and `ESCAPE_UNENCLOSED_FIELD = NONE`. `run_eval.py` creates this automatically. |
 | Eval stuck in `INVOCATION_IN_PROGRESS` for >15 min | Complex agents with many tools take longer. Default max wait is 30 min (60 polls × 30s). Check Snowflake query history for errors. |
 | Scores vary between runs | Normal — LLM judge has ~5-10% variance. Compare trends across multiple runs using the JSON files in `results/`. |
-| `--env` produces wrong agent name | The suffix is appended only if not already present. Check `agents/environments/<env>.yml` has the correct `version_suffix`. |
+| `--env` produces wrong agent name | The suffix is appended only if not already present. Check `environments/<env>.env.yml` has the correct `name_suffix` under `agent:`. |
 
 ## Example: RESORT_EXECUTIVE
 
-15 questions, all dynamic ground truth, run against `SADM_SKI_RESORT_DB.AGENTS.RESORT_EXECUTIVE`:
+15 questions, all dynamic ground truth, run against `AM_SKI_RESORT_PROD.AGENTS.RESORT_EXECUTIVE`:
 
 | Metric | Avg Score | Count | High (>=0.8) | Low (<0.3) | Threshold | Gate |
 |--------|-----------|-------|--------------|------------|-----------|------|

@@ -7,12 +7,11 @@ This DBT project implements a Kimball-style dimensional model for ski resort ope
 ```
 dbt_ski_resort/
 ├── models/
-│   ├── staging/          # Type-safe views from raw data
-│   ├── intermediate/     # Ephemeral business logic transformations
+│   ├── staging/          # Type-safe views from raw data (23)
 │   └── marts/
-│       ├── dimensions/   # Dimension tables (6 total)
-│       ├── facts/        # Fact tables (5 total, incremental)
-│       └── semantic/     # Semantic views for agents
+│       ├── dimensions/   # Dimension tables (6)
+│       ├── facts/        # Fact tables (13, incremental)
+│       └── semantic/     # Semantic views for agents (11)
 ├── tests/                # Data quality tests
 ├── macros/               # Custom SQL macros
 ├── seeds/                # Static reference data
@@ -30,18 +29,26 @@ dbt_ski_resort/
 - `dim_product` - Rentals and F&B items with Type 2 SCD
 - `dim_ticket_type` - Ticket and pass types with Type 2 SCD
 
-### Facts (5 - Incremental)
+### Facts (13 - Incremental)
 - `fact_lift_scans` - Lift scan events with wait times
 - `fact_pass_usage` - Daily customer visit summaries
 - `fact_ticket_sales` - Ticket/pass purchases
 - `fact_rentals` - Equipment rentals
 - `fact_food_beverage` - F&B transactions
+- Plus 8 additional fact tables covering weather, staffing, incidents, lessons, parking, grooming, customer feedback, and marketing
 
-### Semantic Views (4)
+### Semantic Views (11)
 - `sem_operations` - Lift utilization and wait times
 - `sem_customer_behavior` - Customer segments and churn
 - `sem_revenue` - Revenue analytics
 - `sem_passholder_analytics` - Pass holder ROI
+- `sem_customer_satisfaction` - Customer feedback and NPS
+- `sem_daily_summary` - Daily operational summary
+- `sem_lessons_analytics` - Ski lessons performance
+- `sem_marketing_analytics` - Marketing campaign effectiveness
+- `sem_safety_incidents` - Safety and incident tracking
+- `sem_staffing_analytics` - Staffing levels and efficiency
+- `sem_weather_analytics` - Weather impact analysis
 
 ## Setup
 
@@ -66,7 +73,7 @@ dbt docs serve
 
 ## Connection Configuration
 
-This project uses the `agents_example` Snowflake CLI connection. The `profiles.yml` is configured for dual compatibility:
+This project uses the `dbt_ski_resort` profile. The `profiles.yml` is configured for dual compatibility:
 - Local development via Snowflake CLI
 - dbt Projects on Snowflake (native execution)
 
