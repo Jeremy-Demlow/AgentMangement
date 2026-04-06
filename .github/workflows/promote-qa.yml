@@ -156,7 +156,7 @@ jobs:
         run: |
           for config in agent-evaluation/configs/*.yaml; do
             echo "=== Evaluating $(basename $config) ==="
-            python agent-evaluation/run_eval.py "$config" --env qa || true
+            python agent-evaluation/scripts/run_eval.py "$config" --env qa || true
           done
 
       - name: Check thresholds (strict)

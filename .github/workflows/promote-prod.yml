@@ -166,7 +166,7 @@ jobs:
           FAILED=0
           for config in agent-evaluation/configs/*.yaml; do
             echo "=== Evaluating $(basename $config) ==="
-            python agent-evaluation/run_eval.py "$config" --env prod || true
+            python agent-evaluation/scripts/run_eval.py "$config" --env prod || true
           done
 
       - name: Check thresholds (strict)
