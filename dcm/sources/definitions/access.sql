@@ -28,6 +28,7 @@ GRANT USAGE ON DATABASE {{db}} TO DATABASE ROLE {{db}}.ANALYST;
 {{ schema_read_grants(db, 'DOCS', 'ANALYST') }}
 {{ schema_read_grants(db, 'SEMANTIC' ~ semantic_schema_suffix, 'ANALYST') }}
 {{ schema_read_grants(db, 'AGENTS' ~ agents_schema_suffix, 'ANALYST') }}
+{{ schema_read_grants(db, 'DBT_TEST__AUDIT', 'ANALYST') }}
 
 {{ schema_write_grants(db, 'RAW', 'DEVELOPER') }}
 {{ schema_write_grants(db, 'STAGING', 'DEVELOPER') }}
@@ -38,6 +39,7 @@ GRANT USAGE ON DATABASE {{db}} TO DATABASE ROLE {{db}}.ANALYST;
 {{ schema_ddl_grants(db, 'DOCS', 'ADMIN') }}
 {{ schema_ddl_grants(db, 'SEMANTIC' ~ semantic_schema_suffix, 'ADMIN') }}
 {{ schema_ddl_grants(db, 'AGENTS' ~ agents_schema_suffix, 'ADMIN') }}
+{{ schema_ddl_grants(db, 'DBT_TEST__AUDIT', 'ADMIN') }}
 
 {{ schema_stage_write_grants(db, 'AGENTS' ~ agents_schema_suffix, 'DEVELOPER') }}
 {{ schema_stage_write_grants(db, 'AGENTS' ~ agents_schema_suffix, 'ADMIN') }}

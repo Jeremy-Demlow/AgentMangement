@@ -51,7 +51,7 @@ jobs:
           cache: 'pip'
 
       - name: Install dependencies
-        run: pip install pyyaml jinja2 snowflake-connector-python cryptography
+        run: pip install -r requirements.txt
 
       - name: Write private key
         run: echo "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/snowflake_key.p8

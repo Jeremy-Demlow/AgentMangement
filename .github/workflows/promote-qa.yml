@@ -18,14 +18,17 @@ env:
   SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
   SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
   SNOWFLAKE_PRIVATE_KEY_PATH: /tmp/snowflake_key.p8
-  SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
-  SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
   PYTHONPATH: ${{ github.workspace }}
 
 jobs:
   pre-flight:
     name: Pre-flight Checks
     runs-on: ubuntu-latest
+    environment: QA
+    env:
+      SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+      SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+      SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
     steps:
       - uses: actions/checkout@v4
 
@@ -35,7 +38,7 @@ jobs:
           cache: 'pip'
 
       - name: Install dependencies
-        run: pip install pyyaml jinja2 snowflake-connector-python cryptography
+        run: pip install -r requirements.txt
 
       - name: Write private key
         run: echo "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/snowflake_key.p8
@@ -59,6 +62,11 @@ jobs:
     name: Snapshot QA State
     runs-on: ubuntu-latest
     needs: pre-flight
+    environment: QA
+    env:
+      SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+      SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+      SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
     steps:
       - uses: actions/checkout@v4
 
@@ -68,7 +76,7 @@ jobs:
           cache: 'pip'
 
       - name: Install dependencies
-        run: pip install pyyaml jinja2 snowflake-connector-python cryptography
+        run: pip install -r requirements.txt
 
       - name: Write private key
         run: echo "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/snowflake_key.p8
@@ -93,6 +101,11 @@ jobs:
     name: Deploy to QA
     runs-on: ubuntu-latest
     needs: snapshot
+    environment: QA
+    env:
+      SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+      SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+      SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
     steps:
       - uses: actions/checkout@v4
 
@@ -102,12 +115,12 @@ jobs:
           cache: 'pip'
 
       - name: Install dependencies
-        run: pip install pyyaml jinja2 snowflake-connector-python cryptography
+        run: pip install -r requirements.txt
 
       - name: Write private key
         run: echo "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/snowflake_key.p8
 
-      - name: Run dbt build (if dbt project exists)
+      - name: Run dbt (if dbt project exists)
         if: hashFiles('dbt_ski_resort/dbt_project.yml') != ''
         env:
           DBT_TARGET: qa
@@ -115,8 +128,8 @@ jobs:
           pip install dbt-snowflake
           cd dbt_ski_resort
           dbt deps
-          dbt build --target qa --select "marts.facts" --profiles-dir .
-          dbt build --target qa --select "marts.semantic" --profiles-dir .
+          dbt run --target qa --select "+marts.facts" --profiles-dir .
+          dbt run --target qa --select "marts.semantic" --profiles-dir .
 
       - name: Deploy semantic views to QA
         run: python -m agent_management.deploy_semantic_views --env qa
@@ -138,6 +151,11 @@ jobs:
     runs-on: ubuntu-latest
     needs: deploy
     if: inputs.skip_eval != 'true'
+    environment: QA
+    env:
+      SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+      SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+      SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
     steps:
       - uses: actions/checkout@v4
 
@@ -147,7 +165,7 @@ jobs:
           cache: 'pip'
 
       - name: Install dependencies
-        run: pip install pyyaml jinja2 snowflake-connector-python cryptography requests
+        run: pip install -r requirements.txt
 
       - name: Write private key
         run: echo "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/snowflake_key.p8

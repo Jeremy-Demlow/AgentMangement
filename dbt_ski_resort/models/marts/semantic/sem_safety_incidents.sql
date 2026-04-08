@@ -1,0 +1,52 @@
+{{ config(materialized='semantic_view') }}
+
+-- Safety Incidents semantic view (simplified)
+
+TABLES (
+    FACT_INCIDENTS AS {{ ref('fact_incidents') }}
+      PRIMARY KEY (INCIDENT_ID)
+      WITH SYNONYMS ('incidents', 'accidents', 'safety')
+      COMMENT = 'Safety incident records'
+)
+
+FACTS (
+    FACT_INCIDENTS.SEVERITY_SCORE AS SEVERITY_SCORE
+      COMMENT = 'Numeric severity (1-4)',
+    FACT_INCIDENTS.PATROL_RESPONSE_MINUTES AS PATROL_RESPONSE_MINUTES
+      COMMENT = 'Ski patrol response time'
+)
+
+DIMENSIONS (
+    FACT_INCIDENTS.INCIDENT_DATE AS INCIDENT_DATE
+      COMMENT = 'Date of incident',
+    FACT_INCIDENTS.INCIDENT_TYPE AS INCIDENT_TYPE
+      WITH SYNONYMS ('type')
+      COMMENT = 'Type of incident',
+    FACT_INCIDENTS.SEVERITY AS SEVERITY
+      COMMENT = 'Severity level',
+    FACT_INCIDENTS.LOCATION_ID AS LOCATION_ID
+      COMMENT = 'Location ID',
+    FACT_INCIDENTS.LIFT_ID AS LIFT_ID
+      COMMENT = 'Lift associated',
+    FACT_INCIDENTS.TRAIL_NAME AS TRAIL_NAME
+      COMMENT = 'Trail name',
+    FACT_INCIDENTS.CUSTOMER_SKILL_LEVEL AS CUSTOMER_SKILL_LEVEL
+      COMMENT = 'Customer skill level',
+    FACT_INCIDENTS.TRANSPORT_REQUIRED AS TRANSPORT_REQUIRED
+      COMMENT = 'Transport required',
+    FACT_INCIDENTS.CUSTOMER_SEGMENT AS CUSTOMER_SEGMENT
+      COMMENT = 'Customer segment'
+)
+
+METRICS (
+    FACT_INCIDENTS.TOTAL_INCIDENTS AS COUNT(FACT_INCIDENTS.INCIDENT_ID)
+      COMMENT = 'Total incidents',
+    FACT_INCIDENTS.AVERAGE_SEVERITY AS AVG(FACT_INCIDENTS.SEVERITY_SCORE)
+      COMMENT = 'Average severity',
+    FACT_INCIDENTS.CRITICAL_INCIDENTS AS COUNT(CASE WHEN FACT_INCIDENTS.SEVERITY = 'Critical' THEN 1 END)
+      COMMENT = 'Critical incidents',
+    FACT_INCIDENTS.AVG_PATROL_RESPONSE AS AVG(FACT_INCIDENTS.PATROL_RESPONSE_MINUTES)
+      COMMENT = 'Avg patrol response time'
+)
+
+COMMENT = 'Safety incident tracking'

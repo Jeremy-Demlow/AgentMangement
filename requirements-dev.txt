@@ -1,0 +1,10 @@
+-r requirements.txt
+pytest>=7.0
+ruff>=0.4
+snowflake-snowpark-python[pandas]
+pandas
+pyarrow
+numpy
+toml
+pydantic
+dbt-snowflake

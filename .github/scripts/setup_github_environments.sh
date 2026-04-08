@@ -5,21 +5,25 @@ set -euo pipefail
 # Creates the 4 GitHub Environments required by the CI/CD workflows.
 #
 # What this creates:
-#   4 environments in the GitHub repo Settings → Environments:
+#   4 environments in the GitHub repo Settings > Environments:
 #
-#   DEV         - Used by dcm-deploy.yml for DCM deployments to dev
+#   DEV         - Used by deploy-dev.yml
 #                 No protection rules (auto-deploys on push to main)
+#                 Secrets: SNOWFLAKE_WAREHOUSE, SNOWFLAKE_ROLE, SNOWFLAKE_DATABASE
 #
-#   QA          - Used by dcm-deploy.yml for DCM deployments to QA
-#                 No protection rules (optional env, can be skipped)
+#   QA          - Used by promote-qa.yml
+#                 No protection rules
+#                 Secrets: SNOWFLAKE_WAREHOUSE, SNOWFLAKE_ROLE, SNOWFLAKE_DATABASE
 #
-#   PROD        - Used by dcm-deploy.yml for DCM deployments to prod
+#   PROD        - Used by promote-prod.yml (deploy + eval jobs), daily_data_refresh.yml
 #                 No protection rules (approval handled by 'production' env)
+#                 Secrets: SNOWFLAKE_WAREHOUSE, SNOWFLAKE_ROLE, SNOWFLAKE_DATABASE
 #
 #   production  - Used by promote-prod.yml pre-flight job as an approval gate
-#                 HAS required reviewer: the repo owner must approve before
-#                 the promote-to-prod workflow proceeds. This prevents
-#                 accidental production deployments.
+#                 HAS required reviewer: repo owner must approve before prod deploy
+#                 Secrets: same as PROD (SNOWFLAKE_WAREHOUSE, SNOWFLAKE_ROLE, SNOWFLAKE_DATABASE)
+#
+# After creating environments, run setup_github_secrets.sh to populate secrets.
 #
 # Prerequisites:
 #   - gh CLI installed and authenticated (`gh auth login`)
@@ -67,9 +71,11 @@ echo "{\"reviewers\":[{\"type\":\"User\",\"id\":$GH_USER_ID}]}" \
 echo ""
 echo "=== Done: 4 environments created ==="
 echo ""
-echo "  DEV         — DCM deploys (no approval)"
-echo "  QA          — DCM deploys (no approval)"
-echo "  PROD        — DCM deploys (no approval)"
-echo "  production  — Prod promote gate (requires $OWNER approval)"
+echo "  DEV         — deploy-dev.yml (no approval)"
+echo "  QA          — promote-qa.yml (no approval)"
+echo "  PROD        — promote-prod.yml, daily_data_refresh.yml (no approval)"
+echo "  production  — promote-prod.yml pre-flight gate (requires $OWNER approval)"
+echo ""
+echo "Next: run setup_github_secrets.sh to set repo + environment secrets"
 echo ""
 echo "Verify at: https://github.com/$REPO/settings/environments"

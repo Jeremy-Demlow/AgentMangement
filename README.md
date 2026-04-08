@@ -33,7 +33,7 @@ The framework manages the full lifecycle across three environments (DEV, QA, PRO
 │  │  Deploy Pipeline (order matters)                       │      │
 │  │                                                        │      │
 │  │  1. DCM         → databases, schemas, roles, grants    │      │
-│  │  2. dbt build   → staging → dims → facts → semantic    │      │
+│  │  2. dbt run    → staging → dims → facts → semantic     │      │
 │  │  3. Deploy SVs  → SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML│      │
 │  │  4. Deploy Agents → ALTER AGENT / CREATE AGENT         │      │
 │  │  5. Evaluate    → EXECUTE_AI_EVALUATION + thresholds   │      │
@@ -54,7 +54,7 @@ The framework manages the full lifecycle across three environments (DEV, QA, PRO
 │                                                                 │
 │  AM_SKI_RESORT_PROD (source of truth)                           │
 │    RAW (real data)                                              │
-│    STAGING / MARTS / SEMANTIC / AGENTS                          │
+│    STAGING / MARTS / SEMANTIC / AGENTS / DBT_TEST__AUDIT        │
 │      RESORT_EXECUTIVE           (no suffix — canonical)         │
 │      SKI_OPS_ASSISTANT                                          │
 └─────────────────────────────────────────────────────────────────┘
@@ -138,13 +138,21 @@ AgentMangement/
 ├── data_generation/                 # Synthetic ski resort data
 │
 ├── .github/workflows/               # CI/CD pipelines
-│   ├── deploy-dev.yml               #   Deploy on merge to main
-│   ├── promote-qa.yml               #   Manual promote with eval gate
-│   ├── promote-prod.yml             #   Manual promote with approval
+│   ├── deploy-dev.yml               #   Deploy on merge to main (environment: DEV)
+│   ├── promote-qa.yml               #   Manual promote with eval gate (environment: QA)
+│   ├── promote-prod.yml             #   Manual promote with approval (environment: PROD)
 │   ├── validate-pr.yml              #   Lint + validate on PR
 │   ├── rollback.yml                 #   Rollback any environment
-│   ├── daily_data_refresh.yml       #   Daily data pipeline
+│   ├── daily_data_refresh.yml       #   Daily data pipeline (environment: PROD)
 │   └── dcm-deploy.yml              #   DCM infrastructure deploy
+│
+├── .github/scripts/                 # CI/CD helper scripts
+│   ├── setup_github_secrets.sh      #   Set repo + environment secrets via gh CLI
+│   ├── setup_github_environments.sh #   Create GitHub environments with descriptions
+│   ├── teardown.sh                  #   Remove all secrets + environments
+│   └── test_workflow_locally.sh     #   Run workflow steps locally against real Snowflake
+│
+├── .github/PIPELINE_SETUP.md        # CI/CD pipeline setup guide
 │
 ├── tests/                           # Python tests (smoke + template rendering)
 ├── docs/                            # Architecture, data dictionary, dev notes
@@ -248,6 +256,46 @@ uv run python scripts/run_eval.py configs/resort_executive.yaml --connection myc
 pip install -e ".[dev]"
 pytest tests/ -q
 ```
+
+## CI/CD Authentication
+
+All GitHub Actions workflows use **RSA key-pair (JWT) authentication** — no passwords in pipelines.
+
+Secrets are split between **repo-level** (shared across all workflows) and **environment-level** (per DEV/QA/PROD):
+
+| Level | Secret | Example Value |
+|-------|--------|---------------|
+| Repo | `SNOWFLAKE_ACCOUNT` | `trb65519` |
+| Repo | `SNOWFLAKE_USER` | `JDEMLOW` |
+| Repo | `SNOWFLAKE_PRIVATE_KEY` | Contents of `.p8` file |
+| Env: DEV | `SNOWFLAKE_WAREHOUSE` | `AM_SKI_RESORT_WH_DEV` |
+| Env: DEV | `SNOWFLAKE_ROLE` | `AM_DEPLOY_ROLE_DEV` |
+| Env: DEV | `SNOWFLAKE_DATABASE` | `AM_SKI_RESORT_DEV` |
+| Env: QA | `SNOWFLAKE_WAREHOUSE` | `AM_SKI_RESORT_WH_QA` |
+| Env: QA | `SNOWFLAKE_ROLE` | `AM_DEPLOY_ROLE_QA` |
+| Env: QA | `SNOWFLAKE_DATABASE` | `AM_SKI_RESORT_QA` |
+| Env: PROD | `SNOWFLAKE_WAREHOUSE` | `AM_SKI_RESORT_WH_PROD` |
+| Env: PROD | `SNOWFLAKE_ROLE` | `AM_DEPLOY_ROLE_PROD` |
+| Env: PROD | `SNOWFLAKE_DATABASE` | `AM_SKI_RESORT_PROD` |
+
+Each workflow job declares `environment: DEV` (or QA/PROD), and `${{ secrets.SNOWFLAKE_DATABASE }}` resolves to the correct value for that environment.
+
+Setup: `.github/scripts/setup_github_secrets.sh` · Teardown: `.github/scripts/teardown.sh`
+
+See [`.github/PIPELINE_SETUP.md`](.github/PIPELINE_SETUP.md) for the full setup guide.
+
+## Local Testing
+
+Run CI/CD workflow steps locally against real Snowflake:
+
+```bash
+PYTHON=/path/to/python DBT=/path/to/dbt TARGET_ENV=dev \
+  .github/scripts/test_workflow_locally.sh snapshot
+```
+
+Available steps: `snapshot`, `dbt`, `deploy-svs`, `sv-eval`, `deploy-agents`, `agent-eval`, `compute-metrics`
+
+The script force-sets `SNOWFLAKE_DATABASE`, `SNOWFLAKE_ROLE`, and `SNOWFLAKE_WAREHOUSE` per `TARGET_ENV` to avoid IDE environment contamination.
 
 ## Requirements
 

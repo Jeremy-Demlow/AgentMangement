@@ -1,0 +1,295 @@
+version: 2
+
+models:
+  - name: fact_lift_scans
+    description: Lift scan events fact table (transaction grain)
+    config:
+      materialized: incremental
+      unique_key: scan_key
+    columns:
+      - name: scan_key
+        description: Surrogate primary key
+        tests:
+          - unique
+          - not_null
+      - name: date_key
+        description: Foreign key to dim_date
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+
+  - name: fact_pass_usage
+    description: Daily customer visit fact table
+    config:
+      materialized: incremental
+      unique_key: usage_key
+    columns:
+      - name: usage_key
+        description: Surrogate primary key
+        tests:
+          - unique
+          - not_null
+      - name: date_key
+        description: Foreign key to dim_date
+        tests:
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+      - name: customer_key
+        description: Foreign key to dim_customer
+        tests:
+          - relationships:
+              to: ref('dim_customer')
+              field: customer_key
+
+  - name: fact_ticket_sales
+    description: Ticket/pass sales fact table
+    config:
+      materialized: incremental
+      unique_key: sale_key
+    columns:
+      - name: sale_key
+        description: Surrogate primary key
+        tests:
+          - unique
+          - not_null
+      - name: purchase_date_key
+        description: Foreign key to dim_date (purchase date)
+        tests:
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+      - name: customer_key
+        description: Foreign key to dim_customer
+        tests:
+          - relationships:
+              to: ref('dim_customer')
+              field: customer_key
+      - name: location_key
+        description: Foreign key to dim_location
+        tests:
+          - relationships:
+              to: ref('dim_location')
+              field: location_key
+      - name: ticket_type_key
+        description: Foreign key to dim_ticket_type
+        tests:
+          - relationships:
+              to: ref('dim_ticket_type')
+              field: ticket_type_key
+
+  - name: fact_rentals
+    description: Equipment rental fact table
+    config:
+      materialized: incremental
+      unique_key: rental_key
+    columns:
+      - name: rental_key
+        description: Surrogate primary key
+        tests:
+          - unique
+          - not_null
+      - name: rental_date_key
+        description: Foreign key to dim_date (rental date)
+        tests:
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+      - name: customer_key
+        description: Foreign key to dim_customer
+        tests:
+          - relationships:
+              to: ref('dim_customer')
+              field: customer_key
+      - name: location_key
+        description: Foreign key to dim_location
+        tests:
+          - relationships:
+              to: ref('dim_location')
+              field: location_key
+      - name: product_key
+        description: Foreign key to dim_product
+        tests:
+          - relationships:
+              to: ref('dim_product')
+              field: product_key
+
+  - name: fact_food_beverage
+    description: Food & beverage transaction fact table
+    config:
+      materialized: incremental
+      unique_key: transaction_key
+    columns:
+      - name: transaction_key
+        description: Surrogate primary key
+        tests:
+          - unique
+          - not_null
+      - name: transaction_date_key
+        description: Foreign key to dim_date (transaction date)
+        tests:
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+      - name: customer_key
+        description: Foreign key to dim_customer
+        tests:
+          - relationships:
+              to: ref('dim_customer')
+              field: customer_key
+      - name: location_key
+        description: Foreign key to dim_location
+        tests:
+          - relationships:
+              to: ref('dim_location')
+              field: location_key
+      - name: product_key
+        description: Foreign key to dim_product
+        tests:
+          - relationships:
+              to: ref('dim_product')
+              field: product_key
+
+  - name: fact_weather
+    description: Daily weather conditions by mountain zone
+    config:
+      materialized: incremental
+      unique_key: weather_key
+    columns:
+      - name: weather_key
+        description: Surrogate primary key
+        tests:
+          - unique
+          - not_null
+      - name: date_key
+        description: Foreign key to dim_date
+      - name: mountain_zone
+        description: Mountain zone location
+      - name: snowfall_inches
+        description: New snowfall amount
+      - name: is_powder_day
+        description: 6+ inches of new snow
+
+  - name: fact_staffing
+    description: Daily staffing schedules and coverage
+    config:
+      materialized: incremental
+      unique_key: staffing_key
+    columns:
+      - name: staffing_key
+        description: Surrogate primary key
+        tests:
+          - unique
+          - not_null
+      - name: date_key
+        description: Foreign key to dim_date
+      - name: location_key
+        description: Foreign key to dim_location
+      - name: department
+        description: Department name
+      - name: scheduled_employees
+        description: Number scheduled
+      - name: actual_employees
+        description: Actual headcount
+      - name: coverage_ratio
+        description: Actual/Scheduled ratio
+
+  - name: fact_marketing
+    description: Marketing campaign performance and attribution
+    config:
+      materialized: incremental
+      unique_key: marketing_key
+    columns:
+      - name: marketing_key
+        description: Surrogate primary key
+        tests:
+          - unique
+          - not_null
+      - name: send_date_key
+        description: Foreign key to dim_date
+      - name: campaign_name
+        description: Campaign name
+      - name: campaign_channel
+        description: Marketing channel
+      - name: conversion_count
+        description: Number of conversions
+      - name: revenue_attributed
+        description: Revenue attributed to campaign
+
+  - name: fact_season_pass_sales
+    description: Season pass purchase transactions
+    config:
+      materialized: incremental
+      unique_key: sale_id
+    columns:
+      - name: sale_id
+        description: Primary key
+        tests:
+          - unique
+          - not_null
+      - name: customer_id
+        description: Customer who purchased
+      - name: purchase_amount
+        description: Amount paid for pass
+      - name: is_renewal
+        description: Whether this is a renewal
+
+  - name: fact_lessons
+    description: Ski and snowboard lesson bookings
+    config:
+      materialized: incremental
+      unique_key: lesson_id
+    columns:
+      - name: lesson_id
+        description: Primary key
+        tests:
+          - unique
+          - not_null
+      - name: customer_id
+        description: Customer taking lesson
+      - name: total_lesson_revenue
+        description: Total revenue from lesson
+
+  - name: fact_incidents
+    description: Safety incidents and accident reports
+    config:
+      materialized: incremental
+      unique_key: incident_id
+    columns:
+      - name: incident_id
+        description: Primary key
+        tests:
+          - unique
+          - not_null
+      - name: severity_score
+        description: Numeric severity (1-4)
+
+  - name: fact_feedback
+    description: Customer satisfaction and feedback
+    config:
+      materialized: incremental
+      unique_key: feedback_id
+    columns:
+      - name: feedback_id
+        description: Primary key
+        tests:
+          - unique
+          - not_null
+      - name: sentiment_score
+        description: Numeric sentiment (-1, 0, 1)
+
+  - name: fact_parking
+    description: Hourly parking lot occupancy
+    config:
+      materialized: incremental
+      unique_key: record_id
+    columns:
+      - name: record_id
+        description: Primary key
+        tests:
+          - unique
+          - not_null
+      - name: occupancy_percent
+        description: Percentage of spaces occupied

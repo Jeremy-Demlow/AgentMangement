@@ -6,9 +6,9 @@ set -euo pipefail
 # Useful for resetting or cleaning up before re-running setup.
 #
 # What this removes:
-#   Secrets:      SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_PRIVATE_KEY,
-#                 SNOWFLAKE_PRIVATE_KEY_RAW, SNOWFLAKE_WAREHOUSE, SNOWFLAKE_ROLE
-#   Environments: DEV, QA, PROD, production
+#   Repo secrets:  SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_PRIVATE_KEY, SNOWFLAKE_PRIVATE_KEY_RAW
+#   Env secrets:   SNOWFLAKE_WAREHOUSE, SNOWFLAKE_ROLE, SNOWFLAKE_DATABASE (per DEV/QA/PROD/production)
+#   Environments:  DEV, QA, PROD, production
 #
 # Usage:
 #   .github/scripts/teardown.sh
@@ -20,22 +20,30 @@ echo "=== Teardown: Removing GitHub secrets and environments ==="
 echo "Repo: $REPO"
 echo ""
 
-SECRETS=(
+REPO_SECRETS=(
   SNOWFLAKE_ACCOUNT
   SNOWFLAKE_USER
   SNOWFLAKE_PRIVATE_KEY
   SNOWFLAKE_PRIVATE_KEY_RAW
-  SNOWFLAKE_WAREHOUSE
-  SNOWFLAKE_ROLE
 )
 
-echo "--- Removing secrets ---"
-for secret in "${SECRETS[@]}"; do
+echo "--- Removing repo-level secrets ---"
+for secret in "${REPO_SECRETS[@]}"; do
   echo "  Removing $secret..."
   gh secret delete "$secret" -R "$REPO" 2>/dev/null || echo "    (not found, skipping)"
 done
 
+ENV_SECRETS=(SNOWFLAKE_WAREHOUSE SNOWFLAKE_ROLE SNOWFLAKE_DATABASE)
 ENVS=(DEV QA PROD production)
+
+echo ""
+echo "--- Removing environment-level secrets ---"
+for env in "${ENVS[@]}"; do
+  for secret in "${ENV_SECRETS[@]}"; do
+    echo "  Removing $env/$secret..."
+    gh secret delete "$secret" -R "$REPO" --env "$env" 2>/dev/null || echo "    (not found, skipping)"
+  done
+done
 
 echo ""
 echo "--- Removing environments ---"

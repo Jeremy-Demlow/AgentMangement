@@ -51,7 +51,7 @@ semantic-views/snapshots/
 # Misc
 *.log
 .env
+.env.act
+.secrets.act
 .snowflake/
-docs/
-models/
-requirements/
+AGENTS.md

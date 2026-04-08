@@ -16,7 +16,8 @@ DCM creates this foundation (shown for DEV)
   ├── MARTS            Dimensional model (dbt marts layer)
   ├── DOCS             Document storage for Cortex Search
   ├── SEMANTIC         Semantic views for Cortex Analyst
-  └── AGENTS           Cortex Agents + eval infrastructure
+  ├── AGENTS           Cortex Agents + eval infrastructure
+  └── DBT_TEST__AUDIT  dbt test store_failures results
 
   AM_DEPLOY_ROLE_DEV          CI/CD deployment role
   AM_SKI_RESORT_WH_USER_DEV  Warehouse usage role
@@ -197,6 +198,7 @@ Individual users get `DEVELOPER` + `WH_USER` by default (see the `users` list in
 | DOCS     | SELECT all + future  | —                      | + CREATE CORTEX SEARCH SERVICE         |
 | SEMANTIC | SELECT all + future  | —                      | + CREATE SEMANTIC VIEW + AGENT         |
 | AGENTS   | SELECT all + future  | Stage READ/WRITE       | + CREATE AGENT + CORTEX SEARCH SVC     |
+| DBT_TEST__AUDIT | SELECT all + future | —               | CREATE TABLE/VIEW/DT/STAGE/FUNC/PROC  |
 
 **FUTURE grants** on tables and views mean that when dbt creates new objects, they are immediately queryable by ANALYST without any manual grant.
 
@@ -243,12 +245,13 @@ These objects are created by other pipeline stages that run after DCM:
 
 | Object Type | Created By |
 |-------------|-----------|
-| Tables, views, dynamic tables | dbt (`dbt run`) |
+| Tables, views, dynamic tables | dbt (`dbt run` in CI, `dbt build` locally) |
 | Semantic views | dbt semantic_view materialization or `deploy_semantic_views.py` |
 | Cortex Agents | `deploy_agents.py` (ALTER AGENT / CREATE AGENT) |
 | Cortex Search Services | `data_generation/` scripts |
 | UDFs / Stored Procedures | Deployment scripts |
 | Raw data | `data_generation/` scripts |
+| Test failure results | `dbt build` → `DBT_TEST__AUDIT` schema (requires DCM to create schema first) |
 
 DCM creates the roles and grants that _allow_ all of the above to succeed.
 

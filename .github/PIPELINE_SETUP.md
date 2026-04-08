@@ -2,29 +2,41 @@
 
 Complete setup guide for all CI/CD workflows in this repository.
 
-## Required GitHub Secrets
+## Secret Architecture
 
-Go to **Settings → Secrets and variables → Actions** and add these repository secrets:
+Secrets are split between **repo-level** (shared) and **environment-level** (per-env):
 
-| Secret | Used By | Description | Example |
-|--------|---------|-------------|---------|
-| `SNOWFLAKE_ACCOUNT` | All workflows | Snowflake account identifier | `trb65519` |
-| `SNOWFLAKE_USER` | All workflows | Service account or user | `JDEMLOW` |
-| `SNOWFLAKE_PRIVATE_KEY` | All except dcm-deploy | PEM-encoded private key (the full file contents, including `-----BEGIN/END-----` headers) | See [Key Pair Auth](#key-pair-auth) |
-| `SNOWFLAKE_PRIVATE_KEY_RAW` | dcm-deploy | Same key but used by DCM actions (separate secret name required by the Snowflake DCM reusable actions) | Same value as `SNOWFLAKE_PRIVATE_KEY` |
-| `SNOWFLAKE_WAREHOUSE` | All except dcm-deploy | Default compute warehouse | `AM_SKI_RESORT_WH_PROD` |
-| `SNOWFLAKE_ROLE` | All except dcm-deploy | Role for CI/CD operations | `AM_DEPLOY_ROLE_PROD` |
+### Repo-Level Secrets (4)
+
+Go to **Settings → Secrets and variables → Actions → Repository secrets**:
+
+| Secret | Description | Example |
+|--------|-------------|---------|
+| `SNOWFLAKE_ACCOUNT` | Snowflake account identifier | Your account locator (e.g., `abc12345`) |
+| `SNOWFLAKE_USER` | Service account or user | `JDEMLOW` |
+| `SNOWFLAKE_PRIVATE_KEY` | PEM-encoded private key (full file contents including headers) | See [Key Pair Auth](#key-pair-auth) |
+| `SNOWFLAKE_PRIVATE_KEY_RAW` | Same key (required by DCM reusable actions) | Same as above |
+
+### Environment-Level Secrets (3 per environment)
+
+Go to **Settings → Environments → [env name] → Environment secrets**:
+
+| Secret | DEV | QA | PROD / production |
+|--------|-----|-----|-------------------|
+| `SNOWFLAKE_WAREHOUSE` | `AM_SKI_RESORT_WH_DEV` | `AM_SKI_RESORT_WH_QA` | `AM_SKI_RESORT_WH_PROD` |
+| `SNOWFLAKE_ROLE` | `AM_DEPLOY_ROLE_DEV` | `AM_DEPLOY_ROLE_QA` | `AM_DEPLOY_ROLE_PROD` |
+| `SNOWFLAKE_DATABASE` | `AM_SKI_RESORT_DEV` | `AM_SKI_RESORT_QA` | `AM_SKI_RESORT_PROD` |
+
+Each workflow job declares `environment: DEV` (or QA/PROD/production), and `${{ secrets.SNOWFLAKE_WAREHOUSE }}` resolves to the correct environment-specific value.
 
 ### Quick Setup via Scripts
 
-Automated scripts live in `.github/scripts/`. Each script documents exactly what it creates and why.
-
 ```bash
-# 1. Set all 6 secrets (account, user, key x2, warehouse, role)
-.github/scripts/setup_github_secrets.sh
-
-# 2. Create all 4 GitHub environments (DEV, QA, PROD, production)
+# 1. Create all 4 GitHub environments (DEV, QA, PROD, production)
 .github/scripts/setup_github_environments.sh
+
+# 2. Set 4 repo secrets + 12 environment secrets (3 per env x 4 envs)
+.github/scripts/setup_github_secrets.sh
 ```
 
 To tear everything down and start fresh:
@@ -37,9 +49,9 @@ To tear everything down and start fresh:
 
 | Script | What it does |
 |--------|-------------|
-| `setup_github_secrets.sh` | Sets 6 repo secrets: `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, `SNOWFLAKE_PRIVATE_KEY`, `SNOWFLAKE_PRIVATE_KEY_RAW`, `SNOWFLAKE_WAREHOUSE`, `SNOWFLAKE_ROLE`. Reads the private key from `~/.snowflake/keys/snowflake_tf_key.p8`. No password needed — all workflows use key-pair (JWT) auth. |
-| `setup_github_environments.sh` | Creates 4 GitHub environments: `DEV`, `QA`, `PROD` (no protection), `production` (requires repo owner approval before prod promote runs). |
-| `teardown.sh` | Deletes all 6 secrets and all 4 environments. Use to reset before re-running setup. |
+| `setup_github_environments.sh` | Creates 4 GitHub environments: `DEV`, `QA`, `PROD` (no protection), `production` (requires repo owner approval). |
+| `setup_github_secrets.sh` | Sets 4 repo secrets + 3 environment secrets per env (DEV/QA/PROD/production = 16 total). Reads the private key from `~/.snowflake/keys/snowflake_tf_key.p8`. All workflows use key-pair (JWT) auth. |
+| `teardown.sh` | Deletes all repo secrets, environment secrets, and environments. |
 
 All scripts support overrides via environment variables (see script headers for details):
 
@@ -49,22 +61,20 @@ SNOWFLAKE_KEY_PATH=~/alt_key.p8 GH_REPO=myorg/myrepo .github/scripts/setup_githu
 
 ## Required GitHub Environments
 
-The `promote-prod.yml` and `dcm-deploy.yml` workflows use [GitHub Environments](https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment) for approval gates.
-
 Go to **Settings → Environments** and create:
 
-| Environment | Purpose | Recommended Settings |
-|-------------|---------|---------------------|
-| `DEV` | DCM deploys to dev | No protection rules needed |
-| `QA` | DCM deploys to QA | Optional: require reviewer |
-| `PROD` | DCM deploys to prod | Optional: require reviewer |
-| `production` | Prod promote pre-flight check | **Required reviewers** (1+), prevents accidental prod deploys |
+| Environment | Used By | Purpose | Protection |
+|-------------|---------|---------|------------|
+| `DEV` | `deploy-dev.yml` | Auto-deploy on push to main | None |
+| `QA` | `promote-qa.yml` | Manual promote to QA | None (optional: add reviewer) |
+| `PROD` | `promote-prod.yml`, `daily_data_refresh.yml` | Deploy + eval jobs | None |
+| `production` | `promote-prod.yml` (pre-flight job) | Approval gate before prod deploy | **Required reviewer** |
 
-The `production` environment is referenced by `promote-prod.yml` → `pre-flight` job. Without it, the workflow will fail with a "deployment protection rule" error. If you don't want manual approval, create the environment with no protection rules.
+The `production` environment gates the first job in `promote-prod.yml`. Without it, the workflow fails with a "deployment protection rule" error.
 
 ## Key Pair Auth
 
-All deploy/promote/validate workflows use key-pair (JWT) authentication. The workflow writes the key to a temp file, uses it, then cleans up:
+All workflows use key-pair (JWT) authentication. The workflow writes the key to a temp file, uses it, then cleans up:
 
 ```yaml
 - name: Write private key
@@ -75,46 +85,57 @@ All deploy/promote/validate workflows use key-pair (JWT) authentication. The wor
   run: rm -f /tmp/snowflake_key.p8
 ```
 
-To generate a key pair if you don't have one:
+To generate a key pair:
 
 ```bash
-# Generate unencrypted private key
 openssl genrsa 2048 | openssl pkcs8 -topk8 -inform PEM -out snowflake_tf_key.p8 -nocrypt
-
-# Extract public key
 openssl rsa -in snowflake_tf_key.p8 -pubout -out snowflake_tf_key.pub
 
-# Assign to Snowflake user
 # In Snowflake:
 #   ALTER USER JDEMLOW SET RSA_PUBLIC_KEY='<contents of .pub file without headers>';
 ```
 
-The secret value should be the **entire file contents** of the `.p8` file, including the `-----BEGIN PRIVATE KEY-----` and `-----END PRIVATE KEY-----` lines.
-
 ## Workflow Overview
 
-| Workflow | File | Trigger | Secrets Used | Env Required |
-|----------|------|---------|-------------|-------------|
-| **Validate PR** | `validate-pr.yml` | PR to `main` | ACCOUNT, USER, KEY, WH, ROLE | — |
-| **Deploy Dev** | `deploy-dev.yml` | Push to `main` (agents/SVs/envs changed) | ACCOUNT, USER, KEY, WH, ROLE | — |
-| **Promote QA** | `promote-qa.yml` | Manual dispatch | ACCOUNT, USER, KEY, WH, ROLE | — |
-| **Promote Prod** | `promote-prod.yml` | Manual dispatch | ACCOUNT, USER, KEY, WH, ROLE | `production` |
-| **Rollback** | `rollback.yml` | Manual dispatch | ACCOUNT, USER, KEY, WH, ROLE | `production` (for prod) |
-| **Daily Data Refresh** | `daily_data_refresh.yml` | Cron (5am PST) or manual | ACCOUNT, USER, KEY, WH, ROLE | — |
-| **DCM Deploy** | `dcm-deploy.yml` | Push/PR to `main` (dcm/ changed) or manual | USER, KEY_RAW | DEV/QA/PROD |
+| Workflow | File | Trigger | Environment |
+|----------|------|---------|-------------|
+| **Deploy Dev** | `deploy-dev.yml` | Push to `main` (agents/SVs/envs changed) | `DEV` |
+| **Promote QA** | `promote-qa.yml` | Manual dispatch | `QA` |
+| **Promote Prod** | `promote-prod.yml` | Manual dispatch | `production` (pre-flight) + `PROD` |
+| **Daily Data Refresh** | `daily_data_refresh.yml` | Cron (5am PST) or manual | `PROD` |
+| **Validate PR** | `validate-pr.yml` | PR to `main` | — |
+| **Rollback** | `rollback.yml` | Manual dispatch | `production` (for prod) |
+| **DCM Deploy** | `dcm-deploy.yml` | Push/PR to `main` (dcm/ changed) | `DEV`/`QA`/`PROD` |
+
+## Local Testing
+
+Use `test_workflow_locally.sh` to run workflow steps locally before pushing to CI:
+
+```bash
+# Run all steps against DEV
+TARGET_ENV=dev .github/scripts/test_workflow_locally.sh
+
+# Run a single step
+TARGET_ENV=dev .github/scripts/test_workflow_locally.sh snapshot
+
+# Override python/dbt paths
+PYTHON=/path/to/python DBT=/path/to/dbt TARGET_ENV=dev .github/scripts/test_workflow_locally.sh
+```
+
+The script force-sets `SNOWFLAKE_DATABASE`, `SNOWFLAKE_ROLE`, and `SNOWFLAKE_WAREHOUSE` to avoid IDE environment contamination.
 
 ## Verifying Setup
 
-After setting all secrets, test with the simplest workflow first:
-
 ```bash
-# 1. Test validate-pr (doesn't modify Snowflake, just lints)
-#    Open a PR to main — the workflow should run automatically
+# Check repo secrets
+gh secret list
 
-# 2. Test DCM plan (read-only)
-gh workflow run dcm-deploy.yml -f target=DEV -f plan_only=true
+# Check environment secrets
+gh secret list --env DEV
+gh secret list --env QA
+gh secret list --env PROD
 
-# 3. Test deploy-dev (makes changes)
+# Test the simplest workflow first
 gh workflow run deploy-dev.yml
 ```
 
@@ -122,28 +143,13 @@ gh workflow run deploy-dev.yml
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| `Failed to connect to DB: 250001` | Bad account, user, or key | Verify `SNOWFLAKE_ACCOUNT` and `SNOWFLAKE_USER`. Test key locally: `snow connection test` |
-| `Private key is not in PKCS8 format` | Key format wrong | Re-export: `openssl pkcs8 -topk8 -inform PEM -in key.pem -out key.p8 -nocrypt` |
-| `SQL access control error` | Role lacks grants | Run DCM first to create roles/grants, or use `ACCOUNTADMIN` initially |
-| `Environment 'production' not found` | Missing GH environment | Create `production` environment in Settings → Environments |
-| `SNOWFLAKE_PRIVATE_KEY_RAW not set` | DCM secret missing | Set `SNOWFLAKE_PRIVATE_KEY_RAW` (same value as `SNOWFLAKE_PRIVATE_KEY`) |
-| `dbt deps fails` | Key not written to disk | Ensure the `Write private key` step runs before dbt steps |
-
-## Per-Environment Role/Warehouse Strategy
-
-The workflows currently use a single set of secrets (`SNOWFLAKE_ROLE`, `SNOWFLAKE_WAREHOUSE`) for all environments. For production setups, you may want per-environment secrets:
-
-```
-SNOWFLAKE_ROLE_DEV=AM_DEPLOY_ROLE_DEV
-SNOWFLAKE_ROLE_QA=AM_DEPLOY_ROLE_QA
-SNOWFLAKE_ROLE_PROD=AM_DEPLOY_ROLE_PROD
-
-SNOWFLAKE_WAREHOUSE_DEV=AM_SKI_RESORT_WH_DEV
-SNOWFLAKE_WAREHOUSE_QA=AM_SKI_RESORT_WH_QA
-SNOWFLAKE_WAREHOUSE_PROD=AM_SKI_RESORT_WH_PROD
-```
-
-This would require updating the workflow `env:` blocks to reference the correct secret per environment. The current setup works fine when using `ACCOUNTADMIN` or a role that has access to all three databases.
+| `Failed to connect to DB: 250001` | Bad account, user, or key | Verify `SNOWFLAKE_ACCOUNT` and `SNOWFLAKE_USER` |
+| `Private key is not in PKCS8 format` | Key format wrong | `openssl pkcs8 -topk8 -inform PEM -in key.pem -out key.p8 -nocrypt` |
+| `SQL access control error` | Role lacks grants | Check environment secrets point to correct role |
+| `Environment 'production' not found` | Missing GH environment | Run `setup_github_environments.sh` |
+| `SNOWFLAKE_WAREHOUSE` is empty | Missing env secret | Job needs `environment:` declaration + env-level secret set |
+| `DATASCIENCE.RAW` in dbt errors | IDE env contamination | Force-set `SNOWFLAKE_DATABASE` or use `test_workflow_locally.sh` |
+| `dbt source tests fail` | Deploy role can't create test schema | Use `dbt run` not `dbt build` in deploy workflows |
 
 ## Optional: Two-Environment Setup (No QA)
 
@@ -151,4 +157,4 @@ QA is optional. To run dev → prod only:
 
 1. Don't trigger `promote-qa.yml`
 2. Optionally remove `environments/qa.env.yml` and the `qa:` block from `project.yml`
-3. Consider making dev's eval gate stricter (change `continue-on-error: true` to `false` in `deploy-dev.yml` → `sv-eval-gate`)
+3. Consider making dev's eval gate stricter (`continue-on-error: false` in `deploy-dev.yml` → `sv-eval-gate`)

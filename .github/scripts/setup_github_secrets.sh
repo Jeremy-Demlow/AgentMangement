@@ -4,45 +4,39 @@ set -euo pipefail
 #
 # Sets all required GitHub Actions secrets for the AgentManagement repo.
 #
-# What this creates:
-#   6 repository-level secrets in GitHub Actions:
-#     SNOWFLAKE_ACCOUNT        -> Your Snowflake account identifier
-#     SNOWFLAKE_USER           -> The Snowflake user that CI runs as
-#     SNOWFLAKE_PRIVATE_KEY    -> PEM private key for JWT auth (deploy/promote/validate/rollback)
-#     SNOWFLAKE_PRIVATE_KEY_RAW-> Same key, separate name required by Snowflake DCM reusable actions
-#     SNOWFLAKE_WAREHOUSE      -> Default warehouse for CI jobs
-#     SNOWFLAKE_ROLE           -> Default role for CI jobs
+# Architecture:
+#   4 REPO-LEVEL secrets (shared across all environments):
+#     SNOWFLAKE_ACCOUNT         -> Snowflake account identifier
+#     SNOWFLAKE_USER            -> Snowflake user for CI
+#     SNOWFLAKE_PRIVATE_KEY     -> PEM private key for JWT auth
+#     SNOWFLAKE_PRIVATE_KEY_RAW -> Same key (required by DCM reusable actions)
 #
-#   All workflows use key-pair (JWT) auth. No password or PAT needed.
+#   3 ENVIRONMENT-LEVEL secrets (per DEV/QA/PROD/production):
+#     SNOWFLAKE_WAREHOUSE       -> Environment-specific warehouse
+#     SNOWFLAKE_ROLE            -> Environment-specific deploy role
+#     SNOWFLAKE_DATABASE        -> Environment-specific database
+#
+#   All workflows use key-pair (JWT) auth. No password needed.
 #
 # Prerequisites:
 #   - gh CLI installed and authenticated (`gh auth login`)
-#   - Run from the repo root (or any dir — script uses -R flag)
 #   - Private key file at the path below (or override with SNOWFLAKE_KEY_PATH)
+#   - GitHub environments already created (run setup_github_environments.sh first)
 #
 # Usage:
 #   .github/scripts/setup_github_secrets.sh
-#
-# To override defaults, set env vars before running:
-#   SNOWFLAKE_KEY_PATH=~/.snowflake/keys/my_other_key.p8 \
-#   GH_REPO=org/repo \
-#     .github/scripts/setup_github_secrets.sh
 #
 
 REPO="${GH_REPO:-Jeremy-Demlow/AgentMangement}"
 ACCOUNT="${SNOWFLAKE_ACCOUNT:-trb65519}"
 USER="${SNOWFLAKE_USER:-JDEMLOW}"
-WAREHOUSE="${SNOWFLAKE_WAREHOUSE:-AM_SKI_RESORT_WH_PROD}"
-ROLE="${SNOWFLAKE_ROLE:-AM_DEPLOY_ROLE_PROD}"
 KEY_PATH="${SNOWFLAKE_KEY_PATH:-$HOME/.snowflake/keys/snowflake_tf_key.p8}"
 
 echo "=== GitHub Actions Secret Setup ==="
-echo "Repo:      $REPO"
-echo "Account:   $ACCOUNT"
-echo "User:      $USER"
-echo "Warehouse: $WAREHOUSE"
-echo "Role:      $ROLE"
-echo "Key file:  $KEY_PATH"
+echo "Repo:     $REPO"
+echo "Account:  $ACCOUNT"
+echo "User:     $USER"
+echo "Key file: $KEY_PATH"
 echo ""
 
 if ! command -v gh &> /dev/null; then
@@ -62,27 +56,62 @@ if [ ! -f "$KEY_PATH" ]; then
   exit 1
 fi
 
+echo "--- Repo-level secrets (4) ---"
+
 echo "Setting SNOWFLAKE_ACCOUNT..."
 echo "$ACCOUNT" | gh secret set SNOWFLAKE_ACCOUNT -R "$REPO"
 
 echo "Setting SNOWFLAKE_USER..."
 echo "$USER" | gh secret set SNOWFLAKE_USER -R "$REPO"
 
-echo "Setting SNOWFLAKE_PRIVATE_KEY (from $KEY_PATH)..."
+echo "Setting SNOWFLAKE_PRIVATE_KEY..."
 gh secret set SNOWFLAKE_PRIVATE_KEY -R "$REPO" < "$KEY_PATH"
 
-echo "Setting SNOWFLAKE_PRIVATE_KEY_RAW (same key, required by DCM actions)..."
+echo "Setting SNOWFLAKE_PRIVATE_KEY_RAW..."
 gh secret set SNOWFLAKE_PRIVATE_KEY_RAW -R "$REPO" < "$KEY_PATH"
 
-echo "Setting SNOWFLAKE_WAREHOUSE..."
-echo "$WAREHOUSE" | gh secret set SNOWFLAKE_WAREHOUSE -R "$REPO"
+echo ""
+echo "--- Environment-level secrets (3 per env) ---"
 
-echo "Setting SNOWFLAKE_ROLE..."
-echo "$ROLE" | gh secret set SNOWFLAKE_ROLE -R "$REPO"
+declare -A ENV_WH=(
+  [DEV]="AM_SKI_RESORT_WH_DEV"
+  [QA]="AM_SKI_RESORT_WH_QA"
+  [PROD]="AM_SKI_RESORT_WH_PROD"
+  [production]="AM_SKI_RESORT_WH_PROD"
+)
+declare -A ENV_ROLE=(
+  [DEV]="AM_DEPLOY_ROLE_DEV"
+  [QA]="AM_DEPLOY_ROLE_QA"
+  [PROD]="AM_DEPLOY_ROLE_PROD"
+  [production]="AM_DEPLOY_ROLE_PROD"
+)
+declare -A ENV_DB=(
+  [DEV]="AM_SKI_RESORT_DEV"
+  [QA]="AM_SKI_RESORT_QA"
+  [PROD]="AM_SKI_RESORT_PROD"
+  [production]="AM_SKI_RESORT_PROD"
+)
+
+for ENV_NAME in DEV QA PROD production; do
+  echo ""
+  echo "Setting secrets for environment: $ENV_NAME"
+  echo "  SNOWFLAKE_WAREHOUSE = ${ENV_WH[$ENV_NAME]}"
+  echo "  SNOWFLAKE_ROLE      = ${ENV_ROLE[$ENV_NAME]}"
+  echo "  SNOWFLAKE_DATABASE  = ${ENV_DB[$ENV_NAME]}"
+
+  echo "${ENV_WH[$ENV_NAME]}" | gh secret set SNOWFLAKE_WAREHOUSE -R "$REPO" --env "$ENV_NAME"
+  echo "${ENV_ROLE[$ENV_NAME]}" | gh secret set SNOWFLAKE_ROLE -R "$REPO" --env "$ENV_NAME"
+  echo "${ENV_DB[$ENV_NAME]}" | gh secret set SNOWFLAKE_DATABASE -R "$REPO" --env "$ENV_NAME"
+done
 
 echo ""
-echo "=== Done: 6 secrets set ==="
+echo "=== Done: 4 repo secrets + 12 environment secrets (3 x 4 envs) ==="
 echo ""
-echo "Verify with:  gh secret list -R $REPO"
+echo "Verify with:"
+echo "  gh secret list -R $REPO"
+echo "  gh secret list -R $REPO --env DEV"
+echo "  gh secret list -R $REPO --env QA"
+echo "  gh secret list -R $REPO --env PROD"
+echo "  gh secret list -R $REPO --env production"
 echo ""
 echo "All workflows use key-pair (JWT) auth. No password needed."

@@ -35,8 +35,11 @@ class ConfigurationError(Exception):
 
 
 def _load_snow_cli_config() -> Dict[str, Any]:
-    """Load Snow CLI configuration from ~/.snowflake/config.toml"""
-    config_path = Path.home() / ".snowflake" / "config.toml"
+    """Load Snow CLI configuration from ~/.snowflake/connections.toml"""
+    config_path = Path.home() / ".snowflake" / "connections.toml"
+
+    if not config_path.exists():
+        config_path = Path.home() / ".snowflake" / "config.toml"
 
     if not config_path.exists():
         return {}

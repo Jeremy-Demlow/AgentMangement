@@ -1,0 +1,341 @@
+version: 2
+
+sources:
+  - name: raw
+    description: Raw transactional data from ski resort operations
+    database: "{{ target.database }}"
+    schema: RAW
+    tables:
+      - name: customers
+        description: Customer master data
+        columns:
+          - name: customer_id
+            description: Unique customer identifier
+            tests:
+              - unique
+              - not_null
+
+      - name: lifts
+        description: Lift infrastructure metadata
+        columns:
+          - name: lift_id
+            description: Unique lift identifier
+            tests:
+              - unique
+              - not_null
+
+      - name: locations
+        description: Physical locations (rental shops, F&B venues, ticket windows)
+        columns:
+          - name: location_id
+            description: Unique location identifier
+            tests:
+              - unique
+              - not_null
+
+      - name: products
+        description: Products for rental and F&B
+        columns:
+          - name: product_id
+            description: Unique product identifier
+            tests:
+              - unique
+              - not_null
+
+      - name: ticket_types
+        description: Ticket and pass type definitions
+        columns:
+          - name: ticket_type_id
+            description: Unique ticket type identifier
+            tests:
+              - unique
+              - not_null
+
+      - name: lift_scans
+        description: Individual lift scan events
+        columns:
+          - name: scan_id
+            description: Unique scan identifier
+          - name: customer_id
+            description: Customer who scanned
+          - name: lift_id
+            description: Lift that was scanned
+          - name: scan_timestamp
+            description: Timestamp of the scan
+
+      - name: pass_usage
+        description: Daily customer visit tracking
+        columns:
+          - name: usage_id
+            description: Unique usage record identifier
+          - name: customer_id
+            description: Customer who visited
+          - name: visit_date
+            description: Date of visit
+
+      - name: ticket_sales
+        description: Ticket and pass purchase transactions
+        columns:
+          - name: sale_id
+            description: Unique sale identifier
+          - name: customer_id
+            description: Customer who purchased
+          - name: ticket_type_id
+            description: Type of ticket/pass purchased
+
+      - name: rentals
+        description: Equipment rental transactions
+        columns:
+          - name: rental_id
+            description: Unique rental identifier
+          - name: customer_id
+            description: Customer who rented
+
+      - name: food_beverage
+        description: Food and beverage transactions
+        columns:
+          - name: transaction_id
+            description: Unique F&B transaction identifier
+          - name: customer_id
+            description: Customer who purchased
+
+      - name: weather_conditions
+        description: Daily weather conditions by mountain zone
+        columns:
+          - name: weather_date
+            description: Date of weather observation
+          - name: mountain_zone
+            description: Mountain zone (Summit Peak, North Ridge, etc)
+          - name: snow_condition
+            description: Snow surface condition
+          - name: snowfall_inches
+            description: New snowfall in inches
+          - name: base_depth_inches
+            description: Snow base depth
+          - name: temp_high_f
+            description: High temperature (Fahrenheit)
+          - name: temp_low_f
+            description: Low temperature (Fahrenheit)
+          - name: wind_speed_mph
+            description: Wind speed in MPH
+          - name: storm_warning
+            description: Storm warning flag
+
+      - name: staffing_schedule
+        description: Daily staffing schedules by department
+        columns:
+          - name: schedule_id
+            description: Unique schedule identifier
+          - name: schedule_date
+            description: Date of the shift
+          - name: department
+            description: Department (Lift Operations, F&B, Rentals, etc)
+          - name: job_role
+            description: Specific job role
+          - name: scheduled_employees
+            description: Number of employees scheduled
+          - name: actual_employees
+            description: Actual employees who worked
+          - name: coverage_ratio
+            description: Actual/Scheduled ratio
+
+      - name: marketing_touches
+        description: Marketing campaign touchpoints and performance
+        columns:
+          - name: touch_id
+            description: Unique marketing touch identifier
+          - name: campaign_id
+            description: Campaign identifier
+          - name: campaign_name
+            description: Campaign name
+          - name: campaign_channel
+            description: Marketing channel (Email, Social, etc)
+          - name: campaign_type
+            description: Campaign type (Acquisition, Retention, etc)
+          - name: audience_segment
+            description: Target audience segment
+          - name: sent_date
+            description: Date campaign was sent
+          - name: target_count
+            description: Number of recipients targeted
+          - name: open_rate
+            description: Email open rate
+          - name: click_rate
+            description: Click-through rate
+          - name: conversion_count
+            description: Number of conversions
+          - name: revenue_attributed
+            description: Revenue attributed to campaign
+
+      # Phase 1: Marketing & Season Pass Tables
+      - name: season_pass_sales
+        description: Season pass purchase transactions
+        columns:
+          - name: sale_id
+            description: Unique sale identifier
+            tests:
+              - unique
+              - not_null
+          - name: customer_id
+            description: Customer who purchased
+          - name: ticket_type_id
+            description: Pass type purchased
+          - name: purchase_date
+            description: Date of purchase
+          - name: purchase_amount
+            description: Final purchase amount
+
+      - name: marketing_campaigns
+        description: Marketing campaign master data
+        columns:
+          - name: campaign_id
+            description: Unique campaign identifier
+            tests:
+              - unique
+              - not_null
+          - name: campaign_name
+            description: Name of campaign
+          - name: campaign_type
+            description: Type (Acquisition, Retention, etc)
+
+      - name: customer_campaign_touches
+        description: Individual customer interactions with marketing campaigns
+        columns:
+          - name: touch_id
+            description: Unique touch identifier
+            tests:
+              - unique
+              - not_null
+          - name: customer_id
+            description: Customer who received touch
+          - name: campaign_id
+            description: Campaign associated with touch
+          - name: channel
+            description: Channel (email, sms, social)
+          - name: was_delivered
+            description: Whether message was delivered
+          - name: was_opened
+            description: Whether message was opened
+          - name: converted
+            description: Whether customer converted
+
+      # Phase 2: Lessons, Incidents, Feedback
+      - name: ski_lessons
+        description: Ski and snowboard lesson bookings
+        columns:
+          - name: lesson_id
+            description: Unique lesson identifier
+            tests:
+              - unique:
+                  severity: warn
+              - not_null
+          - name: customer_id
+            description: Customer taking lesson
+          - name: instructor_id
+            description: Instructor teaching
+          - name: lesson_type
+            description: Type (Private, Group, Kids, etc)
+          - name: skill_level
+            description: Student skill level
+
+      - name: incidents
+        description: Safety incidents and accident reports
+        columns:
+          - name: incident_id
+            description: Unique incident identifier
+            tests:
+              - unique:
+                  severity: warn
+              - not_null
+          - name: incident_type
+            description: Type of incident
+          - name: severity
+            description: Severity level
+
+      - name: customer_feedback
+        description: Customer satisfaction and feedback
+        columns:
+          - name: feedback_id
+            description: Unique feedback identifier
+            tests:
+              - unique:
+                  severity: warn
+              - not_null
+          - name: customer_id
+            description: Customer who submitted
+          - name: category
+            description: Feedback category
+          - name: sentiment
+            description: Sentiment (Positive, Neutral, Negative)
+          - name: rating
+            description: Numeric rating
+
+      # Phase 3: Operations - Staff, Parking, Grooming
+      - name: instructors
+        description: Ski instructor roster
+        columns:
+          - name: instructor_id
+            description: Unique instructor identifier
+            tests:
+              - unique
+              - not_null
+          - name: instructor_name
+            description: Instructor name
+          - name: certification_level
+            description: Certification level
+
+      - name: employees
+        description: Full employee roster
+        columns:
+          - name: employee_id
+            description: Unique employee identifier
+            tests:
+              - unique
+              - not_null
+          - name: department
+            description: Department
+          - name: job_title
+            description: Job title
+
+      - name: parking_lots
+        description: Parking lot reference data
+        columns:
+          - name: lot_id
+            description: Unique lot identifier
+            tests:
+              - unique
+              - not_null
+          - name: lot_name
+            description: Lot name
+          - name: total_spaces
+            description: Total parking spaces
+
+      - name: parking_occupancy
+        description: Hourly parking lot occupancy
+        columns:
+          - name: record_id
+            description: Unique occupancy record identifier
+            tests:
+              - unique:
+                  severity: warn
+              - not_null
+          - name: lot_id
+            description: Parking lot
+          - name: recorded_at
+            description: Timestamp of reading
+          - name: occupied_spaces
+            description: Number of spaces occupied
+
+      - name: grooming_logs
+        description: Trail grooming activity logs
+        columns:
+          - name: log_id
+            description: Unique grooming log identifier
+            tests:
+              - unique:
+                  severity: warn
+              - not_null
+          - name: trail_name
+            description: Trail that was groomed
+          - name: grooming_type
+            description: Type of grooming performed

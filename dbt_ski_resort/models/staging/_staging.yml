@@ -1,0 +1,272 @@
+version: 2
+
+models:
+  - name: stg_lift_scans
+    description: Cleaned and typed lift scan events from raw data
+    columns:
+      - name: scan_id
+        description: Unique scan identifier
+        tests:
+          - unique
+          - not_null
+      - name: customer_id
+        description: Foreign key to customer
+        tests:
+          - not_null
+      - name: lift_id
+        description: Foreign key to lift
+        tests:
+          - not_null
+      - name: scan_timestamp
+        description: When the scan occurred
+        tests:
+          - not_null
+
+  - name: stg_pass_usage
+    description: Cleaned daily customer visit tracking
+    columns:
+      - name: usage_id
+        description: Unique usage record
+        tests:
+          - unique
+          - not_null
+
+  - name: stg_ticket_sales
+    description: Cleaned ticket and pass sales
+    columns:
+      - name: sale_id
+        description: Unique sale identifier
+        tests:
+          - unique
+          - not_null
+      - name: purchase_timestamp
+        description: Timestamp the ticket was purchased
+      - name: purchase_channel
+        description: Sales channel (online, window, kiosk)
+      - name: purchase_amount
+        description: Amount collected for the ticket
+
+  - name: stg_rentals
+    description: Cleaned rental transactions
+    columns:
+      - name: rental_id
+        description: Unique rental identifier
+        tests:
+          - unique
+          - not_null
+      - name: rental_timestamp
+        description: Rental start timestamp
+      - name: return_timestamp
+        description: Rental return timestamp
+      - name: rental_amount
+        description: Rental revenue for the transaction
+
+  - name: stg_food_beverage
+    description: Cleaned F&B transactions
+    columns:
+      - name: transaction_id
+        description: Unique transaction identifier
+        tests:
+          - unique
+          - not_null
+      - name: transaction_timestamp
+        description: Timestamp of the F&B purchase
+      - name: total_amount
+        description: Total spend for the transaction
+
+  - name: stg_weather_conditions
+    description: Daily weather observations by mountain zone
+    columns:
+      - name: weather_date
+        description: Date of weather observation
+        tests:
+          - not_null
+      - name: mountain_zone
+        description: Mountain zone (Summit Peak, North Ridge, etc)
+        tests:
+          - not_null
+      - name: snowfall_inches
+        description: New snowfall in inches
+      - name: is_powder_day
+        description: Flag for 6+ inches of new snow
+
+  - name: stg_staffing_schedule
+    description: Daily staffing schedules by department and role
+    columns:
+      - name: schedule_id
+        description: Unique schedule identifier
+        tests:
+          - unique
+          - not_null
+      - name: schedule_date
+        description: Date of the scheduled shift
+      - name: department
+        description: Department (Lift Operations, F&B, etc)
+      - name: coverage_ratio
+        description: Actual vs scheduled staff ratio
+
+  - name: stg_marketing_touches
+    description: Marketing campaign touchpoints and performance
+    columns:
+      - name: touch_id
+        description: Unique marketing touch identifier
+        tests:
+          - unique
+          - not_null
+      - name: campaign_id
+        description: Campaign identifier
+      - name: sent_date
+        description: Date campaign was sent
+      - name: revenue_attributed
+        description: Revenue attributed to campaign
+
+  # Phase 1: Marketing & Season Pass
+  - name: stg_season_pass_sales
+    description: Season pass purchase transactions
+    columns:
+      - name: sale_id
+        description: Unique sale identifier
+        tests:
+          - unique
+          - not_null
+      - name: customer_id
+        description: Customer who purchased
+      - name: purchase_date
+        description: Date of purchase
+      - name: purchase_amount
+        description: Final amount paid
+
+  - name: stg_marketing_campaigns
+    description: Marketing campaign master data
+    columns:
+      - name: campaign_id
+        description: Unique campaign identifier
+        tests:
+          - unique
+          - not_null
+      - name: campaign_type
+        description: Type of campaign
+
+  - name: stg_campaign_touches
+    description: Individual customer interactions with campaigns
+    columns:
+      - name: touch_id
+        description: Unique touch identifier
+        tests:
+          - unique
+          - not_null
+      - name: customer_id
+        description: Customer who received the touch
+      - name: converted
+        description: Whether customer converted
+
+  # Phase 2: Lessons, Incidents, Feedback
+  - name: stg_ski_lessons
+    description: Ski and snowboard lesson bookings
+    columns:
+      - name: lesson_id
+        description: Unique lesson identifier
+        tests:
+          - unique
+          - not_null
+      - name: customer_id
+        description: Customer taking lesson
+      - name: lesson_type
+        description: Type of lesson
+
+  - name: stg_incidents
+    description: Safety incidents and accident reports
+    columns:
+      - name: incident_id
+        description: Unique incident identifier
+        tests:
+          - unique
+          - not_null
+      - name: incident_type
+        description: Type of incident
+        tests:
+          - accepted_values:
+              values: ['collision', 'fall', 'equipment_failure', 'medical', 'lost_skier', 'lift_issue', 'injury', 'lift_stop', 'medical_emergency', 'weather_closure']
+      - name: severity
+        description: Severity level
+        tests:
+          - accepted_values:
+              values: ['minor', 'moderate', 'serious', 'major', 'critical']
+      - name: patrol_response_minutes
+        description: Response time in minutes
+
+  - name: stg_customer_feedback
+    description: Customer satisfaction and feedback
+    columns:
+      - name: feedback_id
+        description: Unique feedback identifier
+        tests:
+          - unique
+          - not_null
+      - name: customer_id
+        description: Customer who submitted
+      - name: sentiment
+        description: Sentiment (Positive/Neutral/Negative)
+        tests:
+          - accepted_values:
+              values: ['positive', 'neutral', 'negative']
+      - name: nps_score
+        description: Net Promoter Score (0-10)
+
+  # Phase 3: Operations
+  - name: stg_instructors
+    description: Ski instructor roster
+    columns:
+      - name: instructor_id
+        description: Unique instructor identifier
+        tests:
+          - unique
+          - not_null
+
+  - name: stg_employees
+    description: Full employee roster
+    columns:
+      - name: employee_id
+        description: Unique employee identifier
+        tests:
+          - unique
+          - not_null
+      - name: department
+        description: Department
+
+  - name: stg_parking_lots
+    description: Parking lot reference data
+    columns:
+      - name: lot_id
+        description: Unique lot identifier
+        tests:
+          - unique
+          - not_null
+      - name: total_spaces
+        description: Total parking spaces
+
+  - name: stg_parking_occupancy
+    description: Hourly parking lot occupancy
+    columns:
+      - name: record_id
+        description: Unique occupancy record
+        tests:
+          - unique
+          - not_null
+      - name: lot_id
+        description: Parking lot
+      - name: occupancy_percent
+        description: Percentage occupied
+
+  - name: stg_grooming_logs
+    description: Trail grooming activity logs
+    columns:
+      - name: log_id
+        description: Unique grooming log
+        tests:
+          - unique
+          - not_null
+      - name: trail_name
+        description: Trail that was groomed
+      - name: grooming_type
+        description: Type of grooming

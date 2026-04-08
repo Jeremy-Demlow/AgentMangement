@@ -1,6 +1,6 @@
 [project]
 name = "agent-management"
-version = "0.6.0"
+version = "0.5.0"
 description = "CI/CD reference framework for Snowflake Cortex Agents, Semantic Views, and dbt"
 readme = "README.md"
 requires-python = ">=3.11"

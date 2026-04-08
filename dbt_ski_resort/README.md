@@ -77,6 +77,46 @@ This project uses the `dbt_ski_resort` profile. The `profiles.yml` is configured
 - Local development via Snowflake CLI
 - dbt Projects on Snowflake (native execution)
 
+Environment-specific targets:
+
+| Target | Database | Warehouse | Role |
+|--------|----------|-----------|------|
+| `dev` | `AM_SKI_RESORT_DEV` | `AM_SKI_RESORT_WH_DEV` | `AM_DEPLOY_ROLE_DEV` |
+| `qa` | `AM_SKI_RESORT_QA` | `AM_SKI_RESORT_WH_QA` | `AM_DEPLOY_ROLE_QA` |
+| `prod` | `AM_SKI_RESORT_PROD` | `AM_SKI_RESORT_WH_PROD` | `AM_DEPLOY_ROLE_PROD` |
+
+## CI/CD Integration
+
+### `dbt run` vs `dbt build`
+
+CI/CD deploy workflows use `dbt run` (not `dbt build`) because `dbt build` includes tests that store failures to a `DBT_TEST__AUDIT` schema. The deploy role cannot create this schema unless DCM has provisioned it first. After DCM deploys the schema with proper grants, `dbt build` becomes viable.
+
+### Selector Patterns
+
+The `+` prefix in dbt selectors means "build this AND all upstream dependencies":
+
+```bash
+dbt run --target dev --select "+marts.facts" --profiles-dir .
+```
+
+This builds all staging views first (upstream dependencies), then dimensions, then fact tables — in dependency order.
+
+```bash
+dbt run --target dev --select "marts.semantic" --profiles-dir .
+```
+
+Semantic views reference fact/dimension tables, so they run after facts.
+
+### `--profiles-dir .`
+
+In CI/CD, `--profiles-dir .` tells dbt to use the `profiles.yml` in the project directory (not `~/.dbt/profiles.yml`). This ensures the CI runner uses the checked-in profile with environment variable overrides.
+
+### Environment Variable Override
+
+The `profiles.yml` uses `{{ env_var('SNOWFLAKE_DATABASE', 'AM_SKI_RESORT_DEV') }}` for all connection properties. GitHub Actions sets these via environment secrets. Locally, the `test_workflow_locally.sh` script force-sets them per `TARGET_ENV`.
+
+**Warning:** The Snowflake IDE (Cortex Code) sets `SNOWFLAKE_DATABASE` in the parent shell environment. This overrides the `${VAR:-default}` bash syntax and can cause dbt to target the wrong database. Always explicitly set environment variables when running dbt locally.
+
 ## Data Refresh
 
 The models support incremental loads:

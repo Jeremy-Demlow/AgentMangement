@@ -22,6 +22,9 @@ DEFINE SCHEMA {{db}}.AGENTS{{agents_schema_suffix}}
     WITH MANAGED ACCESS
     COMMENT = 'Cortex Agents and eval infrastructure';
 
+DEFINE SCHEMA {{db}}.DBT_TEST__AUDIT
+    COMMENT = 'dbt test store_failures results (auto-created by dbt build)';
+
 DEFINE WAREHOUSE {{wh_name}}
 WITH
     WAREHOUSE_SIZE = '{{wh_size}}'

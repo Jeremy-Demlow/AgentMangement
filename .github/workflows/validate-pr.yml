@@ -6,7 +6,7 @@ on:
     paths:
       - 'agents/specs/**'
       - 'semantic-views/definitions/**'
-      - 'scripts/**'
+      - 'agent_management/**'
       - 'environments/**'
       - 'tests/**'
       - 'dbt_ski_resort/**'
@@ -35,7 +35,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install pyyaml jinja2 snowflake-connector-python cryptography pytest
+          pip install -r requirements.txt pytest
 
       - name: Run smoke tests
         run: pytest tests/test_smoke.py tests/test_templates.py -v
@@ -52,7 +52,7 @@ jobs:
           cache: 'pip'
 
       - name: Install dependencies
-        run: pip install pyyaml jinja2 snowflake-connector-python cryptography
+        run: pip install -r requirements.txt
 
       - name: Validate all specs for dev
         env:
@@ -169,7 +169,7 @@ jobs:
           cache: 'pip'
 
       - name: Install dependencies
-        run: pip install pyyaml jinja2 snowflake-connector-python cryptography
+        run: pip install -r requirements.txt
 
       - name: Write private key
         run: echo "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/snowflake_key.p8

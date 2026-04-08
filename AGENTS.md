@@ -26,6 +26,8 @@ These principles combine fast.ai's engineering philosophy with Snowflake-specifi
 
 8. **CI/CD discipline** — every change goes through PR -> validate -> deploy -> eval gate. No manual Snowsight edits to agents or semantic views. If it is not in Git, it does not exist.
 
+9. **dbt in CI uses `dbt run`, not `dbt build`** — deploy roles cannot create the `DBT_TEST__AUDIT` schema needed by `dbt build` (test storage). After DCM deploys the schema, `dbt build` becomes viable. Use `dbt run --select "+marts.facts"` (the `+` prefix builds upstream staging dependencies).
+
 ## Workflow
 1. **Understand** — read the relevant requirement in `requirements/` and its user stories
 2. **Plan** — use the todo tool to break work into steps; confirm ambiguous items with user
@@ -65,13 +67,21 @@ AgentMangement/
 ├── .gitignore
 │
 ├── .github/workflows/                     # CI/CD workflows
-│   ├── daily_data_refresh.yml             # Daily data pipeline (EXISTS)
+│   ├── daily_data_refresh.yml             # Daily data pipeline (environment: PROD)
 │   ├── dcm-deploy.yml                  # DCM infrastructure deploy
 │   ├── validate-pr.yml                    # Lint + validate on PR
-│   ├── deploy-dev.yml                     # Deploy on merge to main
-│   ├── promote-qa.yml                     # Manual promote with eval gate
-│   ├── promote-prod.yml                   # Manual promote with approval + eval gate
+│   ├── deploy-dev.yml                     # Deploy on merge to main (environment: DEV)
+│   ├── promote-qa.yml                     # Manual promote with eval gate (environment: QA)
+│   ├── promote-prod.yml                   # Manual promote with approval + eval gate (environment: PROD)
 │   └── rollback.yml                       # Rollback any environment
+│
+├── .github/scripts/                       # CI/CD helper scripts
+│   ├── setup_github_secrets.sh             # Set repo + environment secrets (4 repo + 3×4 env)
+│   ├── setup_github_environments.sh        # Create GitHub environments with descriptions
+│   ├── teardown.sh                         # Remove all secrets + environments
+│   └── test_workflow_locally.sh            # Run workflow steps locally against real Snowflake
+│
+├── .github/PIPELINE_SETUP.md              # CI/CD pipeline setup guide
 │
 ├── dcm/                                  # Infrastructure as Code (DCM)
 │   ├── manifest.yml                      # DEV/QA/PROD targets + templating

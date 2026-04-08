@@ -49,6 +49,7 @@ jobs:
   data-refresh:
     name: Generate Data & Run DBT
     runs-on: ubuntu-latest
+    environment: PROD
 
     env:
       SNOWFLAKE_CONNECTIONS_DEFAULT_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
@@ -89,11 +90,14 @@ jobs:
               out.write(f'raw_tables={chr(10).join(raw_tables)}\n')
           "
 
+      - name: Create connections.toml
+        run: printf '[connections]\n[connections.default]\n' > connections.toml
+
       - name: Setup Snowflake CLI
         uses: snowflakedb/snowflake-cli-action@v1.5
         with:
           cli-version: "latest"
-          default-config-file-path: "config.toml"
+          default-config-file-path: "connections.toml"
         env:
           SNOWFLAKE_CONNECTIONS_DEFAULT_DATABASE: ${{ steps.config.outputs.prod_database }}
           SNOWFLAKE_CONNECTIONS_DEFAULT_SCHEMA: ${{ steps.config.outputs.raw_schema }}
@@ -115,7 +119,7 @@ jobs:
       - name: Install Python Dependencies
         run: |
           pip install --upgrade pip
-          pip install "snowflake-snowpark-python[pandas]" pandas pyarrow numpy pyyaml toml pydantic cryptography
+          pip install -r requirements-dev.txt
 
       # ─── Data Integrity Check ───────────────────────────────────────────
       - name: Check Data Integrity & Coverage
@@ -300,9 +304,9 @@ jobs:
         run: |
           if [ "${{ github.event.inputs.full_refresh }}" = "true" ]; then
             echo "Full refresh requested - rebuilding all fact tables..."
-            dbt run --select "marts.facts" --full-refresh
+            dbt run --select "+marts.facts" --full-refresh
           else
-            dbt run --select "marts.facts"
+            dbt run --select "+marts.facts"
           fi
 
       - name: Run DBT Semantic Views

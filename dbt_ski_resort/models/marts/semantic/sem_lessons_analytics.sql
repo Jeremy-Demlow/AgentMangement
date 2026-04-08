@@ -1,0 +1,58 @@
+{{ config(materialized='semantic_view') }}
+
+-- Lessons Analytics semantic view (simplified)
+
+TABLES (
+    FACT_LESSONS AS {{ ref('fact_lessons') }}
+      PRIMARY KEY (LESSON_ID)
+      WITH SYNONYMS ('lessons', 'ski_school', 'instruction')
+      COMMENT = 'Ski lesson bookings'
+)
+
+FACTS (
+    FACT_LESSONS.LESSON_AMOUNT AS LESSON_AMOUNT
+      COMMENT = 'Base lesson price',
+    FACT_LESSONS.TOTAL_LESSON_REVENUE AS TOTAL_LESSON_REVENUE
+      COMMENT = 'Total lesson revenue',
+    FACT_LESSONS.DURATION_HOURS AS DURATION_HOURS
+      COMMENT = 'Lesson duration',
+    FACT_LESSONS.GROUP_SIZE AS GROUP_SIZE
+      COMMENT = 'Group size',
+    FACT_LESSONS.STUDENT_RATING AS STUDENT_RATING
+      COMMENT = 'Student rating'
+)
+
+DIMENSIONS (
+    FACT_LESSONS.LESSON_DATE AS LESSON_DATE
+      COMMENT = 'Date of lesson',
+    FACT_LESSONS.LESSON_TYPE AS LESSON_TYPE
+      WITH SYNONYMS ('type')
+      COMMENT = 'Lesson type',
+    FACT_LESSONS.SPORT_TYPE AS SPORT_TYPE
+      COMMENT = 'Sport',
+    FACT_LESSONS.SKILL_LEVEL AS SKILL_LEVEL
+      COMMENT = 'Skill level',
+    FACT_LESSONS.INSTRUCTOR_NAME AS INSTRUCTOR_NAME
+      COMMENT = 'Instructor',
+    FACT_LESSONS.BOOKING_CHANNEL AS BOOKING_CHANNEL
+      COMMENT = 'Booking channel',
+    FACT_LESSONS.COMPLETED AS COMPLETED
+      COMMENT = 'Completed',
+    FACT_LESSONS.CUSTOMER_SEGMENT AS CUSTOMER_SEGMENT
+      COMMENT = 'Customer segment'
+)
+
+METRICS (
+    FACT_LESSONS.TOTAL_LESSONS AS COUNT(FACT_LESSONS.LESSON_ID)
+      COMMENT = 'Total lessons',
+    FACT_LESSONS.TOTAL_REVENUE AS SUM(FACT_LESSONS.TOTAL_LESSON_REVENUE)
+      COMMENT = 'Total revenue',
+    FACT_LESSONS.AVG_STUDENT_RATING AS AVG(FACT_LESSONS.STUDENT_RATING)
+      COMMENT = 'Avg student rating',
+    FACT_LESSONS.PRIVATE_LESSONS AS COUNT(CASE WHEN FACT_LESSONS.LESSON_TYPE = 'Private' THEN 1 END)
+      COMMENT = 'Private lessons',
+    FACT_LESSONS.GROUP_LESSONS AS COUNT(CASE WHEN FACT_LESSONS.LESSON_TYPE = 'Group' THEN 1 END)
+      COMMENT = 'Group lessons'
+)
+
+COMMENT = 'Ski school analytics'

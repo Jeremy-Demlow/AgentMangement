@@ -1,0 +1,90 @@
+version: 2
+
+models:
+  - name: sem_operations
+    description: |
+      Ski resort lift and mountain operations semantic view. Tracks wait times, capacity
+      utilization, weather context, and lift performance to support on-mountain decision making.
+    config:
+      materialized: semantic_view
+      schema: semantic
+
+  - name: sem_customer_behavior
+    description: |
+      Customer engagement semantic view spanning visit frequency, segment behavior, and loyalty
+      indicators. Enables churn detection and persona-level insights.
+    config:
+      materialized: semantic_view
+      schema: semantic
+
+  - name: sem_revenue
+    description: |
+      Comprehensive revenue semantic view that unifies ticket, rental, and food & beverage sales
+      for pricing, channel mix, and profitability analysis.
+    config:
+      materialized: semantic_view
+      schema: semantic
+
+  - name: sem_passholder_analytics
+    description: |
+      Pass holder lifecycle semantic view covering acquisition, retention, ROI, and utilization
+      metrics for season and multi-day pass programs.
+    config:
+      materialized: semantic_view
+      schema: semantic
+
+  - name: sem_daily_summary
+    description: |
+      Executive daily summary semantic view - the primary KPI dashboard combining visitation,
+      revenue, and operations metrics. Best starting point for overall resort performance questions.
+    config:
+      materialized: semantic_view
+      schema: semantic
+
+  - name: sem_weather_analytics
+    description: |
+      Weather analytics semantic view for analyzing snow conditions, temperature, and weather
+      patterns. Use for powder day analysis, weather impact on attendance, and seasonal comparisons.
+    config:
+      materialized: semantic_view
+      schema: semantic
+
+  - name: sem_staffing_analytics
+    description: |
+      Staffing and labor analytics semantic view. Tracks coverage ratios, labor hours by department,
+      understaffing incidents, and operational efficiency metrics for workforce optimization.
+    config:
+      materialized: semantic_view
+      schema: semantic
+
+  - name: sem_marketing_analytics
+    description: |
+      Marketing campaign performance semantic view. Analyzes campaign effectiveness, conversion rates,
+      revenue attribution, and channel ROI for marketing optimization and budget allocation.
+    config:
+      materialized: semantic_view
+      schema: semantic
+
+  - name: sem_customer_satisfaction
+    description: |
+      Customer satisfaction and feedback semantic view. Tracks NPS scores, sentiment analysis,
+      feedback categories, and resolution rates for guest experience improvement.
+    config:
+      materialized: semantic_view
+      schema: semantic
+
+  - name: sem_safety_incidents
+    description: |
+      Safety incident tracking semantic view. Monitors accident types, severity levels,
+      ski patrol response times, and incident locations for safety improvement.
+    config:
+      materialized: semantic_view
+      schema: semantic
+
+  - name: sem_lessons_analytics
+    description: |
+      Ski school and lessons analytics semantic view. Tracks lesson bookings, instructor performance,
+      student ratings, and revenue metrics for ski school optimization.
+    config:
+      materialized: semantic_view
+      schema: semantic
