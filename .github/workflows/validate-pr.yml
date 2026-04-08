@@ -97,6 +97,7 @@ jobs:
         env:
           FDBT_PATH: /usr/local/bin/fdbt
         run: |
+          dbt deps --profiles-dir .
           if command -v fdbt &> /dev/null || [ -f "$FDBT_PATH" ]; then
             ${FDBT_PATH:-fdbt} build
           else
