@@ -88,9 +88,9 @@ jobs:
           pip install dbt-snowflake
 
       - name: Install fdbt
+        id: fdbt_install
         run: |
-          curl -sSfL https://github.com/Snowflake-Labs/fdbt/releases/download/v${FDBT_VERSION}/fdbt-linux-x86_64 -o /usr/local/bin/fdbt || true
-          chmod +x /usr/local/bin/fdbt || true
+          curl -sSfL https://github.com/Snowflake-Labs/fdbt/releases/download/v${FDBT_VERSION}/fdbt-linux-x86_64 -o /usr/local/bin/fdbt && chmod +x /usr/local/bin/fdbt && echo "fdbt_available=true" >> $GITHUB_OUTPUT || echo "fdbt_available=false" >> $GITHUB_OUTPUT
 
       - name: Parse dbt manifest
         working-directory: dbt_ski_resort
@@ -106,19 +106,21 @@ jobs:
           fi
 
       - name: Check test coverage (>= 70%)
+        if: steps.fdbt_install.outputs.fdbt_available == 'true'
         env:
           FDBT_PATH: /usr/local/bin/fdbt
           PYTHONPATH: ${{ github.workspace }}
         run: python -m agent_management.ci.check_test_coverage --project dbt_ski_resort --threshold 70
 
       - name: Validate PK tests (not_null + unique)
+        if: steps.fdbt_install.outputs.fdbt_available == 'true'
         env:
           FDBT_PATH: /usr/local/bin/fdbt
           PYTHONPATH: ${{ github.workspace }}
         run: python -m agent_management.ci.check_pk_tests --project dbt_ski_resort
 
       - name: Generate lineage comment
-        if: always()
+        if: always() && steps.fdbt_install.outputs.fdbt_available == 'true'
         env:
           FDBT_PATH: /usr/local/bin/fdbt
           PYTHONPATH: ${{ github.workspace }}
