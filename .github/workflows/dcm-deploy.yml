@@ -46,7 +46,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: DEV
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: Snowflake-Labs/snowflake_dcm_projects/actions/dcm-plan@v1
         with:
@@ -61,7 +61,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: DEV
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: Snowflake-Labs/snowflake_dcm_projects/actions/dcm-plan@v1
         with:
@@ -83,7 +83,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ inputs.target }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: Snowflake-Labs/snowflake_dcm_projects/actions/dcm-connection-test@v1
         with:
@@ -103,7 +103,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ inputs.target }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: Snowflake-Labs/snowflake_dcm_projects/actions/dcm-plan@v1
         with:
