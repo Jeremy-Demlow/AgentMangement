@@ -1,4 +1,7 @@
-"""Quick smoke tests for config, rendering, and deploy_agents SQL generation."""
+"""Quick smoke tests for config, rendering, and deploy_agents SQL generation.
+
+CI validation: this file triggers validate-pr.yml on PR to main.
+"""
 import json
 import os
 
