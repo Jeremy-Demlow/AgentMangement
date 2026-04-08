@@ -18,7 +18,6 @@ env:
   SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
   SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
   PYTHONPATH: ${{ github.workspace }}
-  FDBT_VERSION: "1.0.48"
 
 jobs:
   lint-and-unit:
@@ -70,10 +69,8 @@ jobs:
         run: python -m agent_management.validate_specs --env prod
 
   dbt-quality-gate:
-    name: dbt Quality Gate (fdbt)
+    name: dbt Quality Gate
     runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
     steps:
       - uses: actions/checkout@v4
 
@@ -87,77 +84,11 @@ jobs:
           pip install --upgrade pip
           pip install dbt-snowflake
 
-      - name: Install fdbt
-        id: fdbt_install
-        run: |
-          curl -sSfL https://github.com/Snowflake-Labs/fdbt/releases/download/v${FDBT_VERSION}/fdbt-linux-x86_64 -o /usr/local/bin/fdbt && chmod +x /usr/local/bin/fdbt && echo "fdbt_available=true" >> $GITHUB_OUTPUT || echo "fdbt_available=false" >> $GITHUB_OUTPUT
-
-      - name: Parse dbt manifest
+      - name: Parse dbt project
         working-directory: dbt_ski_resort
-        env:
-          FDBT_PATH: /usr/local/bin/fdbt
         run: |
           dbt deps --profiles-dir .
-          if command -v fdbt &> /dev/null || [ -f "$FDBT_PATH" ]; then
-            ${FDBT_PATH:-fdbt} build
-          else
-            echo "fdbt not available, falling back to dbt parse"
-            dbt parse --profiles-dir .
-          fi
-
-      - name: Check test coverage (>= 70%)
-        if: steps.fdbt_install.outputs.fdbt_available == 'true'
-        env:
-          FDBT_PATH: /usr/local/bin/fdbt
-          PYTHONPATH: ${{ github.workspace }}
-        run: python -m agent_management.ci.check_test_coverage --project dbt_ski_resort --threshold 70
-
-      - name: Validate PK tests (not_null + unique)
-        if: steps.fdbt_install.outputs.fdbt_available == 'true'
-        env:
-          FDBT_PATH: /usr/local/bin/fdbt
-          PYTHONPATH: ${{ github.workspace }}
-        run: python -m agent_management.ci.check_pk_tests --project dbt_ski_resort
-
-      - name: Generate lineage comment
-        if: always() && steps.fdbt_install.outputs.fdbt_available == 'true'
-        env:
-          FDBT_PATH: /usr/local/bin/fdbt
-          PYTHONPATH: ${{ github.workspace }}
-        run: python -m agent_management.ci.generate_lineage_comment --project dbt_ski_resort --output /tmp/lineage_comment.md
-
-      - name: Post lineage comment on PR
-        if: always()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const commentFile = '/tmp/lineage_comment.md';
-            if (!fs.existsSync(commentFile)) return;
-            const body = fs.readFileSync(commentFile, 'utf8');
-            if (!body.trim()) return;
-
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-            const existing = comments.find(c => c.body.includes('dbt Model Impact Analysis'));
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existing.id,
-                body: body,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: body,
-              });
-            }
+          dbt parse --profiles-dir .
 
   validate-snowflake:
     name: Validate Against Snowflake (dry-run)

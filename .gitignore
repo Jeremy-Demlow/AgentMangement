@@ -54,4 +54,7 @@ semantic-views/snapshots/
 .env.act
 .secrets.act
 .snowflake/
+docs/
+models/
+requirements/
 AGENTS.md
