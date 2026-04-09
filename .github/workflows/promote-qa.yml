@@ -30,6 +30,8 @@ jobs:
       SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
       SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
     steps:
+      - uses: actions/checkout@v6
+
       - name: Setup Snowflake
         uses: ./.github/actions/snowflake-setup
         with:
@@ -60,6 +62,8 @@ jobs:
       SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
       SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
     steps:
+      - uses: actions/checkout@v6
+
       - name: Setup Snowflake
         uses: ./.github/actions/snowflake-setup
         with:
@@ -91,6 +95,8 @@ jobs:
       SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
       SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
     steps:
+      - uses: actions/checkout@v6
+
       - name: Setup Snowflake
         uses: ./.github/actions/snowflake-setup
         with:
@@ -133,6 +139,8 @@ jobs:
       SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
       SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
     steps:
+      - uses: actions/checkout@v6
+
       - name: Setup Snowflake
         uses: ./.github/actions/snowflake-setup
         with:
