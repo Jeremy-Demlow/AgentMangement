@@ -1,8 +1,5 @@
 {{ config(materialized='semantic_view') }}
 
--- Lift operations semantic view
--- Focuses on wait times, capacity utilization, and customer mix
-
 TABLES (
     DIM_DATE AS {{ ref('dim_date') }}
       PRIMARY KEY (DATE_KEY)
@@ -22,7 +19,17 @@ TABLES (
     FACT_LIFT_SCANS AS {{ ref('fact_lift_scans') }}
       PRIMARY KEY (SCAN_KEY)
       WITH SYNONYMS ('lift_scans', 'lift_usage_events')
-      COMMENT = 'Granular lift scan fact with wait times and weather context'
+      COMMENT = 'Granular lift scan fact with wait times and weather context',
+
+    FACT_LIFT_MAINTENANCE AS {{ ref('fact_lift_maintenance') }}
+      PRIMARY KEY (MAINTENANCE_KEY)
+      WITH SYNONYMS ('maintenance', 'lift_maintenance', 'repairs', 'inspections')
+      COMMENT = 'Lift maintenance activities including inspections, repairs, and adjustments',
+
+    FACT_GROOMING AS {{ ref('fact_grooming') }}
+      PRIMARY KEY (GROOMING_KEY)
+      WITH SYNONYMS ('grooming', 'trail_grooming', 'grooming_logs')
+      COMMENT = 'Trail grooming operations with conditions before and after'
 )
 
 RELATIONSHIPS (
@@ -31,7 +38,13 @@ RELATIONSHIPS (
     SCANS_TO_LIFT AS
       FACT_LIFT_SCANS (LIFT_KEY) REFERENCES DIM_LIFT,
     SCANS_TO_CUSTOMER AS
-      FACT_LIFT_SCANS (CUSTOMER_KEY) REFERENCES DIM_CUSTOMER
+      FACT_LIFT_SCANS (CUSTOMER_KEY) REFERENCES DIM_CUSTOMER,
+    MAINTENANCE_TO_DATE AS
+      FACT_LIFT_MAINTENANCE (DATE_KEY) REFERENCES DIM_DATE,
+    MAINTENANCE_TO_LIFT AS
+      FACT_LIFT_MAINTENANCE (LIFT_KEY) REFERENCES DIM_LIFT,
+    GROOMING_TO_DATE AS
+      FACT_GROOMING (DATE_KEY) REFERENCES DIM_DATE
 )
 
 FACTS (
@@ -42,13 +55,31 @@ FACTS (
     FACT_LIFT_SCANS.SCAN_HOUR AS SCAN_HOUR
       COMMENT = 'Hour of day for the scan event',
     FACT_LIFT_SCANS.WEATHER_CONDITION AS WEATHER_CONDITION
-      COMMENT = 'Weather condition reported at scan time'
+      COMMENT = 'Weather condition reported at scan time',
+
+    FACT_LIFT_MAINTENANCE.DOWNTIME_MINUTES AS DOWNTIME_MINUTES
+      COMMENT = 'Minutes of lift downtime due to maintenance',
+    FACT_LIFT_MAINTENANCE.TOTAL_COST AS TOTAL_COST
+      COMMENT = 'Total maintenance cost (parts + labor)',
+    FACT_LIFT_MAINTENANCE.PARTS_COST AS PARTS_COST
+      COMMENT = 'Parts cost for maintenance',
+    FACT_LIFT_MAINTENANCE.LABOR_COST AS LABOR_COST
+      COMMENT = 'Labor cost for maintenance',
+    FACT_LIFT_MAINTENANCE.LABOR_HOURS AS LABOR_HOURS
+      COMMENT = 'Labor hours for maintenance',
+
+    FACT_GROOMING.DURATION_MINUTES AS DURATION_MINUTES
+      COMMENT = 'Grooming duration in minutes',
+    FACT_GROOMING.SNOW_DEPTH_INCHES AS SNOW_DEPTH_INCHES
+      COMMENT = 'Snow depth at time of grooming (inches)',
+    FACT_GROOMING.FUEL_USED_GALLONS AS FUEL_USED_GALLONS
+      COMMENT = 'Fuel consumed during grooming (gallons)'
 )
 
 DIMENSIONS (
     DIM_DATE.FULL_DATE AS FULL_DATE
       WITH SYNONYMS ('date')
-      COMMENT = 'Date of the lift scan',
+      COMMENT = 'Date of the operation event',
     DIM_DATE.DAY_NAME AS DAY_NAME
       COMMENT = 'Day of week name',
     DIM_DATE.IS_WEEKEND AS IS_WEEKEND
@@ -74,7 +105,35 @@ DIMENSIONS (
       WITH SYNONYMS ('persona')
       COMMENT = 'Customer persona classification',
     DIM_CUSTOMER.IS_PASS_HOLDER AS IS_PASS_HOLDER
-      COMMENT = 'Indicates if the rider is a pass holder'
+      COMMENT = 'Indicates if the rider is a pass holder',
+
+    FACT_LIFT_MAINTENANCE.MAINTENANCE_TYPE AS MAINTENANCE_TYPE
+      WITH SYNONYMS ('maint_type')
+      COMMENT = 'Type of maintenance (inspection, repair, adjustment)',
+    FACT_LIFT_MAINTENANCE.CATEGORY AS CATEGORY
+      COMMENT = 'Maintenance category (mechanical, electrical, routine, safety)',
+    FACT_LIFT_MAINTENANCE.DURING_OPERATING_HOURS AS DURING_OPERATING_HOURS
+      COMMENT = 'Whether maintenance occurred during operating hours',
+    FACT_LIFT_MAINTENANCE.PASSED_INSPECTION AS PASSED_INSPECTION
+      COMMENT = 'Whether lift passed inspection after maintenance',
+    FACT_LIFT_MAINTENANCE.FOLLOWUP_REQUIRED AS FOLLOWUP_REQUIRED
+      COMMENT = 'Whether follow-up maintenance is needed',
+    FACT_LIFT_MAINTENANCE.PARTS_REPLACED AS PARTS_REPLACED
+      COMMENT = 'Whether parts were replaced during maintenance',
+
+    FACT_GROOMING.TRAIL_NAME AS TRAIL_NAME
+      WITH SYNONYMS ('groomed_trail')
+      COMMENT = 'Trail that was groomed',
+    FACT_GROOMING.GROOMING_TYPE AS GROOMING_TYPE
+      COMMENT = 'Type of grooming performed',
+    FACT_GROOMING.SHIFT AS SHIFT
+      COMMENT = 'Grooming shift (Day, Night, Early Morning)',
+    FACT_GROOMING.CONDITIONS_BEFORE AS CONDITIONS_BEFORE
+      COMMENT = 'Trail condition before grooming',
+    FACT_GROOMING.CONDITIONS_AFTER AS CONDITIONS_AFTER
+      COMMENT = 'Trail condition after grooming',
+    FACT_GROOMING.CONDITION_IMPROVED AS CONDITION_IMPROVED
+      COMMENT = 'Whether grooming improved trail condition'
 )
 
 METRICS (
@@ -107,16 +166,55 @@ METRICS (
         COUNT(FACT_LIFT_SCANS.SCAN_KEY),
         NULLIF(SUM(DIM_LIFT.CAPACITY_PER_HOUR), 0)
     ) * 100
-      COMMENT = 'Utilization versus theoretical lift capacity (%)'
+      COMMENT = 'Utilization versus theoretical lift capacity (%)',
+
+    FACT_LIFT_MAINTENANCE.TOTAL_MAINTENANCE_EVENTS AS COUNT(FACT_LIFT_MAINTENANCE.MAINTENANCE_KEY)
+      COMMENT = 'Total maintenance events recorded',
+    FACT_LIFT_MAINTENANCE.TOTAL_MAINTENANCE_COST AS SUM(FACT_LIFT_MAINTENANCE.TOTAL_COST)
+      COMMENT = 'Total maintenance spend (parts + labor)',
+    FACT_LIFT_MAINTENANCE.AVG_MAINTENANCE_COST AS AVG(FACT_LIFT_MAINTENANCE.TOTAL_COST)
+      COMMENT = 'Average cost per maintenance event',
+    FACT_LIFT_MAINTENANCE.TOTAL_DOWNTIME_MINUTES AS SUM(FACT_LIFT_MAINTENANCE.DOWNTIME_MINUTES)
+      COMMENT = 'Total lift downtime from maintenance (minutes)',
+    FACT_LIFT_MAINTENANCE.AVG_DOWNTIME_MINUTES AS AVG(FACT_LIFT_MAINTENANCE.DOWNTIME_MINUTES)
+      COMMENT = 'Average downtime per maintenance event (minutes)',
+    FACT_LIFT_MAINTENANCE.INSPECTION_PASS_RATE AS DIV0(
+        COUNT(CASE WHEN FACT_LIFT_MAINTENANCE.PASSED_INSPECTION THEN 1 END),
+        NULLIF(COUNT(FACT_LIFT_MAINTENANCE.MAINTENANCE_KEY), 0)
+    ) * 100
+      COMMENT = 'Percentage of maintenance events that passed inspection',
+    FACT_LIFT_MAINTENANCE.FOLLOWUP_RATE AS DIV0(
+        COUNT(CASE WHEN FACT_LIFT_MAINTENANCE.FOLLOWUP_REQUIRED THEN 1 END),
+        NULLIF(COUNT(FACT_LIFT_MAINTENANCE.MAINTENANCE_KEY), 0)
+    ) * 100
+      COMMENT = 'Percentage of maintenance events requiring follow-up',
+    FACT_LIFT_MAINTENANCE.TOTAL_LABOR_HOURS AS SUM(FACT_LIFT_MAINTENANCE.LABOR_HOURS)
+      COMMENT = 'Total labor hours spent on maintenance',
+
+    FACT_GROOMING.TOTAL_GROOMING_RUNS AS COUNT(FACT_GROOMING.GROOMING_KEY)
+      COMMENT = 'Total grooming runs completed',
+    FACT_GROOMING.TOTAL_GROOMING_MINUTES AS SUM(FACT_GROOMING.DURATION_MINUTES)
+      COMMENT = 'Total grooming time (minutes)',
+    FACT_GROOMING.AVG_GROOMING_DURATION AS AVG(FACT_GROOMING.DURATION_MINUTES)
+      COMMENT = 'Average grooming run duration (minutes)',
+    FACT_GROOMING.TOTAL_FUEL_USED AS SUM(FACT_GROOMING.FUEL_USED_GALLONS)
+      COMMENT = 'Total fuel consumed by grooming operations (gallons)',
+    FACT_GROOMING.CONDITION_IMPROVEMENT_RATE AS DIV0(
+        COUNT(CASE WHEN FACT_GROOMING.CONDITION_IMPROVED THEN 1 END),
+        NULLIF(COUNT(FACT_GROOMING.GROOMING_KEY), 0)
+    ) * 100
+      COMMENT = 'Percentage of grooming runs that improved trail conditions',
+    FACT_GROOMING.AVG_SNOW_DEPTH AS AVG(FACT_GROOMING.SNOW_DEPTH_INCHES)
+      COMMENT = 'Average snow depth at time of grooming (inches)'
 )
 
-COMMENT = 'Lift operations semantic view for wait times, capacity, and customer mix analysis'
+COMMENT = 'Operations semantic view covering lift usage, maintenance, and trail grooming for comprehensive resort operations analysis'
 
 WITH EXTENSION (CA = $$
 {
   "module_custom_instructions": {
-    "question_categorization": "Route customer persona or churn questions to SKI_RESORT_DB.SEMANTIC.SEM_CUSTOMER_BEHAVIOR. Route revenue, ticketing, or spend topics to SKI_RESORT_DB.SEMANTIC.SEM_REVENUE. Route pass ROI or renewal effectiveness to SKI_RESORT_DB.SEMANTIC.SEM_PASSHOLDER_ANALYTICS. If a question does not specify the targeted LIFT_NAME, TERRAIN_TYPE, or SKI_SEASON, ask the user to provide that context before answering. Keep snowmaking, rentals, or food & beverage utilization requests outside this view unless they directly relate to lift performance.",
-    "sql_generation": "Slice temporal windows with DIM_DATE.FULL_DATE or DIM_DATE.SKI_SEASON and rely on DATE_TRUNC/DATEADD for trend groupings. Use FACT_LIFT_SCANS.WAIT_TIME_MINUTES for wait calculations and DIM_LIFT.CAPACITY_PER_HOUR when computing utilization; wrap ratios with DIV0(...). Reuse DIM_DATE.IS_WEEKEND and DIM_DATE.SNOW_CONDITION flags instead of recomputing conditions. Bring customer mix context in through DIM_CUSTOMER.CUSTOMER_SEGMENT or DIM_CUSTOMER.IS_PASS_HOLDER when needed. When ranking lifts, include ORDER BY clauses with NULLS LAST so populated metrics surface first."
+    "question_categorization": "This view covers three operational domains: (1) Lift scans and wait times, (2) Lift maintenance and inspections, (3) Trail grooming operations. Route customer persona or churn questions to SEM_CUSTOMER_BEHAVIOR. Route revenue, ticketing, or spend topics to SEM_REVENUE. Route pass ROI or renewal effectiveness to SEM_PASSHOLDER_ANALYTICS. For maintenance questions, use FACT_LIFT_MAINTENANCE metrics (downtime, cost, inspection pass rate). For grooming questions, use FACT_GROOMING metrics (duration, fuel, condition improvement). For lift performance, use FACT_LIFT_SCANS metrics (wait times, utilization).",
+    "sql_generation": "Slice temporal windows with DIM_DATE.FULL_DATE or DIM_DATE.SKI_SEASON and rely on DATE_TRUNC/DATEADD for trend groupings. Use FACT_LIFT_SCANS.WAIT_TIME_MINUTES for wait calculations and DIM_LIFT.CAPACITY_PER_HOUR when computing utilization; wrap ratios with DIV0(...). For maintenance analysis, join through MAINTENANCE_TO_LIFT to get lift names. For grooming analysis, use FACT_GROOMING.TRAIL_NAME directly. Reuse DIM_DATE.IS_WEEKEND and DIM_DATE.SNOW_CONDITION flags instead of recomputing conditions. When ranking lifts by maintenance cost or downtime, include ORDER BY clauses with NULLS LAST."
   }
 }
 $$)

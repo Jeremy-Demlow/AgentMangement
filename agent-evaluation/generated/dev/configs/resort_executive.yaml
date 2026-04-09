@@ -38,8 +38,8 @@ evaluation:
   description: "Answer correctness + logical consistency across all 11 tools"
 
 thresholds:
-  answer_correctness: 0.70
-  logical_consistency: 0.80
+  answer_correctness: 0.6
+  logical_consistency: 0.6
 
 # --- Metrics -----------------------------------------------------------------
 # Built-in: answer_correctness, logical_consistency

@@ -54,7 +54,8 @@ semantic-views/snapshots/
 .env.act
 .secrets.act
 .snowflake/
-docs/
-models/
-requirements/
+# Internal planning docs (top-level only — do NOT match dbt_ski_resort/models/)
+/docs/
+/models/
+/requirements/
 AGENTS.md

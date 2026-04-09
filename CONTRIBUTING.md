@@ -108,6 +108,30 @@ Every job that connects to Snowflake declares `environment:` to pull the correct
 
 All evals go through `python -m agent_management.run_ci_eval --env <env>` which handles agent name suffix resolution.
 
+### Eval Thresholds
+
+Thresholds are **environment-driven**, not hardcoded. Each environment defines pass/fail gates in `environments/<env>.env.yml`:
+
+```yaml
+eval:
+  thresholds:
+    answer_correctness: 0.60    # DEV — lenient while establishing baseline
+    logical_consistency: 0.60
+```
+
+| Environment | answer_correctness | logical_consistency |
+|-------------|-------------------|-------------------|
+| DEV | 0.60 | 0.60 |
+| QA | 0.70 | 0.70 |
+| PROD | 0.80 | 0.80 |
+
+The eval config templates in `agent-evaluation/configs/` use `{{ eval.thresholds.answer_correctness }}` Jinja2 placeholders. These are resolved at two points:
+
+1. **CI runtime** — `run_ci_eval.py` renders templates via `render_file()` before running evals
+2. **Pre-generation** — `render_eval_templates.py` generates resolved configs into `agent-evaluation/generated/<env>/`
+
+To change thresholds, edit the `eval.thresholds` section in the environment config — **not** the template configs or generated configs.
+
 ## Agent Naming
 
 Single-account mode uses suffixes:

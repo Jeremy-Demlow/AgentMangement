@@ -339,3 +339,23 @@ sources:
             description: Trail that was groomed
           - name: grooming_type
             description: Type of grooming performed
+
+      - name: lift_maintenance
+        description: Lift maintenance activities including inspections, repairs, and adjustments
+        columns:
+          - name: maintenance_id
+            description: Unique maintenance record identifier
+            tests:
+              - unique:
+                  severity: warn
+              - not_null
+          - name: lift_id
+            description: Lift that received maintenance
+          - name: maintenance_date
+            description: Date of maintenance activity
+          - name: maintenance_type
+            description: Type of maintenance (inspection, repair, adjustment)
+          - name: category
+            description: Maintenance category (mechanical, electrical, routine, safety)
+          - name: total_cost
+            description: Total cost of maintenance (parts + labor)

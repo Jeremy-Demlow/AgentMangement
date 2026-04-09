@@ -3,8 +3,9 @@ version: 2
 models:
   - name: sem_operations
     description: |
-      Ski resort lift and mountain operations semantic view. Tracks wait times, capacity
-      utilization, weather context, and lift performance to support on-mountain decision making.
+      Operations semantic view covering lift usage, maintenance, and trail grooming.
+      Tracks wait times, capacity utilization, maintenance costs and downtime,
+      inspection pass rates, and grooming effectiveness for comprehensive operations analysis.
     config:
       materialized: semantic_view
       schema: semantic

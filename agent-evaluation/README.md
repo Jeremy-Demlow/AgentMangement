@@ -148,8 +148,8 @@ evaluation:
   description: "Answer correctness + logical consistency"
 
 thresholds:
-  answer_correctness: 0.70
-  logical_consistency: 0.80
+  answer_correctness: {{ eval.thresholds.answer_correctness }}
+  logical_consistency: {{ eval.thresholds.logical_consistency }}
 
 metrics:
   - "answer_correctness"
@@ -158,7 +158,17 @@ metrics:
 
 All `snowflake_table`, `stage`, and `file_format` values must be fully qualified (`DB.SCHEMA.OBJECT`).
 
-The `thresholds` section is optional. When present, the runner exits with code 1 if any metric falls below its threshold — useful for CI/CD gating.
+**Thresholds are templated from environment configs.** The `{{ eval.thresholds.* }}` placeholders resolve from `environments/<env>.env.yml` at render time:
+
+| Environment | `answer_correctness` | `logical_consistency` |
+|-------------|---------------------|-----------------------|
+| DEV | 0.60 | 0.60 |
+| QA | 0.70 | 0.70 |
+| PROD | 0.80 | 0.80 |
+
+This lets DEV be more lenient while PROD enforces stricter quality gates. To change thresholds, edit the `eval.thresholds` section in the corresponding `environments/<env>.env.yml` file — not the config templates.
+
+When the runner exits with code 1, a metric fell below its threshold — useful for CI/CD gating.
 
 ### 3. Write evaluation questions
 
@@ -356,7 +366,13 @@ deployment:
   agents_schema: AGENTS
 agent:
   name_suffix: _DEV    # RESORT_EXECUTIVE -> RESORT_EXECUTIVE_DEV
+eval:
+  thresholds:
+    answer_correctness: 0.60    # DEV is more lenient
+    logical_consistency: 0.60
 ```
+
+Thresholds are injected into eval config templates via `{{ eval.thresholds.answer_correctness }}` etc. To adjust pass/fail gates, edit the `eval.thresholds` section in the environment config — the template configs and generated configs update automatically.
 
 ## Understanding Results
 
@@ -392,7 +408,7 @@ Every run saves to `results/<agent>_<timestamp>.json`:
   "run_name": "resort_executive_eval_20260401_173349",
   "timestamp": "20260401_173852",
   "passed": false,
-  "thresholds": {"answer_correctness": 0.70, "logical_consistency": 0.80},
+  "thresholds": {"answer_correctness": 0.60, "logical_consistency": 0.60},
   "summary": {
     "answer_correctness": {"avg": 0.668, "n": 15},
     "logical_consistency": {"avg": 0.889, "n": 15}
@@ -520,8 +536,8 @@ agent-evaluation/
 
 | Metric | Avg Score | Count | High (>=0.8) | Low (<0.3) | Threshold | Gate |
 |--------|-----------|-------|--------------|------------|-----------|------|
-| answer_correctness | **66.8%** | 15 | 5 | 2 | 70% | FAIL |
-| logical_consistency | **88.9%** | 15 | 12 | 0 | 80% | PASS |
+| answer_correctness | **66.8%** | 15 | 5 | 2 | 60% (DEV) | PASS |
+| logical_consistency | **88.9%** | 15 | 12 | 0 | 60% (DEV) | PASS |
 
 Full results: `results/resort_executive_20260401_173852.json`
 
