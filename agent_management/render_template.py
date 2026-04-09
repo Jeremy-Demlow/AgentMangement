@@ -53,15 +53,16 @@ def build_context(config: dict, run_date: str | None = None) -> dict[str, Any]:
     }
 
 
-def render_string(template_str: str, config: dict) -> str:
-    env = jinja2.Environment(undefined=jinja2.StrictUndefined)
+def render_string(template_str: str, config: dict, strict: bool = True) -> str:
+    undef = jinja2.StrictUndefined if strict else jinja2.Undefined
+    env = jinja2.Environment(undefined=undef)
     tmpl = env.from_string(template_str)
     ctx = build_context(config)
     return tmpl.render(**ctx)
 
 
-def render_file(template_path: str | Path, config: dict) -> str:
+def render_file(template_path: str | Path, config: dict, strict: bool = True) -> str:
     path = Path(template_path)
     if not path.exists():
         raise FileNotFoundError(f"Template not found: {path}")
-    return render_string(path.read_text(), config)
+    return render_string(path.read_text(), config, strict=strict)

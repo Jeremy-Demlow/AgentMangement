@@ -7,6 +7,7 @@ on:
       - 'agents/specs/**'
       - 'semantic-views/definitions/**'
       - 'agent_management/**'
+      - 'agent-evaluation/**'
       - 'environments/**'
       - 'tests/**'
       - 'dbt_ski_resort/**'
@@ -122,6 +123,11 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: python -m agent_management.detect_drift --env dev
+
+      - name: Run agent evaluation (dev)
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -m agent_management.run_ci_eval --env dev
 
       - name: Cleanup
         if: always()
