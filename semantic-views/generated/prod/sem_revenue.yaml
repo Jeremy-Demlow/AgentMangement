@@ -6,7 +6,7 @@ description: 'Revenue analytics semantic model for ski resort operations. Covers
 tables:
   - name: FACT_TICKET_SALES
     base_table:
-      database: AM_SKI_RESORT_PROD
+      database: AM_SKI_RESORT
       schema: MARTS
       table: FACT_TICKET_SALES
     dimensions:
@@ -104,7 +104,7 @@ tables:
         access_modifier: public_access
   - name: FACT_RENTALS
     base_table:
-      database: AM_SKI_RESORT_PROD
+      database: AM_SKI_RESORT
       schema: MARTS
       table: FACT_RENTALS
     dimensions:
@@ -202,7 +202,7 @@ tables:
         access_modifier: public_access
   - name: FACT_FOOD_BEVERAGE
     base_table:
-      database: AM_SKI_RESORT_PROD
+      database: AM_SKI_RESORT
       schema: MARTS
       table: FACT_FOOD_BEVERAGE
     dimensions:
@@ -291,7 +291,7 @@ tables:
         access_modifier: public_access
   - name: DIM_DATE
     base_table:
-      database: AM_SKI_RESORT_PROD
+      database: AM_SKI_RESORT
       schema: MARTS
       table: DIM_DATE
     primary_key:
@@ -364,7 +364,7 @@ tables:
         data_type: DATE
   - name: DIM_CUSTOMER
     base_table:
-      database: AM_SKI_RESORT_PROD
+      database: AM_SKI_RESORT
       schema: MARTS
       table: DIM_CUSTOMER
     primary_key:
@@ -410,7 +410,7 @@ tables:
         data_type: DATE
   - name: DIM_LOCATION
     base_table:
-      database: AM_SKI_RESORT_PROD
+      database: AM_SKI_RESORT
       schema: MARTS
       table: DIM_LOCATION
     primary_key:
@@ -440,7 +440,7 @@ tables:
         data_type: VARCHAR
   - name: DIM_TICKET_TYPE
     base_table:
-      database: AM_SKI_RESORT_PROD
+      database: AM_SKI_RESORT
       schema: MARTS
       table: DIM_TICKET_TYPE
     primary_key:
@@ -471,7 +471,7 @@ tables:
         data_type: NUMBER
   - name: DIM_PRODUCT
     base_table:
-      database: AM_SKI_RESORT_PROD
+      database: AM_SKI_RESORT
       schema: MARTS
       table: DIM_PRODUCT
     primary_key:

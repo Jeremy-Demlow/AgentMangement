@@ -30,18 +30,10 @@ jobs:
       SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
       SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
     steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-python@v6
+      - name: Setup Snowflake
+        uses: ./.github/actions/snowflake-setup
         with:
-          python-version: '3.11'
-          cache: 'pip'
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Write private key
-        run: echo "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/snowflake_key.p8
+          snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
       - name: Validate specs for prod
         run: python -m agent_management.validate_specs --env prod --remote
@@ -70,18 +62,10 @@ jobs:
     outputs:
       snapshot_timestamp: ${{ steps.snap.outputs.timestamp }}
     steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-python@v6
+      - name: Setup Snowflake
+        uses: ./.github/actions/snowflake-setup
         with:
-          python-version: '3.11'
-          cache: 'pip'
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Write private key
-        run: echo "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/snowflake_key.p8
+          snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
       - name: Snapshot current prod state
         id: snap
@@ -114,18 +98,10 @@ jobs:
       SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
       SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
     steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-python@v6
+      - name: Setup Snowflake
+        uses: ./.github/actions/snowflake-setup
         with:
-          python-version: '3.11'
-          cache: 'pip'
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Write private key
-        run: echo "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/snowflake_key.p8
+          snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
       - name: Run dbt (if dbt project exists)
         if: hashFiles('dbt_ski_resort/dbt_project.yml') != ''
@@ -164,31 +140,13 @@ jobs:
       SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
       SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
     steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-python@v6
+      - name: Setup Snowflake
+        uses: ./.github/actions/snowflake-setup
         with:
-          python-version: '3.11'
-          cache: 'pip'
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Write private key
-        run: echo "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/snowflake_key.p8
+          snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
       - name: Run agent evaluations
-        id: eval
-        run: |
-          FAILED=0
-          for config in agent-evaluation/configs/*.yaml; do
-            echo "=== Evaluating $(basename $config) ==="
-            python agent-evaluation/scripts/run_eval.py "$config" --env prod || true
-          done
-
-      - name: Check thresholds (strict)
-        id: threshold
-        run: python -m agent_management.compute_metrics --env prod --results-dir agent-evaluation/results/ --strict
+        run: python -m agent_management.run_ci_eval --env prod
 
       - name: Upload evaluation results
         uses: actions/upload-artifact@v4
@@ -213,18 +171,10 @@ jobs:
       SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
       SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
     steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-python@v6
+      - name: Setup Snowflake
+        uses: ./.github/actions/snowflake-setup
         with:
-          python-version: '3.11'
-          cache: 'pip'
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Write private key
-        run: echo "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/snowflake_key.p8
+          snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
       - name: Download pre-deploy snapshots
         uses: actions/download-artifact@v4

@@ -5,7 +5,7 @@ description: Staffing and labor analytics for ski resort. Tracks scheduled vs ac
 tables:
   - name: FACT_STAFFING
     base_table:
-      database: AM_SKI_RESORT_PROD
+      database: AM_SKI_RESORT
       schema: MARTS
       table: FACT_STAFFING
     dimensions:
@@ -81,7 +81,7 @@ tables:
         access_modifier: public_access
   - name: DIM_DATE
     base_table:
-      database: AM_SKI_RESORT_PROD
+      database: AM_SKI_RESORT
       schema: MARTS
       table: DIM_DATE
     primary_key:
@@ -118,7 +118,7 @@ tables:
         data_type: DATE
   - name: DIM_LOCATION
     base_table:
-      database: AM_SKI_RESORT_PROD
+      database: AM_SKI_RESORT
       schema: MARTS
       table: DIM_LOCATION
     primary_key:

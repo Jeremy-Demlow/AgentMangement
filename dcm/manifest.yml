@@ -73,10 +73,10 @@ templating:
       semantic_schema_suffix: ''
       agents_schema_suffix: ''
     PROD:
-      db: 'AM_SKI_RESORT_PROD'
-      deploy_role: 'AM_DEPLOY_ROLE_PROD'
-      wh_name: 'AM_SKI_RESORT_WH_PROD'
-      wh_role: 'AM_SKI_RESORT_WH_USER_PROD'
+      db: 'AM_SKI_RESORT'
+      deploy_role: 'AM_DEPLOY_ROLE'
+      wh_name: 'AM_SKI_RESORT_WH'
+      wh_role: 'AM_SKI_RESORT_WH_USER'
       wh_size: 'SMALL'
       wh_min_clusters: 1
       wh_max_clusters: 5

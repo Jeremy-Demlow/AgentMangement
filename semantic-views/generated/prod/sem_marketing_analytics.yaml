@@ -7,7 +7,7 @@ tables:
       - day_attributes
     description: Calendar dimension
     base_table:
-      database: AM_SKI_RESORT_PROD
+      database: AM_SKI_RESORT
       schema: MARTS
       table: DIM_DATE
     primary_key:
@@ -30,7 +30,7 @@ tables:
       - promotions
     description: Marketing campaign performance and attribution
     base_table:
-      database: AM_SKI_RESORT_PROD
+      database: AM_SKI_RESORT
       schema: MARTS
       table: FACT_MARKETING
     primary_key:

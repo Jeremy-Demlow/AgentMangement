@@ -5,7 +5,7 @@ description: Lift operations analytics for ski resort. Tracks lift scan volumes,
 tables:
   - name: FACT_LIFT_SCANS
     base_table:
-      database: AM_SKI_RESORT_PROD
+      database: AM_SKI_RESORT
       schema: MARTS
       table: FACT_LIFT_SCANS
     dimensions:
@@ -69,7 +69,7 @@ tables:
         access_modifier: public_access
   - name: DIM_LIFT
     base_table:
-      database: AM_SKI_RESORT_PROD
+      database: AM_SKI_RESORT
       schema: MARTS
       table: DIM_LIFT
     primary_key:
@@ -108,7 +108,7 @@ tables:
         data_type: VARCHAR
   - name: DIM_DATE
     base_table:
-      database: AM_SKI_RESORT_PROD
+      database: AM_SKI_RESORT
       schema: MARTS
       table: DIM_DATE
     primary_key:
@@ -166,7 +166,7 @@ tables:
         data_type: DATE
   - name: DIM_CUSTOMER
     base_table:
-      database: AM_SKI_RESORT_PROD
+      database: AM_SKI_RESORT
       schema: MARTS
       table: DIM_CUSTOMER
     primary_key:

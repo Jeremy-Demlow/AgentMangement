@@ -1,0 +1,33 @@
+name: Snowflake Setup
+description: Checkout, setup Python, install deps, write private key
+
+inputs:
+  python-version:
+    description: Python version
+    default: '3.11'
+  requirements-file:
+    description: Requirements file to install
+    default: 'requirements.txt'
+  snowflake-private-key:
+    description: PEM-encoded private key
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v6
+
+    - uses: actions/setup-python@v6
+      with:
+        python-version: ${{ inputs.python-version }}
+        cache: pip
+
+    - name: Install dependencies
+      shell: bash
+      run: |
+        pip install --upgrade pip
+        pip install -r ${{ inputs.requirements-file }}
+
+    - name: Write private key
+      shell: bash
+      run: echo "${{ inputs.snowflake-private-key }}" > /tmp/snowflake_key.p8

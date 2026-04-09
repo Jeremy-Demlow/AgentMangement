@@ -23,9 +23,9 @@ Go to **Settings → Environments → [env name] → Environment secrets**:
 
 | Secret | DEV | QA | PROD / production |
 |--------|-----|-----|-------------------|
-| `SNOWFLAKE_WAREHOUSE` | `AM_SKI_RESORT_WH_DEV` | `AM_SKI_RESORT_WH_QA` | `AM_SKI_RESORT_WH_PROD` |
-| `SNOWFLAKE_ROLE` | `AM_DEPLOY_ROLE_DEV` | `AM_DEPLOY_ROLE_QA` | `AM_DEPLOY_ROLE_PROD` |
-| `SNOWFLAKE_DATABASE` | `AM_SKI_RESORT_DEV` | `AM_SKI_RESORT_QA` | `AM_SKI_RESORT_PROD` |
+| `SNOWFLAKE_WAREHOUSE` | `AM_SKI_RESORT_WH_DEV` | `AM_SKI_RESORT_WH_QA` | `AM_SKI_RESORT_WH` |
+| `SNOWFLAKE_ROLE` | `AM_DEPLOY_ROLE_DEV` | `AM_DEPLOY_ROLE_QA` | `AM_DEPLOY_ROLE` |
+| `SNOWFLAKE_DATABASE` | `AM_SKI_RESORT_DEV` | `AM_SKI_RESORT_QA` | `AM_SKI_RESORT` |
 
 Each workflow job declares `environment: DEV` (or QA/PROD/production), and `${{ secrets.SNOWFLAKE_WAREHOUSE }}` resolves to the correct environment-specific value.
 

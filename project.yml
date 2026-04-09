@@ -42,9 +42,9 @@ environments:
     agents_schema: AGENTS
     name_suffix: _QA
   prod:
-    database: AM_SKI_RESORT_PROD
-    role: AM_DEPLOY_ROLE_PROD
-    warehouse: AM_SKI_RESORT_WH_PROD
+    database: AM_SKI_RESORT
+    role: AM_DEPLOY_ROLE
+    warehouse: AM_SKI_RESORT_WH
     semantic_schema: SEMANTIC
     agents_schema: AGENTS
     name_suffix: ""

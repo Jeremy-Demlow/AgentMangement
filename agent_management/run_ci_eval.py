@@ -76,6 +76,12 @@ def main():
             rendered_config = render_file(config_path, env_config, strict=False)
             parsed = yaml.safe_load(rendered_config)
 
+            suffix = env_config.get("agent", {}).get("name_suffix", "")
+            if suffix:
+                base_name = parsed["agent"]["name"]
+                if not base_name.endswith(suffix.upper()):
+                    parsed["agent"]["name"] = base_name + suffix.upper()
+
             dataset_relative = parsed["dataset"].get("questions", "")
             if dataset_relative:
                 dataset_path = EVAL_DIR / dataset_relative

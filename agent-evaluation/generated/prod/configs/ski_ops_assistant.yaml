@@ -3,17 +3,17 @@
 # ============================================================================
 agent:
   name: "SKI_OPS_ASSISTANT"
-  database: "AM_SKI_RESORT_PROD"
+  database: "AM_SKI_RESORT"
   schema: "AGENTS"
 
 dataset:
   questions: "datasets/ski_ops_assistant_eval.yaml"
-  snowflake_table: "AM_SKI_RESORT_PROD.AGENTS.SKI_OPS_ASSISTANT_EVAL_DATA"
+  snowflake_table: "AM_SKI_RESORT.AGENTS.SKI_OPS_ASSISTANT_EVAL_DATA"
 
 snowflake:
-  stage: "AM_SKI_RESORT_PROD.AGENTS.eval_config_stage"
-  file_format: "AM_SKI_RESORT_PROD.AGENTS.yaml_file_format"
-  warehouse: "AM_SKI_RESORT_WH_PROD"
+  stage: "AM_SKI_RESORT.AGENTS.eval_config_stage"
+  file_format: "AM_SKI_RESORT.AGENTS.yaml_file_format"
+  warehouse: "AM_SKI_RESORT_WH"
 
 evaluation:
   label: "SKI_OPS_ASSISTANT evaluation"

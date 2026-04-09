@@ -7,7 +7,7 @@ tables:
       - guest_profiles
     description: "Customer persona, geography, and pass attributes"
     base_table:
-      database: AM_SKI_RESORT_PROD
+      database: AM_SKI_RESORT
       schema: MARTS
       table: DIM_CUSTOMER
     primary_key:
@@ -46,7 +46,7 @@ tables:
       - ski_calendar
     description: Calendar dimension with ski-season classifications
     base_table:
-      database: AM_SKI_RESORT_PROD
+      database: AM_SKI_RESORT
       schema: MARTS
       table: DIM_DATE
     primary_key:
@@ -87,7 +87,7 @@ tables:
       - skier_days
     description: Daily pass usage fact capturing lift activity and time on mountain
     base_table:
-      database: AM_SKI_RESORT_PROD
+      database: AM_SKI_RESORT
       schema: MARTS
       table: FACT_PASS_USAGE
     primary_key:
@@ -189,4 +189,4 @@ relationships:
         right_column: DATE_KEY
 module_custom_instructions:
   sql_generation: "Filter seasonal analyses with DIM_DATE.SKI_SEASON; use DIM_DATE.FULL_DATE with DATE_TRUNC or DATEADD for calendar windows. Use DIM_DATE.IS_WEEKEND or FACT_PASS_USAGE.IS_WEEKEND to split weekend versus weekday behavior instead of recalculating flags. Aggregate visit metrics from FACT_PASS_USAGE and guard any division with DIV0(...). Break down personas with DIM_CUSTOMER.CUSTOMER_SEGMENT, STATE, and PASS_TYPE rather than ad-hoc string filters. When profiling specific cohorts, join only the declared tables and apply explicit filters (for example DIM_CUSTOMER.IS_PASS_HOLDER = TRUE) before aggregating."
-  question_categorization: "Route lift wait or terrain utilization questions to AM_SKI_RESORT_PROD.SEMANTIC.SEM_OPERATIONS. Route revenue, pricing, or transaction questions to AM_SKI_RESORT_PROD.SEMANTIC.SEM_REVENUE. Route pass value, ROI, or renewal questions to AM_SKI_RESORT_PROD.SEMANTIC.SEM_PASSHOLDER_ANALYTICS. If a request references a specific guest without a CUSTOMER_ID or clear customer name, ask the user to supply that identifier before proceeding. Clarify whether the user wants day visitors, pass holders, or all guests when the persona scope is unclear. When no time frame is provided, default to the current SKI_SEASON and confirm with the user."
+  question_categorization: "Route lift wait or terrain utilization questions to AM_SKI_RESORT.SEMANTIC.SEM_OPERATIONS. Route revenue, pricing, or transaction questions to AM_SKI_RESORT.SEMANTIC.SEM_REVENUE. Route pass value, ROI, or renewal questions to AM_SKI_RESORT.SEMANTIC.SEM_PASSHOLDER_ANALYTICS. If a request references a specific guest without a CUSTOMER_ID or clear customer name, ask the user to supply that identifier before proceeding. Clarify whether the user wants day visitors, pass holders, or all guests when the persona scope is unclear. When no time frame is provided, default to the current SKI_SEASON and confirm with the user."

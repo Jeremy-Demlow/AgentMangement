@@ -1,5 +1,5 @@
 # Eval config template for RESORT_EXECUTIVE
-# Agent: AM_SKI_RESORT_PROD.AGENTS.RESORT_EXECUTIVE
+# Agent: AM_SKI_RESORT.AGENTS.RESORT_EXECUTIVE
 # Used by evaluations — {PLACEHOLDERS} are substituted at runtime.
 #
 # Metrics:

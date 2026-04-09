@@ -87,10 +87,10 @@ templating:
       wh_name: 'AM_SKI_RESORT_WH_DEV'
       wh_role: 'AM_SKI_RESORT_WH_USER_DEV'
     PROD:
-      db: 'AM_SKI_RESORT_PROD'
-      deploy_role: 'AM_DEPLOY_ROLE_PROD'
-      wh_name: 'AM_SKI_RESORT_WH_PROD'
-      wh_role: 'AM_SKI_RESORT_WH_USER_PROD'
+      db: 'AM_SKI_RESORT'
+      deploy_role: 'AM_DEPLOY_ROLE'
+      wh_name: 'AM_SKI_RESORT_WH'
+      wh_role: 'AM_SKI_RESORT_WH_USER'
 ```
 
 The `infrastructure.sql` uses `{{db}}` everywhere, so env-suffixed database names flow through automatically — no schema suffixes needed.
@@ -117,7 +117,7 @@ Defined in `manifest.yml` (single-account pattern). Each target maps to a regist
 |--------|---------------------------|--------------------|---------------------|-----------------------|
 | DEV    | DCM.AM.AM_SKI_RESORT_DEV  | AM_SKI_RESORT_DEV  | AM_DEPLOY_ROLE_DEV  | AM_SKI_RESORT_WH_DEV  |
 | QA     | DCM.AM.AM_SKI_RESORT_QA   | AM_SKI_RESORT_QA   | AM_DEPLOY_ROLE_QA   | AM_SKI_RESORT_WH_QA   |
-| PROD   | DCM.AM.AM_SKI_RESORT      | AM_SKI_RESORT_PROD | AM_DEPLOY_ROLE_PROD | AM_SKI_RESORT_WH_PROD |
+| PROD   | DCM.AM.AM_SKI_RESORT      | AM_SKI_RESORT      | AM_DEPLOY_ROLE      | AM_SKI_RESORT_WH      |
 
 All warehouses: SMALL, 1-5 clusters, multi-cluster (STANDARD scaling).
 

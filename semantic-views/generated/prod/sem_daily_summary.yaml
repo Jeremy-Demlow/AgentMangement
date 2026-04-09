@@ -5,7 +5,7 @@ description: Executive daily summary KPIs for ski resort. Aggregates key metrics
 tables:
   - name: FACT_TICKET_SALES
     base_table:
-      database: AM_SKI_RESORT_PROD
+      database: AM_SKI_RESORT
       schema: MARTS
       table: FACT_TICKET_SALES
     dimensions:
@@ -46,7 +46,7 @@ tables:
         access_modifier: public_access
   - name: FACT_LIFT_SCANS
     base_table:
-      database: AM_SKI_RESORT_PROD
+      database: AM_SKI_RESORT
       schema: MARTS
       table: FACT_LIFT_SCANS
     dimensions:
@@ -66,7 +66,7 @@ tables:
         data_type: NUMBER
   - name: FACT_FOOD_BEVERAGE
     base_table:
-      database: AM_SKI_RESORT_PROD
+      database: AM_SKI_RESORT
       schema: MARTS
       table: FACT_FOOD_BEVERAGE
     dimensions:
@@ -89,7 +89,7 @@ tables:
         data_type: NUMBER
   - name: FACT_WEATHER
     base_table:
-      database: AM_SKI_RESORT_PROD
+      database: AM_SKI_RESORT
       schema: MARTS
       table: FACT_WEATHER
     dimensions:
@@ -121,7 +121,7 @@ tables:
         data_type: FLOAT
   - name: DIM_DATE
     base_table:
-      database: AM_SKI_RESORT_PROD
+      database: AM_SKI_RESORT
       schema: MARTS
       table: DIM_DATE
     primary_key:

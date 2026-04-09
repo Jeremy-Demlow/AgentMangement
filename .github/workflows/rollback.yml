@@ -33,28 +33,27 @@ env:
   SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
   SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
   SNOWFLAKE_PRIVATE_KEY_PATH: /tmp/snowflake_key.p8
-  SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
-  SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
   PYTHONPATH: ${{ github.workspace }}
 
 jobs:
   rollback:
     name: Rollback ${{ inputs.environment }}
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment == 'prod' && 'production' || inputs.environment }}
+    environment: >-
+      ${{
+        inputs.environment == 'prod' && 'production' ||
+        inputs.environment == 'qa' && 'QA' ||
+        'DEV'
+      }}
+    env:
+      SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+      SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+      SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
     steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-python@v6
+      - name: Setup Snowflake
+        uses: ./.github/actions/snowflake-setup
         with:
-          python-version: '3.11'
-          cache: 'pip'
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Write private key
-        run: echo "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/snowflake_key.p8
+          snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
       - name: List available snapshots
         if: inputs.timestamp == ''

@@ -76,20 +76,20 @@ echo "--- Environment-level secrets (3 per env) ---"
 declare -A ENV_WH=(
   [DEV]="AM_SKI_RESORT_WH_DEV"
   [QA]="AM_SKI_RESORT_WH_QA"
-  [PROD]="AM_SKI_RESORT_WH_PROD"
-  [production]="AM_SKI_RESORT_WH_PROD"
+  [PROD]="AM_SKI_RESORT_WH"
+  [production]="AM_SKI_RESORT_WH"
 )
 declare -A ENV_ROLE=(
   [DEV]="AM_DEPLOY_ROLE_DEV"
   [QA]="AM_DEPLOY_ROLE_QA"
-  [PROD]="AM_DEPLOY_ROLE_PROD"
-  [production]="AM_DEPLOY_ROLE_PROD"
+  [PROD]="AM_DEPLOY_ROLE"
+  [production]="AM_DEPLOY_ROLE"
 )
 declare -A ENV_DB=(
   [DEV]="AM_SKI_RESORT_DEV"
   [QA]="AM_SKI_RESORT_QA"
-  [PROD]="AM_SKI_RESORT_PROD"
-  [production]="AM_SKI_RESORT_PROD"
+  [PROD]="AM_SKI_RESORT"
+  [production]="AM_SKI_RESORT"
 )
 
 for ENV_NAME in DEV QA PROD production; do

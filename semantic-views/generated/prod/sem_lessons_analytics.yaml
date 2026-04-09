@@ -8,7 +8,7 @@ tables:
       - instruction
     description: Ski lesson bookings
     base_table:
-      database: AM_SKI_RESORT_PROD
+      database: AM_SKI_RESORT
       schema: MARTS
       table: FACT_LESSONS
     primary_key:

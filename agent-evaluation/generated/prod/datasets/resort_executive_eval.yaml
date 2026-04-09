@@ -1,6 +1,6 @@
 # RESORT_EXECUTIVE - Agent Evaluation Questions (Dynamic Ground Truth)
 #
-# Test questions for AM_SKI_RESORT_PROD.AGENTS.RESORT_EXECUTIVE
+# Test questions for AM_SKI_RESORT.AGENTS.RESORT_EXECUTIVE
 # Tools: DailySummaryKPIs, RevenueAnalytics, WeatherAnalytics, LiftOperations,
 #        StaffingAnalytics, MarketingAnalytics, CustomerSatisfaction,
 #        SafetyIncidents, SkiSchoolAnalytics, PassholderAnalytics, CustomerAnalytics
@@ -26,18 +26,18 @@ questions:
     test_type: in_scope
     validation_query: |
       WITH current_season AS (
-        SELECT SKI_SEASON FROM AM_SKI_RESORT_PROD.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE()
+        SELECT SKI_SEASON FROM AM_SKI_RESORT.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE()
       ),
       most_recent_complete AS (
-        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT_PROD.MARTS.DIM_DATE
+        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT.MARTS.DIM_DATE
         WHERE SKI_SEASON < (SELECT SKI_SEASON FROM current_season)
       )
       SELECT d.SKI_SEASON AS season,
              ROUND(SUM(t.PURCHASE_AMOUNT), 2) AS total_revenue,
              COUNT(*) AS ticket_count,
              ROUND(AVG(t.PURCHASE_AMOUNT), 2) AS avg_price
-      FROM AM_SKI_RESORT_PROD.MARTS.FACT_TICKET_SALES t
-      JOIN AM_SKI_RESORT_PROD.MARTS.DIM_DATE d ON t.PURCHASE_DATE_KEY = d.DATE_KEY
+      FROM AM_SKI_RESORT.MARTS.FACT_TICKET_SALES t
+      JOIN AM_SKI_RESORT.MARTS.DIM_DATE d ON t.PURCHASE_DATE_KEY = d.DATE_KEY
       WHERE d.SKI_SEASON = (SELECT season FROM most_recent_complete)
       GROUP BY d.SKI_SEASON
     answer_template: >-
@@ -52,14 +52,14 @@ questions:
     test_type: in_scope
     validation_query: |
       WITH most_recent_complete AS (
-        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT_PROD.MARTS.DIM_DATE
-        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM AM_SKI_RESORT_PROD.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
+        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT.MARTS.DIM_DATE
+        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM AM_SKI_RESORT.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
       )
       SELECT d.SKI_SEASON AS season,
              ROUND(SUM(fb.TOTAL_AMOUNT), 0) AS total_revenue,
              COUNT(*) AS transaction_count
-      FROM AM_SKI_RESORT_PROD.MARTS.FACT_FOOD_BEVERAGE fb
-      JOIN AM_SKI_RESORT_PROD.MARTS.DIM_DATE d ON fb.TRANSACTION_DATE_KEY = d.DATE_KEY
+      FROM AM_SKI_RESORT.MARTS.FACT_FOOD_BEVERAGE fb
+      JOIN AM_SKI_RESORT.MARTS.DIM_DATE d ON fb.TRANSACTION_DATE_KEY = d.DATE_KEY
       WHERE d.SKI_SEASON = (SELECT season FROM most_recent_complete)
       GROUP BY d.SKI_SEASON
     answer_template: >-
@@ -73,15 +73,15 @@ questions:
     test_type: in_scope
     validation_query: |
       WITH most_recent_complete AS (
-        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT_PROD.MARTS.DIM_DATE
-        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM AM_SKI_RESORT_PROD.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
+        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT.MARTS.DIM_DATE
+        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM AM_SKI_RESORT.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
       )
       SELECT d.SKI_SEASON AS season,
              ROUND(SUM(r.RENTAL_AMOUNT), 0) AS total_revenue,
              COUNT(*) AS rental_count,
              ROUND(AVG(r.RENTAL_AMOUNT), 2) AS avg_rental
-      FROM AM_SKI_RESORT_PROD.MARTS.FACT_RENTALS r
-      JOIN AM_SKI_RESORT_PROD.MARTS.DIM_DATE d ON r.RENTAL_DATE_KEY = d.DATE_KEY
+      FROM AM_SKI_RESORT.MARTS.FACT_RENTALS r
+      JOIN AM_SKI_RESORT.MARTS.DIM_DATE d ON r.RENTAL_DATE_KEY = d.DATE_KEY
       WHERE d.SKI_SEASON = (SELECT season FROM most_recent_complete)
       GROUP BY d.SKI_SEASON
     answer_template: >-
@@ -99,18 +99,18 @@ questions:
     test_type: in_scope
     validation_query: |
       WITH current_season AS (
-        SELECT SKI_SEASON FROM AM_SKI_RESORT_PROD.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE()
+        SELECT SKI_SEASON FROM AM_SKI_RESORT.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE()
       ),
       prior_season AS (
-        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT_PROD.MARTS.DIM_DATE
+        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT.MARTS.DIM_DATE
         WHERE SKI_SEASON < (SELECT SKI_SEASON FROM current_season)
       ),
       current_rev AS (
         SELECT d.SKI_SEASON AS current_season,
                ROUND(SUM(t.PURCHASE_AMOUNT), 0) AS current_revenue,
                COUNT(*) AS current_tickets
-        FROM AM_SKI_RESORT_PROD.MARTS.FACT_TICKET_SALES t
-        JOIN AM_SKI_RESORT_PROD.MARTS.DIM_DATE d ON t.PURCHASE_DATE_KEY = d.DATE_KEY
+        FROM AM_SKI_RESORT.MARTS.FACT_TICKET_SALES t
+        JOIN AM_SKI_RESORT.MARTS.DIM_DATE d ON t.PURCHASE_DATE_KEY = d.DATE_KEY
         WHERE d.SKI_SEASON = (SELECT SKI_SEASON FROM current_season) AND d.FULL_DATE <= CURRENT_DATE()
         GROUP BY d.SKI_SEASON
       ),
@@ -118,11 +118,11 @@ questions:
         SELECT d.SKI_SEASON AS prior_season,
                ROUND(SUM(t.PURCHASE_AMOUNT), 0) AS prior_revenue,
                COUNT(*) AS prior_tickets
-        FROM AM_SKI_RESORT_PROD.MARTS.FACT_TICKET_SALES t
-        JOIN AM_SKI_RESORT_PROD.MARTS.DIM_DATE d ON t.PURCHASE_DATE_KEY = d.DATE_KEY
+        FROM AM_SKI_RESORT.MARTS.FACT_TICKET_SALES t
+        JOIN AM_SKI_RESORT.MARTS.DIM_DATE d ON t.PURCHASE_DATE_KEY = d.DATE_KEY
         WHERE d.SKI_SEASON = (SELECT season FROM prior_season)
           AND d.WEEK_OF_SEASON <= (
-            SELECT MAX(WEEK_OF_SEASON) FROM AM_SKI_RESORT_PROD.MARTS.DIM_DATE
+            SELECT MAX(WEEK_OF_SEASON) FROM AM_SKI_RESORT.MARTS.DIM_DATE
             WHERE FULL_DATE <= CURRENT_DATE()
               AND SKI_SEASON = (SELECT SKI_SEASON FROM current_season)
           )
@@ -147,16 +147,16 @@ questions:
     test_type: in_scope
     validation_query: |
       WITH most_recent_complete AS (
-        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT_PROD.MARTS.DIM_DATE
-        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM AM_SKI_RESORT_PROD.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
+        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT.MARTS.DIM_DATE
+        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM AM_SKI_RESORT.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
       )
       SELECT d.SKI_SEASON AS season,
              ROUND(SUM(w.SNOWFALL_INCHES), 1) AS total_snowfall,
              SUM(CASE WHEN w.IS_POWDER_DAY THEN 1 ELSE 0 END) AS powder_days,
              ROUND(AVG(w.TEMP_HIGH_F), 1) AS avg_high,
              ROUND(AVG(w.TEMP_LOW_F), 1) AS avg_low
-      FROM AM_SKI_RESORT_PROD.MARTS.FACT_WEATHER w
-      JOIN AM_SKI_RESORT_PROD.MARTS.DIM_DATE d ON w.DATE_KEY = d.DATE_KEY
+      FROM AM_SKI_RESORT.MARTS.FACT_WEATHER w
+      JOIN AM_SKI_RESORT.MARTS.DIM_DATE d ON w.DATE_KEY = d.DATE_KEY
       WHERE d.SKI_SEASON = (SELECT season FROM most_recent_complete)
       GROUP BY d.SKI_SEASON
     answer_template: >-
@@ -174,14 +174,14 @@ questions:
     test_type: in_scope
     validation_query: |
       WITH most_recent_complete AS (
-        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT_PROD.MARTS.DIM_DATE
-        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM AM_SKI_RESORT_PROD.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
+        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT.MARTS.DIM_DATE
+        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM AM_SKI_RESORT.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
       )
       SELECT d.SKI_SEASON AS season,
              COUNT(*) AS total_scans,
              ROUND(AVG(ls.WAIT_TIME_MINUTES), 1) AS avg_wait
-      FROM AM_SKI_RESORT_PROD.MARTS.FACT_LIFT_SCANS ls
-      JOIN AM_SKI_RESORT_PROD.MARTS.DIM_DATE d ON ls.DATE_KEY = d.DATE_KEY
+      FROM AM_SKI_RESORT.MARTS.FACT_LIFT_SCANS ls
+      JOIN AM_SKI_RESORT.MARTS.DIM_DATE d ON ls.DATE_KEY = d.DATE_KEY
       WHERE d.SKI_SEASON = (SELECT season FROM most_recent_complete)
       GROUP BY d.SKI_SEASON
     answer_template: >-
@@ -195,12 +195,12 @@ questions:
     test_type: in_scope
     validation_query: |
       WITH most_recent_complete AS (
-        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT_PROD.MARTS.DIM_DATE
-        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM AM_SKI_RESORT_PROD.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
+        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT.MARTS.DIM_DATE
+        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM AM_SKI_RESORT.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
       )
       SELECT d.DAY_NAME AS day1, COUNT(*) AS count1
-      FROM AM_SKI_RESORT_PROD.MARTS.FACT_LIFT_SCANS ls
-      JOIN AM_SKI_RESORT_PROD.MARTS.DIM_DATE d ON ls.DATE_KEY = d.DATE_KEY
+      FROM AM_SKI_RESORT.MARTS.FACT_LIFT_SCANS ls
+      JOIN AM_SKI_RESORT.MARTS.DIM_DATE d ON ls.DATE_KEY = d.DATE_KEY
       WHERE d.SKI_SEASON = (SELECT season FROM most_recent_complete)
       GROUP BY d.DAY_NAME
       ORDER BY count1 DESC
@@ -219,14 +219,14 @@ questions:
     test_type: in_scope
     validation_query: |
       WITH most_recent_complete AS (
-        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT_PROD.MARTS.DIM_DATE
-        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM AM_SKI_RESORT_PROD.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
+        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT.MARTS.DIM_DATE
+        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM AM_SKI_RESORT.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
       )
       SELECT d.SKI_SEASON AS season,
              ROUND(AVG(s.COVERAGE_RATIO), 2) AS avg_coverage,
              SUM(CASE WHEN s.IS_UNDERSTAFFED THEN 1 ELSE 0 END) AS understaffed_shifts
-      FROM AM_SKI_RESORT_PROD.MARTS.FACT_STAFFING s
-      JOIN AM_SKI_RESORT_PROD.MARTS.DIM_DATE d ON s.DATE_KEY = d.DATE_KEY
+      FROM AM_SKI_RESORT.MARTS.FACT_STAFFING s
+      JOIN AM_SKI_RESORT.MARTS.DIM_DATE d ON s.DATE_KEY = d.DATE_KEY
       WHERE d.SKI_SEASON = (SELECT season FROM most_recent_complete)
       GROUP BY d.SKI_SEASON
     answer_template: >-
@@ -243,14 +243,14 @@ questions:
     test_type: in_scope
     validation_query: |
       WITH most_recent_complete AS (
-        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT_PROD.MARTS.DIM_DATE
-        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM AM_SKI_RESORT_PROD.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
+        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT.MARTS.DIM_DATE
+        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM AM_SKI_RESORT.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
       )
       SELECT m.CAMPAIGN_NAME AS top_campaign,
              m.CAMPAIGN_CHANNEL AS channel,
              ROUND(m.CONVERSION_RATE * 100, 1) AS conversion_pct
-      FROM AM_SKI_RESORT_PROD.MARTS.FACT_MARKETING m
-      JOIN AM_SKI_RESORT_PROD.MARTS.DIM_DATE d ON m.SEND_DATE_KEY = d.DATE_KEY
+      FROM AM_SKI_RESORT.MARTS.FACT_MARKETING m
+      JOIN AM_SKI_RESORT.MARTS.DIM_DATE d ON m.SEND_DATE_KEY = d.DATE_KEY
       WHERE d.SKI_SEASON = (SELECT season FROM most_recent_complete)
       ORDER BY m.CONVERSION_RATE DESC
       LIMIT 1
@@ -268,15 +268,15 @@ questions:
     test_type: in_scope
     validation_query: |
       WITH most_recent_complete AS (
-        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT_PROD.MARTS.DIM_DATE
-        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM AM_SKI_RESORT_PROD.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
+        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT.MARTS.DIM_DATE
+        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM AM_SKI_RESORT.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
       )
       SELECT d.SKI_SEASON AS season,
              ROUND(AVG(f.NPS_SCORE), 1) AS avg_nps,
              ROUND(AVG(f.RATING), 2) AS avg_rating,
              COUNT(*) AS feedback_count
-      FROM AM_SKI_RESORT_PROD.MARTS.FACT_FEEDBACK f
-      JOIN AM_SKI_RESORT_PROD.MARTS.DIM_DATE d ON f.FEEDBACK_DATE = d.FULL_DATE
+      FROM AM_SKI_RESORT.MARTS.FACT_FEEDBACK f
+      JOIN AM_SKI_RESORT.MARTS.DIM_DATE d ON f.FEEDBACK_DATE = d.FULL_DATE
       WHERE d.SKI_SEASON = (SELECT season FROM most_recent_complete)
       GROUP BY d.SKI_SEASON
     answer_template: >-
@@ -293,15 +293,15 @@ questions:
     test_type: in_scope
     validation_query: |
       WITH most_recent_complete AS (
-        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT_PROD.MARTS.DIM_DATE
-        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM AM_SKI_RESORT_PROD.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
+        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT.MARTS.DIM_DATE
+        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM AM_SKI_RESORT.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
       )
       SELECT d.SKI_SEASON AS season,
              COUNT(*) AS incident_count,
              ROUND(AVG(i.SEVERITY_SCORE), 2) AS avg_severity,
              ROUND(AVG(i.PATROL_RESPONSE_MINUTES), 1) AS avg_response_time
-      FROM AM_SKI_RESORT_PROD.MARTS.FACT_INCIDENTS i
-      JOIN AM_SKI_RESORT_PROD.MARTS.DIM_DATE d ON i.INCIDENT_DATE = d.FULL_DATE
+      FROM AM_SKI_RESORT.MARTS.FACT_INCIDENTS i
+      JOIN AM_SKI_RESORT.MARTS.DIM_DATE d ON i.INCIDENT_DATE = d.FULL_DATE
       WHERE d.SKI_SEASON = (SELECT season FROM most_recent_complete)
       GROUP BY d.SKI_SEASON
     answer_template: >-
@@ -319,15 +319,15 @@ questions:
     test_type: in_scope
     validation_query: |
       WITH most_recent_complete AS (
-        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT_PROD.MARTS.DIM_DATE
-        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM AM_SKI_RESORT_PROD.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
+        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT.MARTS.DIM_DATE
+        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM AM_SKI_RESORT.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
       )
       SELECT d.SKI_SEASON AS season,
              COUNT(*) AS lesson_count,
              ROUND(SUM(l.TOTAL_LESSON_REVENUE), 0) AS total_revenue,
              ROUND(AVG(l.STUDENT_RATING), 2) AS avg_rating
-      FROM AM_SKI_RESORT_PROD.MARTS.FACT_LESSONS l
-      JOIN AM_SKI_RESORT_PROD.MARTS.DIM_DATE d ON l.LESSON_DATE = d.FULL_DATE
+      FROM AM_SKI_RESORT.MARTS.FACT_LESSONS l
+      JOIN AM_SKI_RESORT.MARTS.DIM_DATE d ON l.LESSON_DATE = d.FULL_DATE
       WHERE d.SKI_SEASON = (SELECT season FROM most_recent_complete)
       GROUP BY d.SKI_SEASON
     answer_template: >-
@@ -345,15 +345,15 @@ questions:
     test_type: in_scope
     validation_query: |
       WITH most_recent_complete AS (
-        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT_PROD.MARTS.DIM_DATE
-        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM AM_SKI_RESORT_PROD.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
+        SELECT MAX(SKI_SEASON) AS season FROM AM_SKI_RESORT.MARTS.DIM_DATE
+        WHERE SKI_SEASON < (SELECT SKI_SEASON FROM AM_SKI_RESORT.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE())
       )
       SELECT (SELECT season FROM most_recent_complete) AS season,
              COUNT(*) AS passes_sold,
              ROUND(SUM(sp.PURCHASE_AMOUNT), 0) AS total_revenue,
              ROUND(AVG(sp.PURCHASE_AMOUNT), 2) AS avg_price,
              SUM(CASE WHEN sp.IS_RENEWAL THEN 1 ELSE 0 END) AS renewals
-      FROM AM_SKI_RESORT_PROD.MARTS.FACT_SEASON_PASS_SALES sp
+      FROM AM_SKI_RESORT.MARTS.FACT_SEASON_PASS_SALES sp
       WHERE sp.VALID_SEASON = (SELECT season FROM most_recent_complete)
     answer_template: >-
       {passes_sold:,} season passes were sold for the {season} season
@@ -372,7 +372,7 @@ questions:
       SELECT LISTAGG(seg || ' (' || cnt || ')', ', ') WITHIN GROUP (ORDER BY cnt DESC) AS segment_summary
       FROM (
         SELECT CUSTOMER_SEGMENT AS seg, COUNT(*) AS cnt
-        FROM AM_SKI_RESORT_PROD.MARTS.DIM_CUSTOMER
+        FROM AM_SKI_RESORT.MARTS.DIM_CUSTOMER
         GROUP BY CUSTOMER_SEGMENT
         ORDER BY cnt DESC
       )
@@ -389,24 +389,24 @@ questions:
     test_type: in_scope
     validation_query: |
       WITH current_season AS (
-        SELECT SKI_SEASON FROM AM_SKI_RESORT_PROD.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE()
+        SELECT SKI_SEASON FROM AM_SKI_RESORT.MARTS.DIM_DATE WHERE FULL_DATE = CURRENT_DATE()
       ),
       tickets AS (
         SELECT ROUND(SUM(t.PURCHASE_AMOUNT), 0) AS ticket_rev
-        FROM AM_SKI_RESORT_PROD.MARTS.FACT_TICKET_SALES t
-        JOIN AM_SKI_RESORT_PROD.MARTS.DIM_DATE d ON t.PURCHASE_DATE_KEY = d.DATE_KEY
+        FROM AM_SKI_RESORT.MARTS.FACT_TICKET_SALES t
+        JOIN AM_SKI_RESORT.MARTS.DIM_DATE d ON t.PURCHASE_DATE_KEY = d.DATE_KEY
         WHERE d.SKI_SEASON = (SELECT SKI_SEASON FROM current_season) AND d.FULL_DATE <= CURRENT_DATE()
       ),
       weather AS (
         SELECT ROUND(SUM(w.SNOWFALL_INCHES), 1) AS snowfall
-        FROM AM_SKI_RESORT_PROD.MARTS.FACT_WEATHER w
-        JOIN AM_SKI_RESORT_PROD.MARTS.DIM_DATE d ON w.DATE_KEY = d.DATE_KEY
+        FROM AM_SKI_RESORT.MARTS.FACT_WEATHER w
+        JOIN AM_SKI_RESORT.MARTS.DIM_DATE d ON w.DATE_KEY = d.DATE_KEY
         WHERE d.SKI_SEASON = (SELECT SKI_SEASON FROM current_season) AND d.FULL_DATE <= CURRENT_DATE()
       ),
       safety AS (
         SELECT COUNT(*) AS incidents
-        FROM AM_SKI_RESORT_PROD.MARTS.FACT_INCIDENTS i
-        JOIN AM_SKI_RESORT_PROD.MARTS.DIM_DATE d ON i.INCIDENT_DATE = d.FULL_DATE
+        FROM AM_SKI_RESORT.MARTS.FACT_INCIDENTS i
+        JOIN AM_SKI_RESORT.MARTS.DIM_DATE d ON i.INCIDENT_DATE = d.FULL_DATE
         WHERE d.SKI_SEASON = (SELECT SKI_SEASON FROM current_season) AND d.FULL_DATE <= CURRENT_DATE()
       )
       SELECT (SELECT SKI_SEASON FROM current_season) AS season,

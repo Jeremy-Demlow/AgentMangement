@@ -8,7 +8,7 @@ tables:
       - safety
     description: Safety incident records
     base_table:
-      database: AM_SKI_RESORT_PROD
+      database: AM_SKI_RESORT
       schema: MARTS
       table: FACT_INCIDENTS
     primary_key:

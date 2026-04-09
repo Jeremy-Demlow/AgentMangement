@@ -30,9 +30,9 @@ dbt_ski_resort:
       account: "{{ env_var('SNOWFLAKE_ACCOUNT', 'trb65519') }}"
       user: "{{ env_var('SNOWFLAKE_USER', 'JDEMLOW') }}"
       private_key_path: "{{ env_var('SNOWFLAKE_PRIVATE_KEY_PATH', '/Users/jdemlow/.snowflake/keys/snowflake_tf_key.p8') }}"
-      database: "{{ env_var('SNOWFLAKE_DATABASE', 'AM_SKI_RESORT_PROD') }}"
-      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'AM_SKI_RESORT_WH_PROD') }}"
+      database: "{{ env_var('SNOWFLAKE_DATABASE', 'AM_SKI_RESORT') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'AM_SKI_RESORT_WH') }}"
       schema: MARTS
-      role: "{{ env_var('SNOWFLAKE_ROLE', 'AM_DEPLOY_ROLE_PROD') }}"
+      role: "{{ env_var('SNOWFLAKE_ROLE', 'AM_DEPLOY_ROLE') }}"
       threads: 4
       client_session_keep_alive: False

@@ -83,7 +83,7 @@ Environment-specific targets:
 |--------|----------|-----------|------|
 | `dev` | `AM_SKI_RESORT_DEV` | `AM_SKI_RESORT_WH_DEV` | `AM_DEPLOY_ROLE_DEV` |
 | `qa` | `AM_SKI_RESORT_QA` | `AM_SKI_RESORT_WH_QA` | `AM_DEPLOY_ROLE_QA` |
-| `prod` | `AM_SKI_RESORT_PROD` | `AM_SKI_RESORT_WH_PROD` | `AM_DEPLOY_ROLE_PROD` |
+| `prod` | `AM_SKI_RESORT` | `AM_SKI_RESORT_WH` | `AM_DEPLOY_ROLE` |
 
 ## CI/CD Integration
 

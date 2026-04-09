@@ -516,7 +516,7 @@ agent-evaluation/
 
 ## Example: RESORT_EXECUTIVE
 
-15 questions, all dynamic ground truth, run against `AM_SKI_RESORT_PROD.AGENTS.RESORT_EXECUTIVE`:
+15 questions, all dynamic ground truth, run against `AM_SKI_RESORT.AGENTS.RESORT_EXECUTIVE`:
 
 | Metric | Avg Score | Count | High (>=0.8) | Low (<0.3) | Threshold | Gate |
 |--------|-----------|-------|--------------|------------|-----------|------|

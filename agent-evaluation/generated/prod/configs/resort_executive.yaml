@@ -12,7 +12,7 @@
 # --- Agent -------------------------------------------------------------------
 agent:
   name: "RESORT_EXECUTIVE"
-  database: "AM_SKI_RESORT_PROD"
+  database: "AM_SKI_RESORT"
   schema: "AGENTS"
 
 # --- Dataset -----------------------------------------------------------------
@@ -24,13 +24,13 @@ agent:
 #   .csv  (simple):      flat file with target_tool, question, ground_truth, test_type
 dataset:
   questions: "datasets/resort_executive_eval.yaml"
-  snowflake_table: "AM_SKI_RESORT_PROD.AGENTS.RESORT_EXECUTIVE_EVAL_DATA"
+  snowflake_table: "AM_SKI_RESORT.AGENTS.RESORT_EXECUTIVE_EVAL_DATA"
 
 # --- Snowflake Objects (auto-created by run_eval.py) -------------------------
 snowflake:
-  stage: "AM_SKI_RESORT_PROD.AGENTS.eval_config_stage"
-  file_format: "AM_SKI_RESORT_PROD.AGENTS.yaml_file_format"
-  warehouse: "AM_SKI_RESORT_WH_PROD"
+  stage: "AM_SKI_RESORT.AGENTS.eval_config_stage"
+  file_format: "AM_SKI_RESORT.AGENTS.yaml_file_format"
+  warehouse: "AM_SKI_RESORT_WH"
 
 # --- Evaluation --------------------------------------------------------------
 evaluation:

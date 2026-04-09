@@ -52,7 +52,7 @@ The framework manages the full lifecycle across three environments (DEV, QA, PRO
 │      RESORT_EXECUTIVE_DEV       RESORT_EXECUTIVE_QA             │
 │      SKI_OPS_ASSISTANT_DEV      SKI_OPS_ASSISTANT_QA            │
 │                                                                 │
-│  AM_SKI_RESORT_PROD (source of truth)                           │
+│  AM_SKI_RESORT (source of truth)                                │
 │    RAW (real data)                                              │
 │    STAGING / MARTS / SEMANTIC / AGENTS / DBT_TEST__AUDIT        │
 │      RESORT_EXECUTIVE           (no suffix — canonical)         │
@@ -141,10 +141,13 @@ AgentMangement/
 │   ├── deploy-dev.yml               #   Deploy on merge to main (environment: DEV)
 │   ├── promote-qa.yml               #   Manual promote with eval gate (environment: QA)
 │   ├── promote-prod.yml             #   Manual promote with approval (environment: PROD)
-│   ├── validate-pr.yml              #   Lint + validate on PR
+│   ├── validate-pr.yml              #   Lint + dry-run validate on PR
 │   ├── rollback.yml                 #   Rollback any environment
 │   ├── daily_data_refresh.yml       #   Daily data pipeline (environment: PROD)
 │   └── dcm-deploy.yml              #   DCM infrastructure deploy
+│
+├── .github/actions/                 # Reusable composite actions
+│   └── snowflake-setup/action.yml   #   Checkout + Python + pip + private key
 │
 ├── .github/scripts/                 # CI/CD helper scripts
 │   ├── setup_github_secrets.sh      #   Set repo + environment secrets via gh CLI
@@ -190,7 +193,7 @@ Semantic views live in `dbt_ski_resort/models/marts/semantic/` using the `dbt_se
 
 ```bash
 dbt run --target dev --select "marts.semantic"   # → AM_SKI_RESORT_DEV.SEMANTIC
-dbt run --target prod --select "marts.semantic"  # → AM_SKI_RESORT_PROD.SEMANTIC
+dbt run --target prod --select "marts.semantic"  # → AM_SKI_RESORT.SEMANTIC
 ```
 
 ### Path B: Python CI/CD (works without dbt)
@@ -265,8 +268,8 @@ Secrets are split between **repo-level** (shared across all workflows) and **env
 
 | Level | Secret | Example Value |
 |-------|--------|---------------|
-| Repo | `SNOWFLAKE_ACCOUNT` | `trb65519` |
-| Repo | `SNOWFLAKE_USER` | `JDEMLOW` |
+| Repo | `SNOWFLAKE_ACCOUNT` | Your Snowflake account locator |
+| Repo | `SNOWFLAKE_USER` | Service account username |
 | Repo | `SNOWFLAKE_PRIVATE_KEY` | Contents of `.p8` file |
 | Env: DEV | `SNOWFLAKE_WAREHOUSE` | `AM_SKI_RESORT_WH_DEV` |
 | Env: DEV | `SNOWFLAKE_ROLE` | `AM_DEPLOY_ROLE_DEV` |
@@ -274,9 +277,9 @@ Secrets are split between **repo-level** (shared across all workflows) and **env
 | Env: QA | `SNOWFLAKE_WAREHOUSE` | `AM_SKI_RESORT_WH_QA` |
 | Env: QA | `SNOWFLAKE_ROLE` | `AM_DEPLOY_ROLE_QA` |
 | Env: QA | `SNOWFLAKE_DATABASE` | `AM_SKI_RESORT_QA` |
-| Env: PROD | `SNOWFLAKE_WAREHOUSE` | `AM_SKI_RESORT_WH_PROD` |
-| Env: PROD | `SNOWFLAKE_ROLE` | `AM_DEPLOY_ROLE_PROD` |
-| Env: PROD | `SNOWFLAKE_DATABASE` | `AM_SKI_RESORT_PROD` |
+| Env: PROD | `SNOWFLAKE_WAREHOUSE` | `AM_SKI_RESORT_WH` |
+| Env: PROD | `SNOWFLAKE_ROLE` | `AM_DEPLOY_ROLE` |
+| Env: PROD | `SNOWFLAKE_DATABASE` | `AM_SKI_RESORT` |
 
 Each workflow job declares `environment: DEV` (or QA/PROD), and `${{ secrets.SNOWFLAKE_DATABASE }}` resolves to the correct value for that environment.
 
