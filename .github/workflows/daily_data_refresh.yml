@@ -298,10 +298,16 @@ jobs:
 
       - name: Install DBT Dependencies
         working-directory: dbt_ski_resort
+        env:
+          DBT_TARGET: prod
+          SNOWFLAKE_DATABASE: ${{ steps.config.outputs.prod_database }}
         run: dbt deps
 
       - name: Run DBT Fact Tables
         working-directory: dbt_ski_resort
+        env:
+          DBT_TARGET: prod
+          SNOWFLAKE_DATABASE: ${{ steps.config.outputs.prod_database }}
         run: |
           if [ "${{ github.event.inputs.full_refresh }}" = "true" ]; then
             echo "Full refresh requested - rebuilding all fact tables..."
@@ -312,6 +318,9 @@ jobs:
 
       - name: Run DBT Semantic Views
         working-directory: dbt_ski_resort
+        env:
+          DBT_TARGET: prod
+          SNOWFLAKE_DATABASE: ${{ steps.config.outputs.prod_database }}
         run: dbt run --select "marts.semantic"
 
       # ─── Verification ───────────────────────────────────────────────────
