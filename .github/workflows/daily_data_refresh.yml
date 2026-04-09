@@ -87,7 +87,7 @@ jobs:
           with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
               out.write(f'prod_database={prod_db}\n')
               out.write(f'raw_schema={raw_schema}\n')
-              out.write(f'raw_tables={chr(10).join(raw_tables)}\n')
+              out.write(f'raw_tables={",".join(raw_tables)}\n')
           "
 
       - name: Create connections.toml
