@@ -251,7 +251,8 @@ jobs:
               'RENTALS': 'RENTAL_DATE', 'WEATHER_CONDITIONS': 'WEATHER_DATE',
               'STAFFING_SCHEDULE': 'SCHEDULE_DATE', 'SKI_LESSONS': 'LESSON_DATE',
               'INCIDENTS': 'INCIDENT_DATE', 'CUSTOMER_FEEDBACK': 'FEEDBACK_DATE',
-              'PARKING_OCCUPANCY': 'RECORDED_DATE', 'GROOMING_LOGS': 'GROOMING_DATE',
+              'PARKING_OCCUPANCY': 'RECORDED_DATE', 'LIFT_MAINTENANCE': 'MAINTENANCE_DATE',
+              'GROOMING_LOGS': 'GROOMING_DATE',
           }
           stmts = []
           for t in cfg.get('raw_tables', []):
