@@ -116,12 +116,12 @@ jobs:
         if: always()
         run: rm -f /tmp/snowflake_key.p8
 
-  dev-eval-summary:
-    name: DEV Eval Gate (main only)
+  agent-eval:
+    name: Agent Evaluation (DEV)
     runs-on: ubuntu-latest
-    if: github.base_ref == 'main'
     needs: [lint-and-unit, validate-specs, dbt-quality-gate, validate-snowflake]
     environment: DEV
+    continue-on-error: ${{ github.base_ref == 'dev' }}
     env:
       SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
       SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
@@ -134,16 +134,29 @@ jobs:
         with:
           snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
-      - name: Query latest DEV eval results
+      - name: Run agent evaluations
         id: eval
+        run: python -m agent_management.run_ci_eval --env dev
+
+      - name: Query eval summary
+        if: always()
+        id: summary
         run: python agent-evaluation/scripts/eval_summary.py --env dev
 
+      - name: Upload evaluation results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr-evaluation-results
+          path: agent-evaluation/results/
+          retention-days: 30
+
       - name: Comment PR with eval summary
-        if: always() && steps.eval.outputs.summary != ''
+        if: always() && steps.summary.outputs.summary != ''
         uses: actions/github-script@v7
         with:
           script: |
-            const body = `${{ steps.eval.outputs.summary }}`;
+            const body = `${{ steps.summary.outputs.summary }}`;
             if (body) {
               const { data: comments } = await github.rest.issues.listComments({
                 owner: context.repo.owner,
