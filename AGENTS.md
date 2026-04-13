@@ -106,7 +106,7 @@ AgentMangement/
 │   ├── definitions/                       # YAML view definitions
 │   └── snapshots/                         # Pre-deploy state captures
 │
-├── data_generation/                       # Synthetic ski resort data (EXISTS)
+├── data-generation/                       # Synthetic ski resort data (EXISTS)
 │   ├── generate_complete_ski_data.py
 │   ├── generate_daily_increment.py
 │   └── shared.py

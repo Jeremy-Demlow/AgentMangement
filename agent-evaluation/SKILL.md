@@ -769,6 +769,10 @@ evaluation:
   label: "<AGENT_NAME> evaluation"
   description: "<description of what is being evaluated>"
 
+thresholds:
+  answer_correctness: {{ eval.thresholds.answer_correctness }}
+  logical_consistency: {{ eval.thresholds.logical_consistency }}
+
 metrics:
   - "answer_correctness"
   - "logical_consistency"
@@ -782,6 +786,7 @@ metrics:
 - `dataset.questions` must point to the YAML questions file from Step 3.5c
 - `snowflake_table`, `stage`, `file_format` must use fully qualified names
 - Include the same metrics the user selected in Step 2
+- Thresholds use `{{ eval.thresholds.* }}` Jinja2 templates — resolved from `environments/<env>.env.yml` at render time
 - If `boundary_enforcement` was selected, include the full custom metric definition (from Step 4.2)
 
 **Tell the user:** "I've saved the runner config to `configs/<agent>.yaml`. To re-run later: `uv run python scripts/run_eval.py configs/<agent>.yaml --connection <conn>`"
@@ -1167,16 +1172,15 @@ evaluation:
   description: "Answer correctness + logical consistency"
 
 thresholds:
-  answer_correctness: 0.70
-  logical_consistency: 0.80
-  # boundary_enforcement: 7.0
+  answer_correctness: {{ eval.thresholds.answer_correctness }}
+  logical_consistency: {{ eval.thresholds.logical_consistency }}
 
 metrics:
   - "answer_correctness"
   - "logical_consistency"
 ```
 
-The `thresholds` section defines pass/fail gates per metric. When thresholds are configured, the runner exits with code 1 on failure (CI-friendly).
+The `thresholds` section uses Jinja2 templates that resolve from `environments/<env>.env.yml`. Each environment defines its own pass/fail gates under `eval.thresholds`. To change thresholds, edit the environment config — not the template configs.
 
 ### Running
 

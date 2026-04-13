@@ -1,7 +1,7 @@
 name: sem_operations
-description: Lift operations analytics for ski resort. Tracks lift scan volumes, wait
-  times, weather conditions at scan time, and lift utilization by lift type, terrain,
-  and time period.
+description: Operations analytics for ski resort covering lift scans, lift maintenance,
+  and trail grooming. Tracks wait times, capacity utilization, maintenance costs and
+  downtime, and grooming effectiveness.
 tables:
   - name: FACT_LIFT_SCANS
     base_table:
@@ -66,6 +66,195 @@ tables:
       - name: UNIQUE_RIDERS
         description: "Count of distinct customers who rode lifts"
         expr: COUNT(DISTINCT CUSTOMER_KEY)
+        access_modifier: public_access
+  - name: FACT_LIFT_MAINTENANCE
+    base_table:
+      database: {{ env.database }}
+      schema: MARTS
+      table: FACT_LIFT_MAINTENANCE
+    dimensions:
+      - name: MAINTENANCE_KEY
+        expr: MAINTENANCE_KEY
+        data_type: VARCHAR
+      - name: DATE_KEY
+        expr: DATE_KEY
+        data_type: NUMBER
+      - name: LIFT_KEY
+        expr: LIFT_KEY
+        data_type: VARCHAR
+      - name: MAINTENANCE_ID
+        expr: MAINTENANCE_ID
+        data_type: VARCHAR
+      - name: LIFT_ID
+        expr: LIFT_ID
+        data_type: VARCHAR
+      - name: TECHNICIAN_ID
+        expr: TECHNICIAN_ID
+        data_type: VARCHAR
+      - name: MAINTENANCE_TYPE
+        expr: MAINTENANCE_TYPE
+        data_type: VARCHAR
+        description: "Type of maintenance: inspection, repair, adjustment, replacement, emergency"
+      - name: CATEGORY
+        expr: CATEGORY
+        data_type: VARCHAR
+        description: "Maintenance category: mechanical, electrical, routine, safety"
+      - name: DURING_OPERATING_HOURS
+        expr: DURING_OPERATING_HOURS
+        data_type: BOOLEAN
+        description: "Whether maintenance occurred during lift operating hours"
+      - name: PASSED_INSPECTION
+        expr: PASSED_INSPECTION
+        data_type: BOOLEAN
+        description: "Whether lift passed inspection after maintenance"
+      - name: FOLLOWUP_REQUIRED
+        expr: FOLLOWUP_REQUIRED
+        data_type: BOOLEAN
+        description: "Whether follow-up maintenance is needed"
+      - name: PARTS_REPLACED
+        expr: PARTS_REPLACED
+        data_type: BOOLEAN
+        description: "Whether parts were replaced during maintenance"
+    time_dimensions:
+      - name: MAINTENANCE_DATE
+        expr: MAINTENANCE_DATE
+        data_type: DATE
+    facts:
+      - name: DOWNTIME_MINUTES
+        expr: DOWNTIME_MINUTES
+        data_type: NUMBER
+        description: "Minutes of lift downtime due to maintenance"
+      - name: TOTAL_COST
+        expr: TOTAL_COST
+        data_type: NUMBER
+        description: "Total maintenance cost (parts + labor)"
+      - name: PARTS_COST
+        expr: PARTS_COST
+        data_type: NUMBER
+        description: "Cost of replacement parts"
+      - name: LABOR_COST
+        expr: LABOR_COST
+        data_type: NUMBER
+        description: "Cost of maintenance labor"
+      - name: LABOR_HOURS
+        expr: LABOR_HOURS
+        data_type: NUMBER
+        description: "Hours of labor for maintenance"
+    metrics:
+      - name: TOTAL_MAINTENANCE_EVENTS
+        description: "Total maintenance events recorded"
+        expr: COUNT(MAINTENANCE_KEY)
+        access_modifier: public_access
+      - name: TOTAL_MAINTENANCE_COST
+        description: "Total maintenance spend (parts + labor)"
+        expr: SUM(TOTAL_COST)
+        access_modifier: public_access
+      - name: AVG_MAINTENANCE_COST
+        description: "Average cost per maintenance event"
+        expr: AVG(TOTAL_COST)
+        access_modifier: public_access
+      - name: TOTAL_DOWNTIME_MINUTES
+        description: "Total lift downtime from maintenance (minutes)"
+        expr: SUM(DOWNTIME_MINUTES)
+        access_modifier: public_access
+      - name: AVG_DOWNTIME_MINUTES
+        description: "Average downtime per maintenance event (minutes)"
+        expr: AVG(DOWNTIME_MINUTES)
+        access_modifier: public_access
+      - name: TOTAL_LABOR_HOURS
+        description: "Total labor hours spent on maintenance"
+        expr: SUM(LABOR_HOURS)
+        access_modifier: public_access
+      - name: INSPECTION_PASS_RATE
+        description: "Percentage of maintenance events that passed inspection"
+        expr: COUNT(CASE WHEN PASSED_INSPECTION THEN 1 END) * 100.0 / NULLIF(COUNT(MAINTENANCE_KEY), 0)
+        access_modifier: public_access
+  - name: FACT_GROOMING
+    base_table:
+      database: {{ env.database }}
+      schema: MARTS
+      table: FACT_GROOMING
+    dimensions:
+      - name: GROOMING_KEY
+        expr: GROOMING_KEY
+        data_type: VARCHAR
+      - name: DATE_KEY
+        expr: DATE_KEY
+        data_type: NUMBER
+      - name: LOG_ID
+        expr: LOG_ID
+        data_type: VARCHAR
+      - name: GROOMER_ID
+        expr: GROOMER_ID
+        data_type: VARCHAR
+      - name: MACHINE_ID
+        expr: MACHINE_ID
+        data_type: VARCHAR
+      - name: TRAIL_NAME
+        expr: TRAIL_NAME
+        data_type: VARCHAR
+        description: "Trail that was groomed"
+      - name: GROOMING_TYPE
+        expr: GROOMING_TYPE
+        data_type: VARCHAR
+        description: "Type of grooming: Full_Groom, Touch_Up, etc."
+      - name: SHIFT
+        expr: SHIFT
+        data_type: VARCHAR
+        description: "Grooming shift: Day, Night, Early Morning"
+      - name: CONDITIONS_BEFORE
+        expr: CONDITIONS_BEFORE
+        data_type: VARCHAR
+        description: "Trail condition before grooming"
+      - name: CONDITIONS_AFTER
+        expr: CONDITIONS_AFTER
+        data_type: VARCHAR
+        description: "Trail condition after grooming"
+      - name: CONDITION_IMPROVED
+        expr: CONDITION_IMPROVED
+        data_type: BOOLEAN
+        description: "Whether grooming improved trail condition"
+    time_dimensions:
+      - name: GROOMING_DATE
+        expr: GROOMING_DATE
+        data_type: DATE
+    facts:
+      - name: DURATION_MINUTES
+        expr: DURATION_MINUTES
+        data_type: NUMBER
+        description: "Grooming duration in minutes"
+      - name: SNOW_DEPTH_INCHES
+        expr: SNOW_DEPTH_INCHES
+        data_type: NUMBER
+        description: "Snow depth at time of grooming (inches)"
+      - name: FUEL_USED_GALLONS
+        expr: FUEL_USED_GALLONS
+        data_type: NUMBER
+        description: "Fuel consumed during grooming (gallons)"
+    metrics:
+      - name: TOTAL_GROOMING_RUNS
+        description: "Total grooming runs completed"
+        expr: COUNT(GROOMING_KEY)
+        access_modifier: public_access
+      - name: TOTAL_GROOMING_MINUTES
+        description: "Total grooming time (minutes)"
+        expr: SUM(DURATION_MINUTES)
+        access_modifier: public_access
+      - name: AVG_GROOMING_DURATION
+        description: "Average grooming run duration (minutes)"
+        expr: AVG(DURATION_MINUTES)
+        access_modifier: public_access
+      - name: TOTAL_FUEL_USED
+        description: "Total fuel consumed by grooming operations (gallons)"
+        expr: SUM(FUEL_USED_GALLONS)
+        access_modifier: public_access
+      - name: CONDITION_IMPROVEMENT_RATE
+        description: "Percentage of grooming runs that improved trail conditions"
+        expr: COUNT(CASE WHEN CONDITION_IMPROVED THEN 1 END) * 100.0 / NULLIF(COUNT(GROOMING_KEY), 0)
+        access_modifier: public_access
+      - name: AVG_SNOW_DEPTH
+        description: "Average snow depth at time of grooming (inches)"
+        expr: AVG(SNOW_DEPTH_INCHES)
         access_modifier: public_access
   - name: DIM_LIFT
     base_table:
@@ -219,6 +408,30 @@ relationships:
     relationship_columns:
       - left_column: CUSTOMER_KEY
         right_column: CUSTOMER_KEY
+  - name: FACT_LIFT_MAINTENANCE_TO_DIM_DATE
+    left_table: FACT_LIFT_MAINTENANCE
+    right_table: DIM_DATE
+    join_type: inner
+    relationship_type: many_to_one
+    relationship_columns:
+      - left_column: DATE_KEY
+        right_column: DATE_KEY
+  - name: FACT_LIFT_MAINTENANCE_TO_DIM_LIFT
+    left_table: FACT_LIFT_MAINTENANCE
+    right_table: DIM_LIFT
+    join_type: inner
+    relationship_type: many_to_one
+    relationship_columns:
+      - left_column: LIFT_KEY
+        right_column: LIFT_KEY
+  - name: FACT_GROOMING_TO_DIM_DATE
+    left_table: FACT_GROOMING
+    right_table: DIM_DATE
+    join_type: inner
+    relationship_type: many_to_one
+    relationship_columns:
+      - left_column: DATE_KEY
+        right_column: DATE_KEY
 verified_queries:
   - name: busiest_lifts
     question: What are the busiest lifts by total scans and average wait time?
@@ -236,3 +449,22 @@ verified_queries:
       GROUP BY d.FULL_DATE, d.DAY_NAME ORDER BY d.FULL_DATE
     verified_at: 1774649726
     verified_by: Semantic Model Generator
+  - name: maintenance_cost_by_lift
+    question: What is the total maintenance cost and downtime by lift?
+    sql: >-
+      SELECT l.LIFT_NAME, l.LIFT_TYPE, COUNT(*) AS maintenance_events,
+      SUM(m.TOTAL_COST) AS total_cost, SUM(m.DOWNTIME_MINUTES) AS total_downtime
+      FROM fact_lift_maintenance AS m JOIN dim_lift AS l ON m.LIFT_KEY = l.LIFT_KEY
+      GROUP BY l.LIFT_NAME, l.LIFT_TYPE ORDER BY total_cost DESC
+    verified_at: 1744200000
+    verified_by: Manual
+  - name: grooming_effectiveness
+    question: What is the grooming condition improvement rate by trail?
+    sql: >-
+      SELECT g.TRAIL_NAME, COUNT(*) AS total_runs,
+      COUNT(CASE WHEN g.CONDITION_IMPROVED THEN 1 END) AS improved_runs,
+      COUNT(CASE WHEN g.CONDITION_IMPROVED THEN 1 END) * 100.0 / NULLIF(COUNT(*), 0) AS improvement_rate_pct
+      FROM fact_grooming AS g
+      GROUP BY g.TRAIL_NAME ORDER BY total_runs DESC
+    verified_at: 1744200000
+    verified_by: Manual

@@ -20,8 +20,8 @@ evaluation:
   description: "Answer correctness + logical consistency across 4 operational tools"
 
 thresholds:
-  answer_correctness: 0.70
-  logical_consistency: 0.80
+  answer_correctness: 0.8
+  logical_consistency: 0.8
 
 metrics:
   - "answer_correctness"

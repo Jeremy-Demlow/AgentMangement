@@ -20,6 +20,7 @@ from agent_management.utils.config import (
     get_eval_config,
     get_model,
     get_semantic_schema,
+    get_thresholds,
 )
 
 
@@ -27,6 +28,7 @@ def build_context(config: dict, run_date: str | None = None) -> dict[str, Any]:
     from datetime import date as _date
 
     eval_cfg = get_eval_config(config)
+    thresholds = get_thresholds(config)
     return {
         "env": {
             "environment": config["environment"],
@@ -49,6 +51,7 @@ def build_context(config: dict, run_date: str | None = None) -> dict[str, Any]:
             "file_format": eval_cfg["file_format"],
             "warehouse": eval_cfg["warehouse"],
             "run_date": run_date or _date.today().strftime("%Y%m%d"),
+            "thresholds": thresholds,
         },
     }
 

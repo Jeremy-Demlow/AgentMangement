@@ -270,3 +270,29 @@ models:
         description: Trail that was groomed
       - name: grooming_type
         description: Type of grooming
+
+  - name: stg_lift_maintenance
+    description: Lift maintenance activities including inspections, repairs, and adjustments
+    columns:
+      - name: maintenance_id
+        description: Unique maintenance record identifier
+        tests:
+          - unique
+          - not_null
+      - name: lift_id
+        description: Lift that received maintenance
+        tests:
+          - not_null
+      - name: maintenance_date
+        description: Date of maintenance activity
+        tests:
+          - not_null
+      - name: maintenance_type
+        description: Type of maintenance (inspection, repair, adjustment)
+        tests:
+          - accepted_values:
+              values: ['inspection', 'repair', 'adjustment', 'replacement', 'emergency']
+      - name: category
+        description: Maintenance category
+      - name: total_cost
+        description: Total cost of maintenance
