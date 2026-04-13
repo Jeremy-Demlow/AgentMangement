@@ -113,7 +113,7 @@ jobs:
           dbt run --target qa --select "+marts.facts" --profiles-dir .
           dbt run --target qa --select "marts.semantic" --profiles-dir .
 
-      - name: Deploy semantic views to QA
+      - name: Deploy/verify semantic views (QA)
         run: python -m agent_management.deploy_semantic_views --env qa
 
       - name: Deploy agents to QA

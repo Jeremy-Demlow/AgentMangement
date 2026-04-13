@@ -172,3 +172,11 @@ def get_project_schemas() -> dict[str, str]:
         "semantic": "SEMANTIC",
         "agents": "AGENTS",
     })
+
+
+def get_sv_source(config: dict) -> str:
+    source = config.get("semantic_views", {}).get("source")
+    if source:
+        return source.lower()
+    project = load_project_config()
+    return project.get("semantic_views", {}).get("source", "yaml").lower()

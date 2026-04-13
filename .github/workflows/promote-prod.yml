@@ -120,7 +120,7 @@ jobs:
           dbt run --target prod --select "+marts.facts" --profiles-dir .
           dbt run --target prod --select "marts.semantic" --profiles-dir .
 
-      - name: Deploy semantic views to prod
+      - name: Deploy/verify semantic views (prod)
         run: python -m agent_management.deploy_semantic_views --env prod
 
       - name: Deploy agents to prod

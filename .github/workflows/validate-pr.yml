@@ -110,7 +110,7 @@ jobs:
         with:
           snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
-      - name: Dry-run deploy semantic views (dev)
+      - name: Dry-run semantic views (dev)
         run: python -m agent_management.deploy_semantic_views --env dev --dry-run
 
       - name: Dry-run deploy agents (dev)
