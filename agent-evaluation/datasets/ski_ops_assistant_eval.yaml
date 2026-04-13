@@ -226,43 +226,47 @@ questions:
   # ===========================================================================
   # CROSS-DOMAIN — Operational Summary
   # ===========================================================================
-  - question: "Give me a daily operations summary for yesterday: lift wait times, staffing coverage, weather, and any safety incidents."
+  - question: "Give me a daily operations summary for the most recent day with data: lift wait times, staffing coverage, weather, and any safety incidents."
     expected_tools: ["LiftOperationsAnalytics", "StaffingAnalytics", "WeatherAnalytics", "SafetyIncidentsAnalytics"]
     category: cross_domain
     tags: [daily_summary, multi_tool, dynamic]
     test_type: in_scope
     validation_query: |
-      WITH yesterday AS (SELECT CURRENT_DATE() - 1 AS dt),
+      WITH latest_day AS (
+        SELECT MAX(d.FULL_DATE) AS dt
+        FROM {{ eval.source_database }}.MARTS.FACT_LIFT_SCANS ls
+        JOIN {{ eval.source_database }}.MARTS.DIM_DATE d ON ls.DATE_KEY = d.DATE_KEY
+      ),
       lifts AS (
         SELECT ROUND(AVG(ls.WAIT_TIME_MINUTES), 1) AS avg_wait,
                COUNT(*) AS total_scans
         FROM {{ eval.source_database }}.MARTS.FACT_LIFT_SCANS ls
         JOIN {{ eval.source_database }}.MARTS.DIM_DATE d ON ls.DATE_KEY = d.DATE_KEY
-        WHERE d.FULL_DATE = (SELECT dt FROM yesterday)
+        WHERE d.FULL_DATE = (SELECT dt FROM latest_day)
       ),
       staff AS (
         SELECT ROUND(AVG(s.COVERAGE_RATIO), 2) AS avg_coverage
         FROM {{ eval.source_database }}.MARTS.FACT_STAFFING s
         JOIN {{ eval.source_database }}.MARTS.DIM_DATE d ON s.DATE_KEY = d.DATE_KEY
-        WHERE d.FULL_DATE = (SELECT dt FROM yesterday)
+        WHERE d.FULL_DATE = (SELECT dt FROM latest_day)
       ),
       wx AS (
         SELECT ROUND(SUM(w.SNOWFALL_INCHES), 1) AS snowfall,
                ROUND(AVG(w.TEMP_HIGH_F), 0) AS high_temp
         FROM {{ eval.source_database }}.MARTS.FACT_WEATHER w
         JOIN {{ eval.source_database }}.MARTS.DIM_DATE d ON w.DATE_KEY = d.DATE_KEY
-        WHERE d.FULL_DATE = (SELECT dt FROM yesterday)
+        WHERE d.FULL_DATE = (SELECT dt FROM latest_day)
       ),
       safety AS (
         SELECT COUNT(*) AS incidents
         FROM {{ eval.source_database }}.MARTS.FACT_INCIDENTS i
-        WHERE i.INCIDENT_DATE = (SELECT dt FROM yesterday)
+        WHERE i.INCIDENT_DATE = (SELECT dt FROM latest_day)
       )
-      SELECT (SELECT dt FROM yesterday) AS report_date,
+      SELECT (SELECT dt FROM latest_day) AS report_date,
              l.avg_wait, l.total_scans, s.avg_coverage,
              w.snowfall, w.high_temp, sf.incidents
       FROM lifts l, staff s, wx w, safety sf
     answer_template: >-
-      Yesterday ({report_date}): avg wait {avg_wait} min across {total_scans:,} scans,
+      Operations summary for {report_date}: avg wait {avg_wait} min across {total_scans:,} scans,
       staffing coverage {avg_coverage}, snowfall {snowfall} in, high {high_temp}F,
       {incidents} safety incidents.
