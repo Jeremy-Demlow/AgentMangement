@@ -80,6 +80,188 @@ agent-mgmt-deploy-svs --env dev
 agent-mgmt-deploy-agents --env dev
 ```
 
+## Building From This Repo
+
+The diagram below shows the eight phases a new user follows — from forking the repo through production CI/CD. Each phase builds on the previous one.
+
+```mermaid
+flowchart TD
+    Fork["1 · Fork & Configure"]:::phase --> Infra["2 · Provision Infrastructure"]:::phase
+    Infra --> Data["3 · Generate Data"]:::phase
+    Data --> Dbt["4 · Build dbt Models"]:::phase
+    Dbt --> SV["5 · Deploy Semantic Views"]:::phase
+    SV --> Agents["6 · Deploy Agents"]:::phase
+    Agents --> Eval["7 · Run Evaluations"]:::phase
+    Eval --> CICD["8 · Enable CI/CD"]:::phase
+
+    Fork -.- f1["Clone repo · pip install -e .\nconfigure connections.toml\nedit project.yml + environments/*.env.yml"]
+    Infra -.- f2["snow dcm deploy --target DEV\nCreates database, schemas,\nroles, grants, warehouse"]
+    Data -.- f3["python generate_complete_ski_data.py\nLoads 4 years of synthetic\ndata into PROD RAW schema"]
+    Dbt -.- f4["dbt build --target dev\n23 staging → 6 dims →\n13 facts → 11 semantic"]
+    SV -.- f5["agent-mgmt-deploy-svs --env dev\n11 semantic views deployed\nto SEMANTIC schema"]
+    Agents -.- f6["agent-mgmt-deploy-agents --env dev\n2 agents deployed\nto AGENTS schema"]
+    Eval -.- f7["uv run python scripts/run_eval.py\nAnswer correctness +\nlogical consistency checks"]
+    CICD -.- f8["Configure GitHub secrets\nenable workflows\nPRs trigger auto-validation"]
+
+    classDef phase fill:#1a73e8,color:#fff,stroke:none,rx:8
+```
+
+### Phase 1 — Fork and Configure
+
+```bash
+git clone <your-fork> && cd AgentMangement
+pip install -e ".[dev,crypto]"
+
+vim ~/.snowflake/connections.toml   # Add [myconnection] with account, user, private_key_path
+vim project.yml                     # Set account, schemas, deployment mode
+vim environments/dev.env.yml        # Set database, role, warehouse, thresholds
+vim environments/qa.env.yml
+vim environments/prod.env.yml
+```
+
+### Phase 2 — Provision Infrastructure (DCM)
+
+```bash
+cd dcm
+vim manifest.yml                    # Update account_identifier, project names per target
+
+snow dcm create DCM.AM.AM_SKI_RESORT_DEV --if-not-exists -c myconnection
+snow dcm plan  --target DEV -c myconnection
+snow dcm deploy --target DEV -c myconnection --alias "initial-setup"
+```
+
+Creates: database, 7 schemas (RAW, STAGING, MARTS, DOCS, SEMANTIC, AGENTS, DBT\_TEST\_\_AUDIT), warehouse, 3 database roles (ADMIN / DEVELOPER / ANALYST), deploy role, all grants. See [`dcm/README.md`](dcm/README.md).
+
+### Phase 3 — Generate Data
+
+```bash
+cd data-generation
+
+python generate_complete_ski_data.py                    # Full 4-year history → PROD RAW
+python generate_daily_increment.py --env dev --days 30  # Or: daily incremental
+```
+
+Or sync PROD RAW → DEV/QA (zero-copy):
+```bash
+# GitHub Actions → sync_env_data.yml with target_envs: dev,qa
+```
+
+### Phase 4 — Build dbt Models
+
+```bash
+cd dbt_ski_resort
+dbt deps
+dbt build --target dev    # 23 staging → 6 dims → 13 facts → 11 semantic
+dbt test                  # Run all data tests
+```
+
+### Phase 5 — Deploy Semantic Views
+
+```bash
+agent-mgmt-validate --env dev                           # Lint YAML specs
+agent-mgmt-deploy-svs --env dev --dry-run               # Review generated SQL
+agent-mgmt-deploy-svs --env dev                         # Deploy 11 SVs
+agent-mgmt-detect-drift --env dev                       # Verify column alignment
+```
+
+### Phase 6 — Deploy Agents
+
+```bash
+agent-mgmt-deploy-agents --env dev --dry-run            # Review ALTER/CREATE SQL
+agent-mgmt-deploy-agents --env dev                      # Deploy 2 agents
+```
+
+### Phase 7 — Run Evaluations
+
+```bash
+cd agent-evaluation && uv sync
+
+uv run python scripts/run_eval.py configs/resort_executive.yaml \
+    --connection myconnection --env dev
+
+agent-mgmt-metrics --env dev                            # Check threshold results
+```
+
+### Phase 8 — Enable CI/CD Pipelines
+
+```bash
+# 1. Set repo-level secrets
+gh secret set SNOWFLAKE_ACCOUNT  --body "your-account"
+gh secret set SNOWFLAKE_USER     --body "your-user"
+gh secret set SNOWFLAKE_PRIVATE_KEY < ~/.snowflake/keys/rsa_key.p8
+
+# 2. Set per-environment secrets (DEV, QA, PROD)
+.github/scripts/setup_github_secrets.sh
+.github/scripts/setup_github_environments.sh
+
+# 3. Push — PRs now trigger validate-pr.yml, merges to dev trigger deploy-dev.yml
+```
+
+## CI/CD Pipeline Architecture
+
+Eight workflows cover the full lifecycle. Arrows show trigger relationships:
+
+```mermaid
+flowchart LR
+    subgraph triggers ["Triggers"]
+        PR["PR to dev / main"]
+        PushDev["Push to dev"]
+        ManualQA["Manual: Promote QA"]
+        ManualProd["Manual: Promote Prod"]
+        ManualRB["Manual: Rollback"]
+        Cron["Cron daily 5am PST"]
+        ManualSync["Manual: Sync Envs"]
+        DCMChange["dcm/** changed"]
+    end
+
+    subgraph workflows ["Workflows"]
+        ValidatePR["validate-pr\n4 parallel jobs · dry-run"]
+        DeployDev["deploy-dev\nsnapshot → dbt → SVs →\nagents → eval ⚠️ advisory"]
+        PromoteQA["promote-qa\npre-flight → snapshot →\ndeploy → eval 🔒 hard gate"]
+        PromoteProd["promote-prod\napproval → snapshot → deploy →\neval 🔒 hard gate → auto-rollback"]
+        Rollback["rollback\nrestore from snapshot"]
+        DataRefresh["daily-data-refresh\ngenerate → dbt → verify"]
+        SyncEnv["sync-env-data\nTRUNCATE+INSERT RAW\nPROD → DEV / QA"]
+        DCMDeploy["dcm-deploy\nplan → deploy infra"]
+    end
+
+    PR --> ValidatePR
+    PushDev --> DeployDev
+    ManualQA --> PromoteQA
+    ManualProd --> PromoteProd
+    ManualRB --> Rollback
+    Cron --> DataRefresh
+    ManualSync --> SyncEnv
+    DCMChange --> DCMDeploy
+    DataRefresh -.->|calls| SyncEnv
+```
+
+### Promotion Flow: DEV → QA → PROD
+
+Eval thresholds escalate at each stage. PROD adds an approval gate and auto-rollback on eval failure.
+
+```mermaid
+flowchart TD
+    subgraph dev ["DEV — advisory evals (threshold: 0.60)"]
+        D1["Snapshot"] --> D2["dbt run"] --> D3["Deploy SVs"]
+        D3 --> D4["SV Eval ⚠️"] --> D5["Deploy Agents"] --> D6["Agent Eval ⚠️"]
+    end
+
+    subgraph qa ["QA — hard eval gate (threshold: 0.70)"]
+        Q1["Pre-flight\nvalidate · drift · dry-run"] --> Q2["Snapshot"]
+        Q2 --> Q3["dbt + SVs + Agents"] --> Q4["Eval 🔒"]
+    end
+
+    subgraph prod ["PROD — approval + auto-rollback (threshold: 0.80)"]
+        P1["Pre-flight + Approval"] --> P2["Snapshot"]
+        P2 --> P3["dbt + SVs + Agents"] --> P4["Eval 🔒"]
+        P4 -->|failure| P5["Auto-Rollback"]
+    end
+
+    D6 -->|"manual dispatch"| Q1
+    Q4 -->|"manual dispatch"| P1
+```
+
 ## Repository Structure
 
 ```
@@ -135,7 +317,7 @@ AgentMangement/
 │   ├── manifest.yml                 #   DEV/QA/PROD targets
 │   └── sources/                     #   Database, schemas, roles, grants
 │
-├── data_generation/                 # Synthetic ski resort data
+├── data-generation/                 # Synthetic ski resort data
 │
 ├── .github/workflows/               # CI/CD pipelines
 │   ├── deploy-dev.yml               #   Deploy on merge to main (environment: DEV)
@@ -241,7 +423,7 @@ cd agent-evaluation && uv sync
 uv run python scripts/run_eval.py configs/resort_executive.yaml --dry-run
 
 # Full eval (polls, checks thresholds, saves JSON)
-uv run python scripts/run_eval.py configs/resort_executive.yaml --connection myconnection --env dev
+uv run python scripts/run_eval.py configs/resort_executive.yaml --connection <your-connection> --env dev
 ```
 
 ## Adapting for Your Domain

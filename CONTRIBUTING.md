@@ -79,7 +79,8 @@ Merge to dev               →  deploy-dev.yml       (real deploy, evals advisor
 Manual dispatch            →  promote-qa.yml       (real deploy, evals required)
 Manual dispatch            →  promote-prod.yml     (approval gate, auto-rollback on failure)
 Manual dispatch   →  rollback.yml         (any env, from snapshot)
-Scheduled daily   →  daily_data_refresh   (PROD data pipeline)
+Scheduled daily   →  daily_data_refresh   (PROD data pipeline + env sync)
+Manual dispatch   →  sync_env_data.yml    (copy RAW data from PROD to DEV/QA)
 Manual dispatch   →  dcm-deploy.yml       (infrastructure changes)
 ```
 
@@ -97,6 +98,27 @@ Manual dispatch   →  dcm-deploy.yml       (infrastructure changes)
 - **Environment-level** (per DEV/QA/PROD/production): `SNOWFLAKE_WAREHOUSE`, `SNOWFLAKE_ROLE`, `SNOWFLAKE_DATABASE`
 
 Every job that connects to Snowflake declares `environment:` to pull the correct secrets.
+
+## Data Pipeline & Environment Sync
+
+Data generation runs only in **PROD** (`daily_data_refresh.yml`). DEV and QA receive data via **sync**, not independent generation — this ensures all environments test against the same dataset.
+
+**Flow:**
+
+```
+daily_data_refresh.yml (PROD)
+  └── generate_daily_increment.py → AM_SKI_RESORT.RAW.*
+  └── dbt run → STAGING + MARTS in PROD
+  └── sync_env_data.yml (DEV, QA)
+        ├── TRUNCATE + INSERT RAW tables from PROD
+        └── dbt run → rebuild STAGING + MARTS
+```
+
+**Manual sync**: Run `sync_env_data.yml` with `target_envs: dev,qa` to copy current PROD data.
+
+**Adding new RAW tables**: Add the table name to `raw_tables` in `project.yml`. The sync workflow reads this list. Also ensure the table DDL exists in all environments (create via DCM or manual `CREATE TABLE ... LIKE`).
+
+**Local generation to a specific env**: `python generate_daily_increment.py --env dev --date 2026-01-01 --days 30`
 
 ## Evaluation Strategy
 

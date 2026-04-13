@@ -14,14 +14,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
 
+from agent_management import setup_logging
+from agent_management.paths import agents_snapshots_dir, sv_snapshots_dir
 from agent_management.utils.config import get_agents_schema, get_semantic_schema, load_env_config
 from agent_management.utils.snowflake_client import connect
 
-AGENTS_SNAPSHOTS_DIR = Path(__file__).resolve().parent.parent / "agents" / "snapshots"
-SV_SNAPSHOTS_DIR = Path(__file__).resolve().parent.parent / "semantic-views" / "snapshots"
+logger = logging.getLogger(__name__)
 
 
 def find_snapshots(base_dir: Path, env: str, timestamp: str, ext: str) -> list[Path]:
@@ -32,9 +34,9 @@ def find_snapshots(base_dir: Path, env: str, timestamp: str, ext: str) -> list[P
 
 
 def rollback_agents(cur, config: dict, timestamp: str, dry_run: bool) -> tuple[int, int]:
-    files = find_snapshots(AGENTS_SNAPSHOTS_DIR, config["environment"], timestamp, "json")
+    files = find_snapshots(agents_snapshots_dir(), config["environment"], timestamp, "json")
     if not files:
-        print("  No agent snapshots found for this timestamp")
+        logger.info("  No agent snapshots found for this timestamp")
         return 0, 0
 
     success = 0
@@ -46,7 +48,7 @@ def rollback_agents(cur, config: dict, timestamp: str, dry_run: bool) -> tuple[i
         spec_raw = snapshot.get("agent_spec")
 
         if not spec_raw:
-            print(f"  {agent_name} — SKIPPED (no agent_spec in snapshot)")
+            logger.info("  %s — SKIPPED (no agent_spec in snapshot)", agent_name)
             continue
 
         try:
@@ -55,7 +57,7 @@ def rollback_agents(cur, config: dict, timestamp: str, dry_run: bool) -> tuple[i
             spec_json = str(spec_raw)
 
         if "$$" in spec_json:
-            print(f"  {agent_name} — SKIPPED (spec contains $$)")
+            logger.info("  %s — SKIPPED (spec contains $$)", agent_name)
             continue
 
         sql = (
@@ -65,25 +67,25 @@ def rollback_agents(cur, config: dict, timestamp: str, dry_run: bool) -> tuple[i
         )
 
         if dry_run:
-            print(f"  [DRY RUN] {agent_name} — would ALTER from {path.name}")
+            logger.info("  [DRY RUN] %s — would ALTER from %s", agent_name, path.name)
             success += 1
         else:
-            print(f"  {agent_name}...", end=" ", flush=True)
+            logger.info("  %s...", agent_name)
             try:
                 cur.execute(sql)
-                print("OK")
+                logger.info("  %s... OK", agent_name)
                 success += 1
             except Exception as e:
-                print(f"FAILED — {e}")
+                logger.error("  %s... FAILED — %s", agent_name, e)
                 failed += 1
 
     return success, failed
 
 
 def rollback_semantic_views(cur, config: dict, timestamp: str, dry_run: bool) -> tuple[int, int]:
-    files = find_snapshots(SV_SNAPSHOTS_DIR, config["environment"], timestamp, "yaml")
+    files = find_snapshots(sv_snapshots_dir(), config["environment"], timestamp, "yaml")
     if not files:
-        print("  No SV snapshots found for this timestamp")
+        logger.info("  No SV snapshots found for this timestamp")
         return 0, 0
 
     schema_fqn = get_semantic_schema(config)
@@ -94,22 +96,22 @@ def rollback_semantic_views(cur, config: dict, timestamp: str, dry_run: bool) ->
         yaml_content = path.read_text()
 
         if "$$" in yaml_content:
-            print(f"  {sv_name} — SKIPPED (YAML contains $$)")
+            logger.info("  %s — SKIPPED (YAML contains $$)", sv_name)
             continue
 
         if dry_run:
-            print(f"  [DRY RUN] {sv_name} — would restore from {path.name}")
+            logger.info("  [DRY RUN] %s — would restore from %s", sv_name, path.name)
             success += 1
         else:
-            print(f"  {sv_name}...", end=" ", flush=True)
+            logger.info("  %s...", sv_name)
             try:
                 cur.execute(
                     f"CALL SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML('{schema_fqn}', $${yaml_content}$$, FALSE)"
                 )
-                print("OK")
+                logger.info("  %s... OK", sv_name)
                 success += 1
             except Exception as e:
-                print(f"FAILED — {e}")
+                logger.error("  %s... FAILED — %s", sv_name, e)
                 failed += 1
 
     return success, failed
@@ -117,7 +119,7 @@ def rollback_semantic_views(cur, config: dict, timestamp: str, dry_run: bool) ->
 
 def list_available_timestamps(env: str) -> list[str]:
     timestamps = set()
-    for base_dir in (AGENTS_SNAPSHOTS_DIR, SV_SNAPSHOTS_DIR):
+    for base_dir in (agents_snapshots_dir(), sv_snapshots_dir()):
         snap_dir = base_dir / env
         if snap_dir.exists():
             for f in snap_dir.iterdir():
@@ -136,24 +138,26 @@ def main():
     parser.add_argument("--list", action="store_true", help="List available snapshots")
     args = parser.parse_args()
 
+    setup_logging(1)
+
     config = load_env_config(args.env)
 
     if args.list:
         ts_list = list_available_timestamps(config["environment"])
-        print(f"Available snapshots for {config['environment']}:")
+        logger.info("Available snapshots for %s:", config['environment'])
         for ts in ts_list:
-            print(f"  {ts}")
+            logger.info("  %s", ts)
         sys.exit(0)
 
     if not args.timestamp:
-        print("ERROR: --timestamp is required (use --list to see available)")
+        logger.error("ERROR: --timestamp is required (use --list to see available)")
         sys.exit(1)
 
-    print(f"Environment: {config['environment']}")
-    print(f"Timestamp: {args.timestamp}")
-    print(f"Target: {args.target}")
-    print(f"Mode: {'DRY RUN' if args.dry_run else 'LIVE'}")
-    print("=" * 60)
+    logger.info("Environment: %s", config['environment'])
+    logger.info("Timestamp: %s", args.timestamp)
+    logger.info("Target: %s", args.target)
+    logger.info("Mode: %s", 'DRY RUN' if args.dry_run else 'LIVE')
+    logger.info("=" * 60)
 
     conn = connect(config)
     cur = conn.cursor()
@@ -162,19 +166,19 @@ def main():
     total_failed = 0
 
     if args.target in ("agents", "all"):
-        print("\nAgents:")
+        logger.info("\nAgents:")
         s, f = rollback_agents(cur, config, args.timestamp, args.dry_run)
         total_success += s
         total_failed += f
 
     if args.target in ("semantic-views", "all"):
-        print("\nSemantic Views:")
+        logger.info("\nSemantic Views:")
         s, f = rollback_semantic_views(cur, config, args.timestamp, args.dry_run)
         total_success += s
         total_failed += f
 
-    print(f"\n{'=' * 60}")
-    print(f"Restored: {total_success}  Failed: {total_failed}  Environment: {config['environment']}")
+    logger.info("\n%s", "=" * 60)
+    logger.info("Restored: %d  Failed: %d  Environment: %s", total_success, total_failed, config['environment'])
 
     cur.close()
     conn.close()

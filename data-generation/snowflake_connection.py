@@ -98,12 +98,12 @@ class ConnectionConfig(BaseModel):
         env_vars = {
             'SNOWFLAKE_ACCOUNT': 'account',
             'SNOWFLAKE_USER': 'user',
-            'SNOWFLAKE_PASSWORD': 'password',
+            'SNOWFLAKE_PASSWORD': 'password',  # pragma: allowlist secret
             'SNOWFLAKE_ROLE': 'role',
             'SNOWFLAKE_WAREHOUSE': 'warehouse',
             'SNOWFLAKE_DATABASE': 'database',
             'SNOWFLAKE_SCHEMA': 'schema',
-            'SNOWFLAKE_PRIVATE_KEY_PATH': 'private_key_path',
+            'SNOWFLAKE_PRIVATE_KEY_PATH': 'private_key_path',  # pragma: allowlist secret
             'SNOWFLAKE_AUTHENTICATOR': 'authenticator',
             'SNOWFLAKE_CREATE_DB_IF_MISSING': 'create_db_if_missing'
         }

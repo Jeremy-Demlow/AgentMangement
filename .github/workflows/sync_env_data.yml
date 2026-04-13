@@ -1,0 +1,245 @@
+# =============================================================================
+# Sync Environment Data
+# =============================================================================
+# Copies RAW table data from PROD to DEV and/or QA, then runs dbt to rebuild
+# downstream staging/marts/semantic layers.
+#
+# Why: The daily_data_refresh.yml only generates data in PROD. DEV and QA need
+# the same RAW data so agents can be tested against realistic datasets.
+#
+# Trigger options:
+#   1. Manual dispatch (workflow_dispatch) — pick target environment(s)
+#   2. Called by daily_data_refresh.yml after PROD data generation completes
+#   3. Called by deploy workflows when new tables are added
+#
+# Strategy: TRUNCATE + INSERT (full replace) for each RAW table. This ensures
+# DEV/QA always mirror PROD exactly. For large tables, consider switching to
+# CLONE or incremental sync.
+# =============================================================================
+
+name: Sync Environment Data
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_envs:
+        description: 'Target environments (comma-separated: dev,qa)'
+        required: true
+        default: 'dev,qa'
+      full_refresh_dbt:
+        description: 'Force full dbt refresh after sync'
+        required: false
+        default: 'false'
+        type: boolean
+      tables:
+        description: 'Specific tables to sync (comma-separated, empty = all)'
+        required: false
+        default: ''
+
+  workflow_call:
+    inputs:
+      target_envs:
+        description: 'Target environments'
+        required: true
+        type: string
+        default: 'dev,qa'
+      full_refresh_dbt:
+        description: 'Force full dbt refresh'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  build-matrix:
+    name: Build environment matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Parse target environments into matrix
+        id: set-matrix
+        run: |
+          ENVS="${{ inputs.target_envs || 'dev,qa' }}"
+          JSON=$(echo "$ENVS" | python3 -c "
+          import sys, json
+          envs = [e.strip() for e in sys.stdin.read().strip().split(',') if e.strip()]
+          print(json.dumps(envs))
+          ")
+          echo "matrix={\"env\":${JSON}}" >> $GITHUB_OUTPUT
+          echo "Matrix: ${JSON}"
+
+  sync:
+    name: Sync RAW data → ${{ matrix.env }}
+    needs: build-matrix
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJson(needs.build-matrix.outputs.matrix) }}
+      fail-fast: false
+
+    environment: ${{ matrix.env == 'dev' && 'DEV' || matrix.env == 'qa' && 'QA' || 'PROD' }}
+
+    env:
+      SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+      SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+      SNOWFLAKE_PRIVATE_KEY_PATH: /tmp/snowflake_key.p8
+      SNOWFLAKE_CONNECTIONS_DEFAULT_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+      SNOWFLAKE_CONNECTIONS_DEFAULT_USER: ${{ secrets.SNOWFLAKE_USER }}
+      SNOWFLAKE_CONNECTIONS_DEFAULT_AUTHENTICATOR: SNOWFLAKE_JWT
+      SNOWFLAKE_CONNECTIONS_DEFAULT_PRIVATE_KEY_PATH: /tmp/snowflake_key.p8
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Write private key
+        run: echo "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/snowflake_key.p8
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pyyaml dbt-snowflake
+
+      - name: Load Project Config
+        id: config
+        run: |
+          python3 << 'PYEOF'
+          import yaml, os
+          with open('project.yml') as f:
+              cfg = yaml.safe_load(f)
+          env = "${{ matrix.env }}"
+          prod = cfg['environments']['prod']
+          target = cfg['environments'][env]
+          raw_schema = cfg['defaults']['schemas']['raw']
+          tables = cfg.get('raw_tables', [])
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              out.write(f'prod_database={prod["database"]}\n')
+              out.write(f'target_database={target["database"]}\n')
+              out.write(f'target_warehouse={target["warehouse"]}\n')
+              out.write(f'target_role={target["role"]}\n')
+              out.write(f'raw_schema={raw_schema}\n')
+              out.write(f'raw_tables={",".join(tables)}\n')
+          PYEOF
+
+      - name: Create connections.toml
+        run: printf '[connections]\n[connections.default]\n' > connections.toml
+
+      - name: Setup Snowflake CLI
+        uses: snowflakedb/snowflake-cli-action@v1.5
+        with:
+          cli-version: "latest"
+          default-config-file-path: "connections.toml"
+        env:
+          SNOWFLAKE_CONNECTIONS_DEFAULT_WAREHOUSE: ${{ steps.config.outputs.target_warehouse }}
+          SNOWFLAKE_CONNECTIONS_DEFAULT_ROLE: ${{ steps.config.outputs.target_role }}
+          SNOWFLAKE_CONNECTIONS_DEFAULT_DATABASE: ${{ steps.config.outputs.target_database }}
+          SNOWFLAKE_CONNECTIONS_DEFAULT_SCHEMA: ${{ steps.config.outputs.raw_schema }}
+
+      - name: Sync RAW tables from PROD
+        env:
+          PROD_DB: ${{ steps.config.outputs.prod_database }}
+          TARGET_DB: ${{ steps.config.outputs.target_database }}
+          RAW_SCHEMA: ${{ steps.config.outputs.raw_schema }}
+          ALL_TABLES: ${{ steps.config.outputs.raw_tables }}
+          SPECIFIC_TABLES: ${{ inputs.tables || '' }}
+        run: |
+          if [ -n "$SPECIFIC_TABLES" ]; then
+            TABLES="$SPECIFIC_TABLES"
+          else
+            TABLES="$ALL_TABLES"
+          fi
+
+          echo "Syncing RAW tables from ${PROD_DB} → ${TARGET_DB}"
+          echo "Tables: ${TABLES}"
+
+          IFS=',' read -ra TABLE_ARRAY <<< "$TABLES"
+          FAILED=0
+
+          for TABLE in "${TABLE_ARRAY[@]}"; do
+            TABLE=$(echo "$TABLE" | xargs)
+            echo ""
+            echo "── Syncing ${TABLE} ──"
+
+            PROD_COUNT=$(snow sql -q "SELECT COUNT(*) as CNT FROM ${PROD_DB}.${RAW_SCHEMA}.${TABLE}" --format json 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin)[0]['CNT'])" 2>/dev/null || echo "0")
+            echo "  PROD rows: ${PROD_COUNT}"
+
+            if [ "$PROD_COUNT" = "0" ]; then
+              echo "  Skipping (no data in PROD)"
+              continue
+            fi
+
+            snow sql -q "
+              BEGIN;
+              TRUNCATE TABLE IF EXISTS ${TARGET_DB}.${RAW_SCHEMA}.${TABLE};
+              INSERT INTO ${TARGET_DB}.${RAW_SCHEMA}.${TABLE}
+                SELECT * FROM ${PROD_DB}.${RAW_SCHEMA}.${TABLE};
+              COMMIT;
+            " && {
+              TARGET_COUNT=$(snow sql -q "SELECT COUNT(*) as CNT FROM ${TARGET_DB}.${RAW_SCHEMA}.${TABLE}" --format json | python3 -c "import json,sys; print(json.load(sys.stdin)[0]['CNT'])")
+              echo "  Synced: ${TARGET_COUNT} rows"
+            } || {
+              echo "  FAILED to sync ${TABLE}"
+              FAILED=$((FAILED + 1))
+            }
+          done
+
+          if [ "$FAILED" -gt 0 ]; then
+            echo ""
+            echo "${FAILED} table(s) failed to sync"
+            exit 1
+          fi
+
+          echo ""
+          echo "All tables synced successfully"
+
+      - name: Run dbt to rebuild downstream
+        working-directory: dbt_ski_resort
+        env:
+          DBT_TARGET: ${{ matrix.env }}
+          SNOWFLAKE_DATABASE: ${{ steps.config.outputs.target_database }}
+          SNOWFLAKE_WAREHOUSE: ${{ steps.config.outputs.target_warehouse }}
+          SNOWFLAKE_ROLE: ${{ steps.config.outputs.target_role }}
+        run: |
+          dbt deps
+
+          if [ "${{ inputs.full_refresh_dbt }}" = "true" ]; then
+            echo "Full refresh: rebuilding all models..."
+            dbt run --full-refresh
+          else
+            echo "Incremental run: updating downstream models..."
+            dbt run
+          fi
+
+      - name: Verify sync
+        env:
+          TARGET_DB: ${{ steps.config.outputs.target_database }}
+          RAW_SCHEMA: ${{ steps.config.outputs.raw_schema }}
+          ALL_TABLES: ${{ steps.config.outputs.raw_tables }}
+        run: |
+          echo "Verification - ${TARGET_DB}.${RAW_SCHEMA}:"
+          IFS=',' read -ra TABLE_ARRAY <<< "$ALL_TABLES"
+          for TABLE in "${TABLE_ARRAY[@]}"; do
+            TABLE=$(echo "$TABLE" | xargs)
+            COUNT=$(snow sql -q "SELECT COUNT(*) as CNT FROM ${TARGET_DB}.${RAW_SCHEMA}.${TABLE}" --format json 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin)[0]['CNT'])" 2>/dev/null || echo "ERROR")
+            printf "  %-25s %s rows\n" "$TABLE" "$COUNT"
+          done
+
+      - name: Job Summary
+        run: |
+          echo "## Data Sync: PROD -> ${{ matrix.env }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Source:** ${{ steps.config.outputs.prod_database }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Target:** ${{ steps.config.outputs.target_database }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Run Date:** $(date '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+
+      - name: Cleanup
+        if: always()
+        run: rm -f /tmp/snowflake_key.p8

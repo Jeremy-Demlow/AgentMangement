@@ -46,11 +46,110 @@ Runs evaluations end-to-end from your terminal: load questions, generate ground 
  └─────────────────────────────────────┘     └──────────────────────────────────────────────┘
 
   ┌──────────────────────────────────────────────────────────────────────────────────────────┐
-  │  Optional: --env dev/staging/prod                                                       │
+  │  Optional: --env dev/qa/prod                                                          │
   │  Loads environments/{env}.env.yml to override database, schema, warehouse, role,       │
   │  and version_suffix (e.g. RESORT_EXECUTIVE -> RESORT_EXECUTIVE_DEV)                     │
   └──────────────────────────────────────────────────────────────────────────────────────────┘
 ```
+
+## Evaluation Dataset Lifecycle
+
+Each evaluation run creates several artifacts in Snowflake. Understanding where they live and how they accumulate is important for debugging and cleanup.
+
+### What gets created per eval run
+
+```
+run_eval.py
+  │
+  ├── 1. EVAL DATA TABLE (overwritten each run)
+  │      {DB}.AGENTS.{AGENT_NAME}_EVAL_DATA
+  │      Columns: input_query (VARCHAR), output (VARIANT)
+  │      Contains questions + resolved ground truth
+  │
+  ├── 2. EVAL CONFIG YAML (uploaded to stage)
+  │      @{DB}.AGENTS.EVAL_CONFIG_STAGE/{agent}_eval_{timestamp}.yaml
+  │      Snowflake-format config consumed by EXECUTE_AI_EVALUATION
+  │
+  └── 3. DATASET OBJECT (one per run — accumulates)
+         {DB}.AGENTS.{AGENT_NAME}_EVAL_DS_{timestamp}
+         Snowflake DATASET with a system-managed version
+         Created by EXECUTE_AI_EVALUATION, never auto-cleaned
+```
+
+### Artifact behavior
+
+| Artifact | Created by | Lifecycle | Accumulates? |
+|----------|-----------|-----------|--------------|
+| `*_EVAL_DATA` table | `run_eval.py` (CREATE OR REPLACE) | **Overwritten** each run — always reflects the latest questions and ground truth | No |
+| `@EVAL_CONFIG_STAGE/*.yaml` | `run_eval.py` (PUT) | One file per run, stays on stage | Yes |
+| `*_EVAL_DS_*` dataset | `EXECUTE_AI_EVALUATION` | One per run, never deleted automatically | **Yes — grows over time** |
+
+### Querying eval data directly
+
+The eval data table is a regular Snowflake table and fully queryable:
+
+```sql
+-- See current questions and ground truth
+SELECT
+    input_query AS question,
+    output:ground_truth_output::STRING AS ground_truth
+FROM AM_SKI_RESORT_DEV.AGENTS.RESORT_EXECUTIVE_EVAL_DATA;
+
+-- Count questions per agent
+SELECT COUNT(*) FROM AM_SKI_RESORT_DEV.AGENTS.RESORT_EXECUTIVE_EVAL_DATA;   -- 15
+SELECT COUNT(*) FROM AM_SKI_RESORT_DEV.AGENTS.SKI_OPS_ASSISTANT_EVAL_DATA;  -- 10
+```
+
+Eval **results** (scores, explanations) are queryable via system functions — see [Querying Results via SQL](#querying-results-via-sql).
+
+### Listing eval artifacts
+
+```sql
+-- Tables (eval data)
+SHOW TABLES LIKE '%EVAL%' IN SCHEMA AM_SKI_RESORT_DEV.AGENTS;
+
+-- Datasets (one per eval run — these accumulate)
+SHOW DATASETS IN AM_SKI_RESORT_DEV.AGENTS;
+
+-- Stage files (eval config YAMLs)
+LIST @AM_SKI_RESORT_DEV.AGENTS.EVAL_CONFIG_STAGE;
+```
+
+### Cleanup
+
+Dataset objects accumulate and are never auto-deleted. After many eval runs you may want to prune old ones:
+
+```sql
+-- View all eval datasets
+SHOW DATASETS IN AM_SKI_RESORT_DEV.AGENTS;
+
+-- Drop a specific old dataset
+DROP DATASET AM_SKI_RESORT_DEV.AGENTS.RESORT_EXECUTIVE_EVAL_DS_20260406_110203;
+
+-- Remove old stage config files
+REMOVE @AM_SKI_RESORT_DEV.AGENTS.EVAL_CONFIG_STAGE/resort_executive_eval_20260406_110203.yaml;
+```
+
+> **Note:** The `*_EVAL_DATA` tables are safe to overwrite — they are recreated from your YAML dataset every run. Do **not** drop the `EVAL_CONFIG_STAGE` stage itself, only individual files within it.
+
+### Dynamic ground truth flow
+
+When questions use `validation_query` + `answer_template` (recommended for data-driven questions), ground truth is resolved **at eval time** from live Snowflake data:
+
+```
+YAML dataset question
+  │
+  ├── validation_query: SQL executed against current data
+  │     SELECT SUM(REVENUE) AS total ...
+  │
+  ├── answer_template: Python format string
+  │     "Total revenue was ${total:,.0f}"
+  │
+  └── Resolved at runtime → ground_truth
+        "Total revenue was $2,619,109"
+```
+
+This means the same eval dataset produces different ground truth values as data changes — evaluations are always testing against **current** data, not a frozen snapshot. Questions should use relative time references (e.g., "most recent complete season") rather than hardcoded dates.
 
 ## Prerequisites
 
@@ -320,7 +419,7 @@ uv run python scripts/run_eval.py <config.yaml> [flags]
 | `--resolve-only` | Run `validation_query` SQL and print ground truth (no eval) |
 | `--no-wait` | Start the eval and exit without polling |
 | `--poll-interval N` | Seconds between status polls (default: 30) |
-| `--env {dev,staging,prod}` | Override db/schema/warehouse/role from `environments/<env>.env.yml` |
+| `--env {dev,qa,prod}` | Override db/schema/warehouse/role from `environments/<env>.env.yml` |
 | `--status` | Check status of the last run |
 | `--results` | Print results of the last run |
 | `--run-name NAME` | Override auto-generated run name |
@@ -342,7 +441,7 @@ The Makefile uses `--connection myconnection` and `--env dev` by default. Overri
 
 ## Environment Configs
 
-The `--env` flag loads `environments/<env>.env.yml` and overrides the agent's database, schema, warehouse, role, and name suffix. This lets a single config YAML target dev, staging, or prod:
+The `--env` flag loads `environments/<env>.env.yml` and overrides the agent's database, schema, warehouse, role, and name suffix. This lets a single config YAML target dev, qa, or prod:
 
 ```bash
 # Evaluate RESORT_EXECUTIVE_DEV in dev environment
@@ -502,8 +601,7 @@ agent-evaluation/
     resort_executive.yaml                #   Agent + dataset + metrics + thresholds
     resort_executive_eval_config.yaml    #   Snowflake-format template with {PLACEHOLDERS}
   datasets/                              # One questions file per agent
-    resort_executive_eval.yaml           #   Questions + ground truth (YAML, recommended)
-    resort_executive_eval.csv            #   Questions + ground truth (CSV alternative)
+    resort_executive_eval.yaml           #   Questions + ground truth (YAML, dynamic)
     resort_executive_eval_20260401.md    #   Run review notes
   results/                               # JSON results from runs
     resort_executive_20260401_173852.json #  Summary + thresholds + per-record scores

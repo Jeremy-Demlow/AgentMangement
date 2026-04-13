@@ -12,16 +12,18 @@ Implements REQ-002 and REQ-003 validation acceptance criteria.
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 
 import yaml
 
+from agent_management import setup_logging
+from agent_management.paths import specs_dir, sv_definitions_dir
 from agent_management.render_template import render_file
-from agent_management.utils.config import load_env_config
+from agent_management.utils.config import _get_nested, load_env_config
 
-SPECS_DIR = Path(__file__).resolve().parent.parent / "agents" / "specs"
-DEFINITIONS_DIR = Path(__file__).resolve().parent.parent / "semantic-views" / "definitions"
+logger = logging.getLogger(__name__)
 
 REQUIRED_AGENT_FIELDS = ["metadata.name", "tools"]
 REQUIRED_TOOL_FIELDS = ["name", "type", "description"]
@@ -30,16 +32,6 @@ TOOL_TYPE_REQUIRED = {
     "cortex_search": ["search_service"],
     "generic": ["identifier"],
 }
-
-
-def _get_nested(d: dict, dotpath: str):
-    parts = dotpath.split(".")
-    val = d
-    for p in parts:
-        if not isinstance(val, dict) or p not in val:
-            return None
-        val = val[p]
-    return val
 
 
 def validate_agent_yaml(path: Path, config: dict) -> list[str]:
@@ -105,41 +97,43 @@ def main():
     parser.add_argument("--remote", action="store_true", help="Also validate via Snowflake dry-run")
     args = parser.parse_args()
 
+    setup_logging(1)
+
     config = load_env_config(args.env)
 
-    print(f"Environment: {config['environment']}")
-    print("=" * 60)
+    logger.info("Environment: %s", config['environment'])
+    logger.info("=" * 60)
 
     total_errors = 0
 
-    agent_files = sorted(SPECS_DIR.glob("*.y*ml"))
-    print(f"\nAgent specs ({len(agent_files)}):")
+    agent_files = sorted(specs_dir().glob("*.y*ml"))
+    logger.info("\nAgent specs (%d):", len(agent_files))
     for path in agent_files:
         errors = validate_agent_yaml(path, config)
         if errors:
-            print(f"  {path.name} — INVALID ({len(errors)} errors)")
+            logger.error("  %s — INVALID (%d errors)", path.name, len(errors))
             for e in errors:
-                print(f"    - {e}")
+                logger.error("    - %s", e)
             total_errors += len(errors)
         else:
-            print(f"  {path.name} — VALID")
+            logger.info("  %s — VALID", path.name)
 
-    sv_files = sorted(DEFINITIONS_DIR.glob("sem_*.y*ml"))
-    print(f"\nSemantic view YAMLs ({len(sv_files)}):")
+    sv_files = sorted(sv_definitions_dir().glob("sem_*.y*ml"))
+    logger.info("\nSemantic view YAMLs (%d):", len(sv_files))
     for path in sv_files:
         errors = validate_sv_yaml(path, config)
         if errors:
-            print(f"  {path.name} — INVALID ({len(errors)} errors)")
+            logger.error("  %s — INVALID (%d errors)", path.name, len(errors))
             for e in errors:
-                print(f"    - {e}")
+                logger.error("    - %s", e)
             total_errors += len(errors)
         else:
-            print(f"  {path.name} — VALID")
+            logger.info("  %s — VALID", path.name)
 
     if args.remote:
         from agent_management.utils.snowflake_client import connect
         from agent_management.utils.config import get_semantic_schema
-        print("\nRemote validation (Snowflake dry-run):")
+        logger.info("\nRemote validation (Snowflake dry-run):")
         conn = connect(config, schema=config["deployment"]["semantic_schema"])
         cur = conn.cursor()
         schema_fqn = get_semantic_schema(config)
@@ -150,19 +144,19 @@ def main():
                 cur.execute(
                     f"CALL SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML('{schema_fqn}', $${rendered}$$, TRUE)"
                 )
-                print(f"  {name} — VALID (Snowflake)")
+                logger.info("  %s — VALID (Snowflake)", name)
             except Exception as e:
-                print(f"  {name} — INVALID (Snowflake) — {e}")
+                logger.error("  %s — INVALID (Snowflake) — %s", name, e)
                 total_errors += 1
         cur.close()
         conn.close()
 
-    print(f"\n{'=' * 60}")
+    logger.info("\n%s", "=" * 60)
     if total_errors:
-        print(f"VALIDATION FAILED — {total_errors} error(s)")
+        logger.error("VALIDATION FAILED — %d error(s)", total_errors)
         sys.exit(1)
     else:
-        print("ALL VALID")
+        logger.info("ALL VALID")
         sys.exit(0)
 
 

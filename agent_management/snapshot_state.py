@@ -14,15 +14,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from agent_management import setup_logging
+from agent_management.paths import agents_snapshots_dir, sv_snapshots_dir
 from agent_management.utils.config import get_agents_schema, get_semantic_schema, load_env_config
 from agent_management.utils.snowflake_client import connect
 
-AGENTS_SNAPSHOTS_DIR = Path(__file__).resolve().parent.parent / "agents" / "snapshots"
-SV_SNAPSHOTS_DIR = Path(__file__).resolve().parent.parent / "semantic-views" / "snapshots"
+logger = logging.getLogger(__name__)
 
 
 def snapshot_agents(cur, config: dict, timestamp: str) -> list[dict]:
@@ -52,13 +54,13 @@ def snapshot_agents(cur, config: dict, timestamp: str) -> list[dict]:
             }
             snapshots.append(snapshot)
 
-            out_dir = AGENTS_SNAPSHOTS_DIR / config["environment"]
+            out_dir = agents_snapshots_dir() / config["environment"]
             out_dir.mkdir(parents=True, exist_ok=True)
             out_file = out_dir / f"{agent_name}_{timestamp}.json"
             out_file.write_text(json.dumps(snapshot, indent=2) + "\n")
-            print(f"  {agent_name} -> {out_file.name}")
+            logger.info("  %s -> %s", agent_name, out_file.name)
         except Exception as e:
-            print(f"  {agent_name} — FAILED: {e}")
+            logger.error("  %s — FAILED: %s", agent_name, e)
 
     return snapshots
 
@@ -87,13 +89,13 @@ def snapshot_semantic_views(cur, config: dict, timestamp: str) -> list[dict]:
             }
             snapshots.append(snapshot)
 
-            out_dir = SV_SNAPSHOTS_DIR / config["environment"]
+            out_dir = sv_snapshots_dir() / config["environment"]
             out_dir.mkdir(parents=True, exist_ok=True)
             out_file = out_dir / f"{view_name}_{timestamp}.yaml"
             out_file.write_text(yaml_content)
-            print(f"  {view_name} -> {out_file.name}")
+            logger.info("  %s -> %s", view_name, out_file.name)
         except Exception as e:
-            print(f"  {view_name} — FAILED: {e}")
+            logger.error("  %s — FAILED: %s", view_name, e)
 
     return snapshots
 
@@ -131,33 +133,35 @@ def main():
     parser.add_argument("--no-remote", action="store_true", help="Skip saving to Snowflake table")
     args = parser.parse_args()
 
+    setup_logging(1)
+
     config = load_env_config(args.env)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
-    print(f"Environment: {config['environment']}")
-    print(f"Timestamp: {timestamp}")
-    print(f"Target: {args.target}")
-    print("=" * 60)
+    logger.info("Environment: %s", config['environment'])
+    logger.info("Timestamp: %s", timestamp)
+    logger.info("Target: %s", args.target)
+    logger.info("=" * 60)
 
     conn = connect(config)
     cur = conn.cursor()
     all_snapshots = []
 
     if args.target in ("agents", "all"):
-        print("\nAgents:")
+        logger.info("\nAgents:")
         all_snapshots.extend(snapshot_agents(cur, config, timestamp))
 
     if args.target in ("semantic-views", "all"):
-        print("\nSemantic Views:")
+        logger.info("\nSemantic Views:")
         all_snapshots.extend(snapshot_semantic_views(cur, config, timestamp))
 
     if not args.no_remote and all_snapshots:
-        print("\nSaving to Snowflake CI_CD_SNAPSHOTS table...")
+        logger.info("\nSaving to Snowflake CI_CD_SNAPSHOTS table...")
         save_to_snowflake(cur, config, all_snapshots)
-        print(f"  {len(all_snapshots)} snapshot(s) saved")
+        logger.info("  %d snapshot(s) saved", len(all_snapshots))
 
-    print(f"\n{'=' * 60}")
-    print(f"Snapshots: {len(all_snapshots)}  Environment: {config['environment']}")
+    logger.info("\n%s", "=" * 60)
+    logger.info("Snapshots: %d  Environment: %s", len(all_snapshots), config['environment'])
 
     cur.close()
     conn.close()
