@@ -98,7 +98,29 @@ def get_eval_configs(env_config: dict) -> list[dict]:
     return results
 
 
+def find_latest_run(cursor, agent: dict) -> str | None:
+    try:
+        cursor.execute(f"""
+            SELECT DISTINCT record_attributes:"snow.ai.observability.run.name"::STRING AS run_name,
+                   MAX(timestamp) AS ended
+            FROM TABLE(SNOWFLAKE.LOCAL.GET_AI_OBSERVABILITY_LOGS(
+                '{agent["database"]}', '{agent["schema"]}', '{agent["name"]}', 'CORTEX AGENT'
+            ))
+            WHERE record_attributes:"snow.ai.observability.run.name" IS NOT NULL
+            GROUP BY 1
+            ORDER BY ended DESC
+            LIMIT 1
+        """)
+        row = cursor.fetchone()
+        return row[0] if row else None
+    except Exception:
+        return None
+
+
 def query_latest_eval(cursor, agent: dict) -> tuple[str | None, dict]:
+    run_name = find_latest_run(cursor, agent)
+    if not run_name:
+        return None, {}
     try:
         cursor.execute(f"""
             SELECT
@@ -107,7 +129,7 @@ def query_latest_eval(cursor, agent: dict) -> tuple[str | None, dict]:
                 COUNT(*) AS record_count
             FROM TABLE(SNOWFLAKE.LOCAL.GET_AI_EVALUATION_DATA(
                 '{agent["database"]}', '{agent["schema"]}', '{agent["name"]}',
-                'CORTEX AGENT'
+                'CORTEX AGENT', '{run_name}'
             ))
             GROUP BY METRIC_NAME
         """)
@@ -117,7 +139,7 @@ def query_latest_eval(cursor, agent: dict) -> tuple[str | None, dict]:
         summary = {}
         for row in rows:
             summary[row[0]] = {"avg": float(row[1]) if row[1] else 0.0, "n": int(row[2] or 0)}
-        return "found", summary
+        return run_name, summary
     except Exception as e:
         return f"error: {e}", {}
 
@@ -216,7 +238,10 @@ def main():
     if output_file:
         with open(output_file, "a") as f:
             f.write(f"passed={'true' if all_passed else 'false'}\n")
-            f.write(f"summary<<EOF\n{md_output}\nEOF\n")
+
+    comment_file = os.environ.get("EVAL_COMMENT_FILE", "/tmp/eval_summary.md")
+    with open(comment_file, "w") as f:
+        f.write(md_output)
 
     cursor.close()
     conn.close()
