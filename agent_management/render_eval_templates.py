@@ -13,13 +13,18 @@ Implements REQ-011: Eval Template Rendering.
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 
 import jinja2
 
+from agent_management import setup_logging
+from agent_management.paths import eval_dir
 from agent_management.render_template import build_context
 from agent_management.utils.config import load_env_config
+
+logger = logging.getLogger(__name__)
 
 
 class _PreserveUndefined(jinja2.Undefined):
@@ -40,8 +45,7 @@ class _PreserveUndefined(jinja2.Undefined):
         return False
 
 
-EVAL_DIR = Path(__file__).resolve().parent.parent / "agent-evaluation"
-GENERATED_DIR = EVAL_DIR / "generated"
+GENERATED_DIR = eval_dir() / "generated"
 
 EVAL_GLOBS = [
     "configs/*.yaml",
@@ -54,13 +58,13 @@ EVAL_GLOBS = [
 
 def find_eval_files(specific: str | None) -> list[Path]:
     if specific:
-        path = EVAL_DIR / specific
+        path = eval_dir() / specific
         if not path.exists():
             raise FileNotFoundError(f"Eval file not found: {path}")
         return [path]
     files = []
     for pattern in EVAL_GLOBS:
-        files.extend(EVAL_DIR.glob(pattern))
+        files.extend(eval_dir().glob(pattern))
     seen = set()
     unique = []
     for f in sorted(files):
@@ -78,21 +82,23 @@ def main():
     parser.add_argument("--dry-run", "-n", action="store_true", help="Print rendered output, don't write")
     args = parser.parse_args()
 
+    setup_logging(1)
+
     config = load_env_config(args.env)
     eval_files = find_eval_files(args.file)
     out_dir = GENERATED_DIR / config["environment"]
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"Environment: {config['environment']}")
-    print(f"Files: {len(eval_files)}")
-    print(f"Output: {out_dir}")
-    print("=" * 60)
+    logger.info("Environment: %s", config['environment'])
+    logger.info("Files: %d", len(eval_files))
+    logger.info("Output: %s", out_dir)
+    logger.info("=" * 60)
 
     success = 0
     failed = 0
     skipped = 0
     for path in eval_files:
-        rel = path.relative_to(EVAL_DIR)
+        rel = path.relative_to(eval_dir())
         content = path.read_text()
 
         if "{{" not in content:
@@ -105,23 +111,23 @@ def main():
             rendered = j2_env.from_string(content).render(**ctx)
 
             if args.dry_run:
-                print(f"\n--- {rel} ---")
-                print(rendered[:500])
+                logger.info("\n--- %s ---", rel)
+                logger.info("%s", rendered[:500])
                 if len(rendered) > 500:
-                    print(f"... ({len(rendered)} chars total)")
+                    logger.info("... (%d chars total)", len(rendered))
             else:
                 out_path = out_dir / rel
                 out_path.parent.mkdir(parents=True, exist_ok=True)
                 out_path.write_text(rendered)
-                print(f"  {rel} -> {out_path.relative_to(EVAL_DIR)}")
+                logger.info("  %s -> %s", rel, out_path.relative_to(eval_dir()))
 
             success += 1
         except Exception as e:
-            print(f"  {rel}... FAILED — {e}")
+            logger.error("  %s... FAILED — %s", rel, e)
             failed += 1
 
-    print(f"\n{'=' * 60}")
-    print(f"Rendered: {success}  Skipped: {skipped}  Failed: {failed}")
+    logger.info("\n%s", "=" * 60)
+    logger.info("Rendered: %d  Skipped: %d  Failed: %d", success, skipped, failed)
     sys.exit(1 if failed > 0 else 0)
 
 

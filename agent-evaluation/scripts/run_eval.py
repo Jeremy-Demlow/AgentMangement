@@ -39,6 +39,10 @@ from pathlib import Path
 
 import snowflake.connector
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+from agent_management.paths import eval_dir
+from agent_management.utils.config import load_env_config
+
 try:
     import yaml
 except ImportError:
@@ -440,7 +444,7 @@ def check_thresholds(summary: dict[str, dict], thresholds: dict[str, float]) -> 
 
 
 def save_results_json(config: dict, run_name: str, summary: dict, results: list[dict], thresholds: dict, passed: bool) -> Path:
-    results_dir = Path(config.get("_config_path", ".")).parent.parent / "results"
+    results_dir = eval_dir() / "results"
     results_dir.mkdir(exist_ok=True)
     agent_name = config["agent"]["name"].lower()
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -464,13 +468,6 @@ def save_results_json(config: dict, run_name: str, summary: dict, results: list[
     )
     return output_file
 
-
-def load_env_config(env: str) -> dict:
-    path = Path("agents/environments") / f"{env}.yml"
-    if not path.exists():
-        raise FileNotFoundError(f"Environment config not found: {path}")
-    with open(path) as f:
-        return yaml.safe_load(f)
 
 
 def _connect(args, env_config: dict = None):
@@ -560,7 +557,7 @@ def main():
     parser.add_argument("--tag", action="append", dest="tags", help="Filter questions by tag (repeatable)")
     parser.add_argument("--no-wait", action="store_true", help="Start evaluation and exit without polling")
     parser.add_argument("--poll-interval", type=int, default=POLL_INTERVAL_SECONDS, help=f"Seconds between status polls (default: {POLL_INTERVAL_SECONDS})")
-    parser.add_argument("--env", choices=["dev", "staging", "prod"], help="Load environment config from agents/environments/<env>.yml")
+    parser.add_argument("--env", choices=["dev", "qa", "prod"], help="Load environment config from environments/<env>.env.yml")
 
     args = parser.parse_args()
     config = load_config(args.config)

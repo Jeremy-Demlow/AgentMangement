@@ -12,16 +12,19 @@ Implements REQ-006: Drift Detection.
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 
 import yaml as pyyaml
 
+from agent_management import setup_logging
+from agent_management.paths import sv_definitions_dir
 from agent_management.render_template import render_file
 from agent_management.utils.config import load_env_config
 from agent_management.utils.snowflake_client import connect
 
-DEFINITIONS_DIR = Path(__file__).resolve().parent.parent / "semantic-views" / "definitions"
+logger = logging.getLogger(__name__)
 
 
 def get_table_columns(cur, database: str, schema: str, table: str) -> dict[str, str]:
@@ -80,7 +83,13 @@ def check_drift_for_sv(cur, sv_yaml: dict, config: dict) -> list[dict]:
                 })
 
         for actual_col in actual_cols:
-            pass
+            if actual_col not in declared_cols:
+                drifts.append({
+                    "sv": sv_name,
+                    "table": table_fqn,
+                    "type": "COLUMN_UNDECLARED",
+                    "detail": f"Column {actual_col} in table but not declared in SV",
+                })
 
     return drifts
 
@@ -91,51 +100,53 @@ def main():
     parser.add_argument("--view", "-v", help="Check single SV by name")
     args = parser.parse_args()
 
+    setup_logging(1)
+
     config = load_env_config(args.env)
 
     if args.view:
-        path = DEFINITIONS_DIR / f"{args.view}.yaml"
+        path = sv_definitions_dir() / f"{args.view}.yaml"
         if not path.exists():
-            path = DEFINITIONS_DIR / f"{args.view}.yml"
+            path = sv_definitions_dir() / f"{args.view}.yml"
         if not path.exists():
-            print(f"SV YAML not found: {args.view}")
+            logger.error("SV YAML not found: %s", args.view)
             sys.exit(1)
         sv_files = [path]
     else:
-        sv_files = sorted(DEFINITIONS_DIR.glob("sem_*.y*ml"))
+        sv_files = sorted(sv_definitions_dir().glob("sem_*.y*ml"))
 
-    print(f"Environment: {config['environment']}")
-    print(f"Views: {len(sv_files)}")
-    print("=" * 60)
+    logger.info("Environment: %s", config['environment'])
+    logger.info("Views: %d", len(sv_files))
+    logger.info("=" * 60)
 
     conn = connect(config)
     cur = conn.cursor()
 
-    total_drifts = 0
-    for path in sv_files:
-        rendered = render_file(path, config)
-        sv_yaml = pyyaml.safe_load(rendered)
-        sv_name = sv_yaml.get("name", path.stem)
+    try:
+        total_drifts = 0
+        for path in sv_files:
+            rendered = render_file(path, config)
+            sv_yaml = pyyaml.safe_load(rendered)
+            sv_name = sv_yaml.get("name", path.stem)
 
-        drifts = check_drift_for_sv(cur, sv_yaml, config)
-        if drifts:
-            print(f"\n  {sv_name} — {len(drifts)} drift(s):")
-            for d in drifts:
-                print(f"    [{d['type']}] {d['detail']}")
-            total_drifts += len(drifts)
+            drifts = check_drift_for_sv(cur, sv_yaml, config)
+            if drifts:
+                logger.warning("\n  %s — %d drift(s):", sv_name, len(drifts))
+                for d in drifts:
+                    logger.warning("    [%s] %s", d['type'], d['detail'])
+                total_drifts += len(drifts)
+            else:
+                logger.info("  %s — no drift", sv_name)
+
+        logger.info("\n%s", "=" * 60)
+        if total_drifts:
+            logger.error("DRIFT DETECTED — %d issue(s)", total_drifts)
+            sys.exit(1)
         else:
-            print(f"  {sv_name} — no drift")
-
-    print(f"\n{'=' * 60}")
-    if total_drifts:
-        print(f"DRIFT DETECTED — {total_drifts} issue(s)")
-        sys.exit(1)
-    else:
-        print("NO DRIFT — all SVs match table schemas")
-        sys.exit(0)
-
-    cur.close()
-    conn.close()
+            logger.info("NO DRIFT — all SVs match table schemas")
+    finally:
+        cur.close()
+        conn.close()
 
 
 if __name__ == "__main__":

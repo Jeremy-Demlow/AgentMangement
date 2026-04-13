@@ -11,6 +11,7 @@ Usage (CI):
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import subprocess
 import sys
@@ -19,12 +20,15 @@ from pathlib import Path
 
 import yaml
 
+from agent_management import setup_logging
+from agent_management.paths import eval_dir
 from agent_management.render_template import render_file
 from agent_management.utils.config import load_env_config
 
-EVAL_DIR = Path(__file__).resolve().parent.parent / "agent-evaluation"
-CONFIGS_DIR = EVAL_DIR / "configs"
-SCRIPTS_DIR = EVAL_DIR / "scripts"
+logger = logging.getLogger(__name__)
+
+CONFIGS_DIR = eval_dir() / "configs"
+SCRIPTS_DIR = eval_dir() / "scripts"
 
 
 def find_eval_configs(agent: str | None) -> list[Path]:
@@ -55,23 +59,25 @@ def main():
     parser.add_argument("--poll-interval", type=int, default=30, help="Seconds between polls")
     args = parser.parse_args()
 
+    setup_logging(1)
+
     env_config = load_env_config(args.env)
     configs = find_eval_configs(args.agent)
 
     if not configs:
-        print("No eval configs found")
+        logger.info("No eval configs found")
         sys.exit(0)
 
-    print(f"Environment: {env_config['environment']}")
-    print(f"Eval configs: {len(configs)}")
-    print("=" * 60)
+    logger.info("Environment: %s", env_config['environment'])
+    logger.info("Eval configs: %d", len(configs))
+    logger.info("=" * 60)
 
     overall_passed = True
 
     with tempfile.TemporaryDirectory(prefix="ci_eval_") as tmp_dir:
         for config_path in configs:
             agent_name = config_path.stem
-            print(f"\n--- Evaluating: {agent_name} ---")
+            logger.info("\n--- Evaluating: %s ---", agent_name)
 
             rendered_config = render_file(config_path, env_config, strict=False)
             parsed = yaml.safe_load(rendered_config)
@@ -84,7 +90,7 @@ def main():
 
             dataset_relative = parsed["dataset"].get("questions", "")
             if dataset_relative:
-                dataset_path = EVAL_DIR / dataset_relative
+                dataset_path = eval_dir() / dataset_relative
                 if dataset_path.exists():
                     rendered_dataset_path = render_and_write(dataset_path, env_config, tmp_dir, strict=False)
                     parsed["dataset"]["questions"] = rendered_dataset_path
@@ -93,12 +99,12 @@ def main():
             rendered_config_path.write_text(yaml.dump(parsed, default_flow_style=False))
 
             if args.dry_run:
-                print(f"  Agent: {parsed['agent']['database']}.{parsed['agent']['schema']}.{parsed['agent']['name']}")
-                print(f"  Dataset: {parsed['dataset']['questions']}")
-                print(f"  Table: {parsed['dataset']['snowflake_table']}")
-                print(f"  Stage: {parsed['snowflake']['stage']}")
-                print(f"  Thresholds: {parsed.get('thresholds', {})}")
-                print(f"  Metrics: {parsed.get('metrics', [])}")
+                logger.info("  Agent: %s.%s.%s", parsed['agent']['database'], parsed['agent']['schema'], parsed['agent']['name'])
+                logger.info("  Dataset: %s", parsed['dataset']['questions'])
+                logger.info("  Table: %s", parsed['dataset']['snowflake_table'])
+                logger.info("  Stage: %s", parsed['snowflake']['stage'])
+                logger.info("  Thresholds: %s", parsed.get('thresholds', {}))
+                logger.info("  Metrics: %s", parsed.get('metrics', []))
                 continue
 
             cmd = [
@@ -122,22 +128,22 @@ def main():
             if args.poll_interval != 30:
                 cmd.extend(["--poll-interval", str(args.poll_interval)])
 
-            print(f"  Running evaluation...")
-            result = subprocess.run(cmd, cwd=str(EVAL_DIR))
+            logger.info("  Running evaluation...")
+            result = subprocess.run(cmd, cwd=str(eval_dir()))
 
             if result.returncode != 0:
-                print(f"  FAILED: {agent_name} (exit code {result.returncode})")
+                logger.error("  FAILED: %s (exit code %d)", agent_name, result.returncode)
                 overall_passed = False
             else:
-                print(f"  PASSED: {agent_name}")
+                logger.info("  PASSED: %s", agent_name)
 
-    print(f"\n{'=' * 60}")
+    logger.info("\n%s", "=" * 60)
     if args.dry_run:
-        print("DRY RUN complete — no evaluations executed")
+        logger.info("DRY RUN complete — no evaluations executed")
         sys.exit(0)
 
     status = "ALL PASSED" if overall_passed else "FAILURES DETECTED"
-    print(f"Overall: {status}")
+    logger.info("Overall: %s", status)
     sys.exit(0 if overall_passed else 1)
 
 

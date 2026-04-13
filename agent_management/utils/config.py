@@ -10,15 +10,11 @@ Implements REQ-010: Library Configuration.
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from typing import Any
 
 import yaml
 
-
-ROOT_DIR = Path(__file__).resolve().parent.parent.parent
-ENVIRONMENTS_DIR = ROOT_DIR / "environments"
-PROJECT_CONFIG_PATH = ROOT_DIR / "project.yml"
+from agent_management.paths import environments_dir, project_config_path
 
 REQUIRED_FIELDS = [
     "environment",
@@ -49,15 +45,16 @@ def _validate(config: dict) -> None:
 
 
 def load_project_config() -> dict:
-    if not PROJECT_CONFIG_PATH.exists():
+    path = project_config_path()
+    if not path.exists():
         return {}
-    with open(PROJECT_CONFIG_PATH) as f:
+    with open(path) as f:
         return yaml.safe_load(f) or {}
 
 
 def load_env_config(env: str | None = None) -> dict:
     env = env or os.environ.get("SNOWFLAKE_ENV", "dev")
-    path = ENVIRONMENTS_DIR / f"{env}.env.yml"
+    path = environments_dir() / f"{env}.env.yml"
     if not path.exists():
         raise FileNotFoundError(f"Environment config not found: {path}")
     with open(path) as f:

@@ -15,10 +15,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
 
+from agent_management import setup_logging
+from agent_management.paths import eval_dir
 from agent_management.utils.config import get_thresholds, load_env_config
+
+logger = logging.getLogger(__name__)
 
 
 def load_results(path: Path) -> dict:
@@ -108,6 +113,8 @@ def main():
     parser.add_argument("--strict", action="store_true", help="Exit 1 on any threshold failure")
     args = parser.parse_args()
 
+    setup_logging(1)
+
     config = load_env_config(args.env)
     thresholds = get_thresholds(config)
 
@@ -117,17 +124,17 @@ def main():
     elif args.results_dir:
         result_files = sorted(Path(args.results_dir).glob("*.json"))
     else:
-        default_dir = Path(__file__).resolve().parent.parent / "agent-evaluation" / "results"
+        default_dir = eval_dir() / "results"
         result_files = sorted(default_dir.glob("*.json"))
 
     if not result_files:
-        print("No result files found — skipping metric checks")
+        logger.info("No result files found — skipping metric checks")
         sys.exit(0)
 
-    print(f"Environment: {config['environment']}")
-    print(f"Thresholds: {thresholds}")
-    print(f"Files: {len(result_files)}")
-    print("=" * 60)
+    logger.info("Environment: %s", config['environment'])
+    logger.info("Thresholds: %s", thresholds)
+    logger.info("Files: %d", len(result_files))
+    logger.info("=" * 60)
 
     any_failure = False
     for path in result_files:
@@ -136,7 +143,7 @@ def main():
         scores = compute_scores(data)
         classification = compute_classification_metrics(data, thresholds)
 
-        print(f"\n{agent}:")
+        logger.info("\n%s:", agent)
         for metric, info in sorted(scores.items()):
             threshold = thresholds.get(metric)
             status = ""
@@ -146,26 +153,26 @@ def main():
                 else:
                     status = f"  FAIL (< {threshold})"
                     any_failure = True
-            print(f"  {metric}: {info['avg']:.4f} (n={info['n']}){status}")
+            logger.info("  %s: %.4f (n=%d)%s", metric, info['avg'], info['n'], status)
 
             cls = classification.get(metric)
             if cls:
-                print(f"    F1={cls['f1']:.4f}  Precision={cls['precision']:.4f}  "
-                      f"Recall={cls['recall']:.4f}  (TP={cls['tp']} FN={cls['fn']})")
+                logger.info("    F1=%.4f  Precision=%.4f  Recall=%.4f  (TP=%d FN=%d)",
+                            cls['f1'], cls['precision'], cls['recall'], cls['tp'], cls['fn'])
 
         failures = check_thresholds(scores, thresholds)
         if failures:
-            print(f"  THRESHOLD FAILURES: {len(failures)}")
+            logger.warning("  THRESHOLD FAILURES: %d", len(failures))
         else:
-            print(f"  All thresholds passed")
+            logger.info("  All thresholds passed")
 
-    print(f"\n{'=' * 60}")
+    logger.info("\n%s", "=" * 60)
     if any_failure:
-        print("RESULT: FAIL — one or more metrics below threshold")
+        logger.error("RESULT: FAIL — one or more metrics below threshold")
         if args.strict:
             sys.exit(1)
     else:
-        print("RESULT: PASS — all metrics meet thresholds")
+        logger.info("RESULT: PASS — all metrics meet thresholds")
 
 
 if __name__ == "__main__":

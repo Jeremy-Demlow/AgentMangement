@@ -13,59 +13,62 @@ Implements REQ-002: Semantic View CI/CD Pipeline.
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 
+from agent_management import setup_logging
+from agent_management.paths import sv_definitions_dir
 from agent_management.render_template import render_file
 from agent_management.utils.config import get_semantic_schema, load_env_config
 from agent_management.utils.snowflake_client import connect
 
-DEFINITIONS_DIR = Path(__file__).resolve().parent.parent / "semantic-views" / "definitions"
+logger = logging.getLogger(__name__)
 
 
 def find_sv_files(view: str | None) -> list[Path]:
     if view:
-        path = DEFINITIONS_DIR / f"{view}.yml"
+        path = sv_definitions_dir() / f"{view}.yml"
         if not path.exists():
-            path = DEFINITIONS_DIR / f"{view}.yaml"
+            path = sv_definitions_dir() / f"{view}.yaml"
         if not path.exists():
             raise FileNotFoundError(f"Semantic view YAML not found: {view}")
         return [path]
-    files = sorted(DEFINITIONS_DIR.glob("sem_*.y*ml"))
+    files = sorted(sv_definitions_dir().glob("sem_*.y*ml"))
     if not files:
-        print(f"No semantic view YAMLs found in {DEFINITIONS_DIR}")
+        logger.warning("No semantic view YAMLs found in %s", sv_definitions_dir())
         sys.exit(0)
     return files
 
 
 def deploy_one(cur, schema_fqn: str, yaml_content: str, name: str, dry_run: bool) -> bool:
     if "$$" in yaml_content:
-        print(f"  {name}... SKIPPED — YAML contains '$$'")
+        logger.info("  %s... SKIPPED — YAML contains '$$'", name)
         return False
 
     if dry_run:
-        print(f"  [DRY RUN] {name} — validating...")
+        logger.info("  [DRY RUN] %s — validating...", name)
         try:
             cur.execute(
                 f"CALL SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML('{schema_fqn}', $${yaml_content}$$, TRUE)"
             )
             result = cur.fetchone()
-            print(f"  {name}... VALID — {result[0] if result else 'ok'}")
+            logger.info("  %s... VALID — %s", name, result[0] if result else 'ok')
             return True
         except Exception as e:
-            print(f"  {name}... INVALID — {e}")
+            logger.error("  %s... INVALID — %s", name, e)
             return False
 
-    print(f"  Deploying {name}...", end=" ", flush=True)
+    logger.info("  Deploying %s...", name)
     try:
         cur.execute(
             f"CALL SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML('{schema_fqn}', $${yaml_content}$$, FALSE)"
         )
         result = cur.fetchone()
-        print(f"OK — {result[0] if result else 'deployed'}")
+        logger.info("  %s... OK — %s", name, result[0] if result else 'deployed')
         return True
     except Exception as e:
-        print(f"FAILED — {e}")
+        logger.error("  %s... FAILED — %s", name, e)
         return False
 
 
@@ -76,14 +79,16 @@ def main():
     parser.add_argument("--dry-run", "-n", action="store_true", help="Validate only, no deploy")
     args = parser.parse_args()
 
+    setup_logging(1)
+
     config = load_env_config(args.env)
     schema_fqn = get_semantic_schema(config)
     sv_files = find_sv_files(args.view)
 
-    print(f"Environment: {config['environment']}")
-    print(f"Target: {schema_fqn}")
-    print(f"Views: {len(sv_files)}")
-    print("=" * 60)
+    logger.info("Environment: %s", config['environment'])
+    logger.info("Target: %s", schema_fqn)
+    logger.info("Views: %d", len(sv_files))
+    logger.info("=" * 60)
 
     conn = connect(config, schema=config["deployment"]["semantic_schema"])
     cur = conn.cursor()
@@ -98,16 +103,16 @@ def main():
         else:
             failed += 1
 
-    print(f"\n{'=' * 60}")
+    logger.info("\n%s", "=" * 60)
     action = "Validated" if args.dry_run else "Deployed"
-    print(f"{action}: {success}  Failed: {failed}  Environment: {config['environment']}")
+    logger.info("%s: %d  Failed: %d  Environment: %s", action, success, failed, config['environment'])
 
     if not args.dry_run:
         cur.execute(f"SHOW SEMANTIC VIEWS IN SCHEMA {schema_fqn}")
         rows = cur.fetchall()
-        print(f"\nSemantic views in {schema_fqn}: {len(rows)}")
+        logger.info("\nSemantic views in %s: %d", schema_fqn, len(rows))
         for row in rows:
-            print(f"  - {row[1]}")
+            logger.info("  - %s", row[1])
 
     cur.close()
     conn.close()

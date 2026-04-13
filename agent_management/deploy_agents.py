@@ -17,30 +17,32 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
 
 import yaml
 
+from agent_management import setup_logging
+from agent_management.paths import generated_dir, specs_dir
 from agent_management.render_template import render_file
 from agent_management.utils.config import get_agents_schema, get_budget, get_model, load_env_config
 from agent_management.utils.snowflake_client import connect
 
-SPECS_DIR = Path(__file__).resolve().parent.parent / "agents" / "specs"
-GENERATED_DIR = Path(__file__).resolve().parent.parent / "agents" / "generated"
+logger = logging.getLogger(__name__)
 
 
 def find_agent_files(agent: str | None) -> list[Path]:
     if agent:
-        path = SPECS_DIR / f"{agent}.yml"
+        path = specs_dir() / f"{agent}.yml"
         if not path.exists():
-            path = SPECS_DIR / f"{agent}.yaml"
+            path = specs_dir() / f"{agent}.yaml"
         if not path.exists():
             raise FileNotFoundError(f"Agent spec not found: {agent}")
         return [path]
-    files = sorted(SPECS_DIR.glob("*.y*ml"))
+    files = sorted(specs_dir().glob("*.y*ml"))
     if not files:
-        print(f"No agent specs found in {SPECS_DIR}")
+        logger.warning("No agent specs found in %s", specs_dir())
         sys.exit(0)
     return files
 
@@ -202,7 +204,7 @@ def build_force_create_sql(fqn: str, agent: dict, spec_json: str, profile: dict 
 
 
 def save_generated(agent_name: str, env_name: str, sql_text: str, spec: dict) -> Path:
-    out_dir = GENERATED_DIR / env_name
+    out_dir = generated_dir() / env_name
     out_dir.mkdir(parents=True, exist_ok=True)
     sql_path = out_dir / f"{agent_name}.sql"
     sql_path.write_text(sql_text + "\n")
@@ -222,15 +224,17 @@ def main():
     )
     args = parser.parse_args()
 
+    setup_logging(1)
+
     config = load_env_config(args.env)
     agent_files = find_agent_files(args.agent)
 
     strategy = "CREATE OR REPLACE (forced)" if args.force_create else "ALTER if exists / CREATE if new"
-    print(f"Environment: {config['environment']}")
-    print(f"Target: {get_agents_schema(config)}")
-    print(f"Agents: {len(agent_files)}")
-    print(f"Strategy: {strategy}")
-    print("=" * 60)
+    logger.info("Environment: %s", config['environment'])
+    logger.info("Target: %s", get_agents_schema(config))
+    logger.info("Agents: %d", len(agent_files))
+    logger.info("Strategy: %s", strategy)
+    logger.info("=" * 60)
 
     prepared = []
     for path in agent_files:
@@ -250,7 +254,7 @@ def main():
         })
 
     if args.dry_run:
-        print(f"\n[DRY RUN] SQL written to {GENERATED_DIR / config['environment']}/")
+        logger.info("\n[DRY RUN] SQL written to %s/", generated_dir() / config['environment'])
         for item in prepared:
             fqn = item["fqn"]
             spec_json = item["spec_json"]
@@ -274,8 +278,8 @@ def main():
                 label = "ALTER/CREATE"
 
             out_path = save_generated(item["agent_name"], config["environment"], sql, item["spec"])
-            print(f"\n-- [{label}] {fqn}")
-            print(f"-- Written to: {out_path}")
+            logger.info("\n-- [%s] %s", label, fqn)
+            logger.info("-- Written to: %s", out_path)
             print(f"{sql}\n")
         sys.exit(0)
 
@@ -296,30 +300,30 @@ def main():
         try:
             if args.force_create:
                 method = "CREATE OR REPLACE"
-                print(f"\n[{method}] {fqn} ({tool_count} tools)...", end=" ", flush=True)
+                logger.info("\n[%s] %s (%d tools)...", method, fqn, tool_count)
                 cur.execute(build_force_create_sql(fqn, agent, spec_json, profile))
             elif agent_exists(cur, agent_name, schema_fqn):
                 method = "ALTER"
-                print(f"\n[{method}] {fqn} ({tool_count} tools)...", end=" ", flush=True)
+                logger.info("\n[%s] %s (%d tools)...", method, fqn, tool_count)
                 cur.execute(build_alter_spec_sql(fqn, spec_json))
                 meta_sql = build_alter_metadata_sql(fqn, agent, profile)
                 if meta_sql:
                     cur.execute(meta_sql)
             else:
                 method = "CREATE"
-                print(f"\n[{method}] {fqn} ({tool_count} tools)...", end=" ", flush=True)
+                logger.info("\n[%s] %s (%d tools)...", method, fqn, tool_count)
                 cur.execute(build_create_sql(fqn, agent, spec_json, profile))
 
             save_generated(agent_name, config["environment"],
                            build_alter_spec_sql(fqn, spec_json), item["spec"])
-            print("OK")
+            logger.info("OK")
             success += 1
         except Exception as e:
-            print(f"FAILED — {e}")
+            logger.error("FAILED — %s", e)
             failed += 1
 
-    print(f"\n{'=' * 60}")
-    print(f"Deployed: {success}  Failed: {failed}  Environment: {config['environment']}")
+    logger.info("\n%s", "=" * 60)
+    logger.info("Deployed: %d  Failed: %d  Environment: %s", success, failed, config['environment'])
 
     cur.close()
     conn.close()

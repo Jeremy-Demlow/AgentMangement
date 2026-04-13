@@ -293,3 +293,63 @@ models:
           - not_null
       - name: occupancy_percent
         description: Percentage of spaces occupied
+
+  - name: fact_lift_maintenance
+    description: Lift maintenance activities including inspections, repairs, and adjustments
+    config:
+      materialized: incremental
+      unique_key: maintenance_key
+    columns:
+      - name: maintenance_key
+        description: Surrogate primary key
+        tests:
+          - unique
+          - not_null
+      - name: date_key
+        description: Foreign key to dim_date
+        tests:
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+      - name: lift_key
+        description: Foreign key to dim_lift
+        tests:
+          - relationships:
+              to: ref('dim_lift')
+              field: lift_key
+      - name: maintenance_type
+        description: Type of maintenance performed
+      - name: category
+        description: Maintenance category
+      - name: downtime_minutes
+        description: Minutes of lift downtime
+      - name: total_cost
+        description: Total maintenance cost (parts + labor)
+      - name: passed_inspection
+        description: Whether lift passed inspection
+
+  - name: fact_grooming
+    description: Trail grooming operations and conditions
+    config:
+      materialized: incremental
+      unique_key: grooming_key
+    columns:
+      - name: grooming_key
+        description: Surrogate primary key
+        tests:
+          - unique
+          - not_null
+      - name: date_key
+        description: Foreign key to dim_date
+        tests:
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+      - name: trail_name
+        description: Trail that was groomed
+      - name: grooming_type
+        description: Type of grooming performed
+      - name: duration_minutes
+        description: Grooming duration in minutes
+      - name: condition_improved
+        description: Whether trail condition improved after grooming

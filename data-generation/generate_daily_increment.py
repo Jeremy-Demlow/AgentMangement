@@ -10,7 +10,7 @@ import numpy as np
 from datetime import datetime, timedelta
 import logging
 from snowflake_connection import SnowflakeConnection
-from config import DATABASE, RAW_SCHEMA
+from config import DATABASE, RAW_SCHEMA, get_database_for_env, VALID_ENVS
 
 # Import shared constants and utilities
 from shared import (
@@ -35,7 +35,7 @@ def check_date_exists(conn, table_name, date_column, date_value):
     """Check if data for a specific date already exists in a table."""
     query = f"""
         SELECT COUNT(*) as cnt
-        FROM {DATABASE}.{RAW_SCHEMA}.{table_name}
+        FROM {table_name}
         WHERE {date_column} = '{date_value}'
     """
     result = conn.sql(query).to_pandas()
@@ -577,23 +577,26 @@ def main():
     parser.add_argument('--days', type=int, default=1, help='Number of days (default: 1)')
     parser.add_argument('--connection', type=str, default='snowflake_agents', help='Snow CLI connection')
     parser.add_argument('--force', action='store_true', help='Force regeneration even if data exists')
+    parser.add_argument('--env', type=str, default='prod', choices=VALID_ENVS,
+                        help=f'Target environment (default: prod). Valid: {VALID_ENVS}')
     args = parser.parse_args()
 
+    target_db = get_database_for_env(args.env) if args.env != 'prod' else DATABASE
     start_date = datetime.strptime(args.date, '%Y-%m-%d')
 
     logger.info("=" * 60)
     logger.info("INCREMENTAL DATA GENERATION - ALL DATA TYPES")
     logger.info("=" * 60)
+    logger.info(f"Environment: {args.env} -> Database: {target_db}")
     logger.info(f"Generating {args.days} day(s) starting {start_date.strftime('%Y-%m-%d')}")
 
-    # Try environment variables first (for CI/CD), then fall back to Snow CLI
     try:
         conn = SnowflakeConnection.from_env_or_snow_cli(args.connection)
     except Exception as e:
         logger.info(f"Using Snow CLI connection '{args.connection}'")
         conn = SnowflakeConnection.from_snow_cli(args.connection)
 
-    conn.execute(f"USE DATABASE {DATABASE}")
+    conn.execute(f"USE DATABASE {target_db}")
     conn.execute(f"USE SCHEMA {RAW_SCHEMA}")
 
     # Load customers

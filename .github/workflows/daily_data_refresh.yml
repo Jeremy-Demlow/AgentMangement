@@ -44,6 +44,10 @@ on:
         required: false
         default: 'false'
         type: boolean
+      sync_to_envs:
+        description: 'Sync RAW data to DEV/QA after PROD refresh (comma-separated: dev,qa or empty to skip)'
+        required: false
+        default: 'dev,qa'
 
 jobs:
   data-refresh:
@@ -401,3 +405,13 @@ jobs:
       - name: Cleanup
         if: always()
         run: rm -f /tmp/snowflake_key.p8
+
+  sync-environments:
+    name: Sync data to DEV/QA
+    needs: data-refresh
+    if: inputs.sync_to_envs != '' && inputs.sync_to_envs != 'none'
+    uses: ./.github/workflows/sync_env_data.yml
+    with:
+      target_envs: ${{ inputs.sync_to_envs || 'dev,qa' }}
+      full_refresh_dbt: ${{ inputs.full_refresh == 'true' || inputs.full_refresh == true }}
+    secrets: inherit  # pragma: allowlist secret

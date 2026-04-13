@@ -62,9 +62,11 @@ tools:
     semantic_view: {{ env.semantic_schema }}.SEM_OPERATIONS
     warehouse: {{ env.warehouse }}
     description: >
-      Lift performance, wait times, capacity utilization across 18 lifts.
-      KEY METRICS: TOTAL_SCANS, AVG_WAIT_MINUTES, CAPACITY_UTILIZATION_PCT.
-      KEY DIMENSIONS: LIFT_NAME, TERRAIN_TYPE, SCAN_HOUR, IS_WEEKEND.
+      Lift performance, wait times, capacity utilization, maintenance, and grooming.
+      LIFT METRICS: TOTAL_SCANS, AVG_WAIT_MINUTES, CAPACITY_UTILIZATION_PCT.
+      MAINTENANCE METRICS: TOTAL_MAINTENANCE_EVENTS, TOTAL_MAINTENANCE_COST, TOTAL_DOWNTIME_MINUTES.
+      GROOMING METRICS: TOTAL_GROOMING_RUNS, CONDITION_IMPROVEMENT_RATE.
+      KEY DIMENSIONS: LIFT_NAME, TERRAIN_TYPE, MAINTENANCE_TYPE, GROOMING_TRAIL_NAME.
 
   - name: StaffingAnalytics
     type: cortex_analyst_text_to_sql
@@ -144,7 +146,7 @@ instructions:
     Overall performance -> DailySummaryKPIs (start here for broad questions).
     Revenue deep dives -> RevenueAnalytics.
     Customer questions -> CustomerAnalytics or PassholderAnalytics.
-    Operations -> LiftOperations. Staffing -> StaffingAnalytics.
+    Operations, maintenance, grooming -> LiftOperations. Staffing -> StaffingAnalytics.
     Weather -> WeatherAnalytics. Marketing -> MarketingAnalytics.
     Satisfaction -> CustomerSatisfaction. Safety -> SafetyIncidents.
     Ski school -> SkiSchoolAnalytics. Pass program -> PassholderAnalytics.
