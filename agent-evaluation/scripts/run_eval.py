@@ -325,7 +325,7 @@ def show_results(cursor, config: dict, run_name: str, category: str = None):
     print("-" * 55)
     for row in cursor.fetchall():
         score_pct = f"{row[1]*100:.1f}%" if row[1] is not None else "N/A"
-        print(f"{row[0]:<25} {score_pct:>8} {row[2]:>6} {row[3]:>6} {row[4]:>6}")
+        print(f"{row[0]:<25} {score_pct:>8} {(row[2] or 0):>6} {(row[3] or 0):>6} {(row[4] or 0):>6}")
 
     cursor.execute(f"""
         SELECT
@@ -343,8 +343,10 @@ def show_results(cursor, config: dict, run_name: str, category: str = None):
     print(f"\n  {'Score':>5}  {'Metric':<22} Question")
     print(f"  {'-----':>5}  {'------':<22} --------")
     for row in cursor.fetchall():
-        score = f"{row[2]:.2f}" if row[2] is not None else "N/A"
-        print(f"  {score:>5}  {row[1]:<22} {row[0]}")
+        score = f"{row[2]:.2f}" if row[2] is not None else "  N/A"
+        metric = row[1] or "unknown"
+        question = row[0] or "(no question)"
+        print(f"  {score:>5}  {metric:<22} {question}")
 
     cursor.execute(
         "SELECT LOWER(CURRENT_ORGANIZATION_NAME()), LOWER(CURRENT_ACCOUNT_NAME())"
