@@ -324,8 +324,11 @@ def show_results(cursor, config: dict, run_name: str, category: str = None):
     print(f"\n{'Metric':<25} {'Avg':>8} {'Count':>6} {'High':>6} {'Low':>6}")
     print("-" * 55)
     for row in cursor.fetchall():
-        score_pct = f"{row[1]*100:.1f}%" if row[1] is not None else "N/A"
-        print(f"{row[0]:<25} {score_pct:>8} {(row[2] or 0):>6} {(row[3] or 0):>6} {(row[4] or 0):>6}")
+        score_pct = f"{float(row[1])*100:.1f}%" if row[1] is not None else "N/A"
+        cnt = int(row[2]) if row[2] is not None else 0
+        high = int(row[3]) if row[3] is not None else 0
+        low = int(row[4]) if row[4] is not None else 0
+        print(f"{row[0]:<25} {score_pct:>8} {cnt:>6} {high:>6} {low:>6}")
 
     cursor.execute(f"""
         SELECT
