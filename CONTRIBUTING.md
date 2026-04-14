@@ -92,12 +92,17 @@ Manual dispatch   →  dcm-deploy.yml       (infrastructure changes)
 | `qa` | `QA` | `AM_SKI_RESORT_QA` | `AM_DEPLOY_ROLE_QA` |
 | `prod` | `production` (with approval) or `PROD` | `AM_SKI_RESORT` | `AM_DEPLOY_ROLE` |
 
-## Secrets Architecture
+## Secrets & Variables Architecture
 
-- **Repo-level**: `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, `SNOWFLAKE_PRIVATE_KEY`
-- **Environment-level** (per DEV/QA/PROD/production): `SNOWFLAKE_WAREHOUSE`, `SNOWFLAKE_ROLE`, `SNOWFLAKE_DATABASE`
+- **Repo-level secrets**: `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, `SNOWFLAKE_PRIVATE_KEY`
+- **Environment-level variables** (per DEV/QA/PROD/production): `SNOWFLAKE_WAREHOUSE`, `SNOWFLAKE_ROLE`, `SNOWFLAKE_DATABASE`
 
-Every job that connects to Snowflake declares `environment:` to pull the correct secrets.
+> **Why variables, not secrets?** GitHub Actions masks any value stored as a secret wherever it
+> appears in log output. Database names, roles, and warehouses are not sensitive, and masking
+> them breaks Snowsight URLs and makes CI logs harder to read. Only truly sensitive values
+> (account identifier, username, private key) are stored as secrets.
+
+Every job that connects to Snowflake declares `environment:` to pull the correct variables and secrets.
 
 ## Data Pipeline & Environment Sync
 

@@ -647,4 +647,4 @@ In GitHub Actions, agent evaluations run as the final step of each deploy workfl
 2. **QA** (`promote-qa.yml`): Eval is a **gate** — failure blocks the promotion
 3. **PROD** (`promote-prod.yml`): Eval is a **gate** — failure triggers auto-rollback from snapshot
 
-The eval step uses GitHub environment secrets (`environment: DEV/QA/PROD`) so `SNOWFLAKE_DATABASE`, `SNOWFLAKE_ROLE`, and `SNOWFLAKE_WAREHOUSE` resolve to the correct values per environment. Authentication uses RSA key-pair (JWT) — no passwords.
+The eval step uses GitHub environment variables (`environment: DEV/QA/PROD`) so `SNOWFLAKE_DATABASE`, `SNOWFLAKE_ROLE`, and `SNOWFLAKE_WAREHOUSE` resolve to the correct values per environment. These are stored as `vars` (not `secrets`) so they appear unmasked in CI logs — important for clickable Snowsight URLs. Authentication uses RSA key-pair (JWT) secrets — no passwords.

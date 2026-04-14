@@ -2,9 +2,13 @@
 
 Complete setup guide for all CI/CD workflows in this repository.
 
-## Secret Architecture
+## Secrets & Variables Architecture
 
-Secrets are split between **repo-level** (shared) and **environment-level** (per-env):
+Credentials are split between **repo-level secrets** (sensitive) and **environment-level variables** (non-sensitive):
+
+> **Why variables, not secrets?** GitHub masks any secret value wherever it appears in log output.
+> Database names, roles, and warehouses are not sensitive — masking them breaks Snowsight URLs
+> and makes CI logs harder to read. Only truly sensitive values use secrets.
 
 ### Repo-Level Secrets (4)
 
@@ -17,17 +21,17 @@ Go to **Settings → Secrets and variables → Actions → Repository secrets**:
 | `SNOWFLAKE_PRIVATE_KEY` | PEM-encoded private key (full file contents including headers) | See [Key Pair Auth](#key-pair-auth) |
 | `SNOWFLAKE_PRIVATE_KEY_RAW` | Same key (required by DCM reusable actions) | Same as above |
 
-### Environment-Level Secrets (3 per environment)
+### Environment-Level Variables (3 per environment)
 
-Go to **Settings → Environments → [env name] → Environment secrets**:
+Go to **Settings → Environments → [env name] → Environment variables**:
 
-| Secret | DEV | QA | PROD / production |
-|--------|-----|-----|-------------------|
+| Variable | DEV | QA | PROD / production |
+|----------|-----|-----|-------------------|
 | `SNOWFLAKE_WAREHOUSE` | `AM_SKI_RESORT_WH_DEV` | `AM_SKI_RESORT_WH_QA` | `AM_SKI_RESORT_WH` |
 | `SNOWFLAKE_ROLE` | `AM_DEPLOY_ROLE_DEV` | `AM_DEPLOY_ROLE_QA` | `AM_DEPLOY_ROLE` |
 | `SNOWFLAKE_DATABASE` | `AM_SKI_RESORT_DEV` | `AM_SKI_RESORT_QA` | `AM_SKI_RESORT` |
 
-Each workflow job declares `environment: DEV` (or QA/PROD/production), and `${{ secrets.SNOWFLAKE_WAREHOUSE }}` resolves to the correct environment-specific value.
+Each workflow job declares `environment: DEV` (or QA/PROD/production), and `${{ vars.SNOWFLAKE_WAREHOUSE }}` resolves to the correct environment-specific value.
 
 ### Quick Setup via Scripts
 
@@ -35,7 +39,7 @@ Each workflow job declares `environment: DEV` (or QA/PROD/production), and `${{ 
 # 1. Create all 4 GitHub environments (DEV, QA, PROD, production)
 .github/scripts/setup_github_environments.sh
 
-# 2. Set 4 repo secrets + 12 environment secrets (3 per env x 4 envs)
+# 2. Set 4 repo secrets + 12 environment variables (3 per env x 4 envs)
 .github/scripts/setup_github_secrets.sh
 ```
 
@@ -50,8 +54,8 @@ To tear everything down and start fresh:
 | Script | What it does |
 |--------|-------------|
 | `setup_github_environments.sh` | Creates 4 GitHub environments: `DEV`, `QA`, `PROD` (no protection), `production` (requires repo owner approval). |
-| `setup_github_secrets.sh` | Sets 4 repo secrets + 3 environment secrets per env (DEV/QA/PROD/production = 16 total). Reads the private key from `~/.snowflake/keys/snowflake_tf_key.p8`. All workflows use key-pair (JWT) auth. |
-| `teardown.sh` | Deletes all repo secrets, environment secrets, and environments. |
+| `setup_github_secrets.sh` | Sets 4 repo secrets + 3 environment variables per env (DEV/QA/PROD/production = 16 total). Reads the private key from `~/.snowflake/keys/snowflake_tf_key.p8`. All workflows use key-pair (JWT) auth. |
+| `teardown.sh` | Deletes all repo secrets, environment variables, and environments. |
 
 All scripts support overrides via environment variables (see script headers for details):
 
@@ -130,10 +134,10 @@ The script force-sets `SNOWFLAKE_DATABASE`, `SNOWFLAKE_ROLE`, and `SNOWFLAKE_WAR
 # Check repo secrets
 gh secret list
 
-# Check environment secrets
-gh secret list --env DEV
-gh secret list --env QA
-gh secret list --env PROD
+# Check environment variables
+gh variable list --env DEV
+gh variable list --env QA
+gh variable list --env PROD
 
 # Test the simplest workflow first
 gh workflow run deploy-dev.yml
@@ -145,9 +149,9 @@ gh workflow run deploy-dev.yml
 |-------|-------|-----|
 | `Failed to connect to DB: 250001` | Bad account, user, or key | Verify `SNOWFLAKE_ACCOUNT` and `SNOWFLAKE_USER` |
 | `Private key is not in PKCS8 format` | Key format wrong | `openssl pkcs8 -topk8 -inform PEM -in key.pem -out key.p8 -nocrypt` |
-| `SQL access control error` | Role lacks grants | Check environment secrets point to correct role |
+| `SQL access control error` | Role lacks grants | Check environment variables point to correct role |
 | `Environment 'production' not found` | Missing GH environment | Run `setup_github_environments.sh` |
-| `SNOWFLAKE_WAREHOUSE` is empty | Missing env secret | Job needs `environment:` declaration + env-level secret set |
+| `SNOWFLAKE_WAREHOUSE` is empty | Missing env variable | Job needs `environment:` declaration + env-level variable set |
 | `DATASCIENCE.RAW` in dbt errors | IDE env contamination | Force-set `SNOWFLAKE_DATABASE` or use `test_workflow_locally.sh` |
 | `dbt source tests fail` | Deploy role can't create test schema | Use `dbt run` not `dbt build` in deploy workflows |
 

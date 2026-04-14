@@ -9,19 +9,19 @@ set -euo pipefail
 #
 #   DEV         - Used by deploy-dev.yml
 #                 No protection rules (auto-deploys on push to main)
-#                 Secrets: SNOWFLAKE_WAREHOUSE, SNOWFLAKE_ROLE, SNOWFLAKE_DATABASE
+#                 Variables: SNOWFLAKE_WAREHOUSE, SNOWFLAKE_ROLE, SNOWFLAKE_DATABASE
 #
 #   QA          - Used by promote-qa.yml
 #                 No protection rules
-#                 Secrets: SNOWFLAKE_WAREHOUSE, SNOWFLAKE_ROLE, SNOWFLAKE_DATABASE
+#                 Variables: SNOWFLAKE_WAREHOUSE, SNOWFLAKE_ROLE, SNOWFLAKE_DATABASE
 #
 #   PROD        - Used by promote-prod.yml (deploy + eval jobs), daily_data_refresh.yml
 #                 No protection rules (approval handled by 'production' env)
-#                 Secrets: SNOWFLAKE_WAREHOUSE, SNOWFLAKE_ROLE, SNOWFLAKE_DATABASE
+#                 Variables: SNOWFLAKE_WAREHOUSE, SNOWFLAKE_ROLE, SNOWFLAKE_DATABASE
 #
 #   production  - Used by promote-prod.yml pre-flight job as an approval gate
 #                 HAS required reviewer: repo owner must approve before prod deploy
-#                 Secrets: same as PROD (SNOWFLAKE_WAREHOUSE, SNOWFLAKE_ROLE, SNOWFLAKE_DATABASE)
+#                 Variables: same as PROD (SNOWFLAKE_WAREHOUSE, SNOWFLAKE_ROLE, SNOWFLAKE_DATABASE)
 #
 # After creating environments, run setup_github_secrets.sh to populate secrets.
 #
@@ -76,6 +76,6 @@ echo "  QA          — promote-qa.yml (no approval)"
 echo "  PROD        — promote-prod.yml, daily_data_refresh.yml (no approval)"
 echo "  production  — promote-prod.yml pre-flight gate (requires $OWNER approval)"
 echo ""
-echo "Next: run setup_github_secrets.sh to set repo + environment secrets"
+echo "Next: run setup_github_secrets.sh to set repo secrets + environment variables"
 echo ""
 echo "Verify at: https://github.com/$REPO/settings/environments"

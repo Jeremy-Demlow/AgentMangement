@@ -11,10 +11,13 @@ set -euo pipefail
 #     SNOWFLAKE_PRIVATE_KEY     -> PEM private key for JWT auth
 #     SNOWFLAKE_PRIVATE_KEY_RAW -> Same key (required by DCM reusable actions)
 #
-#   3 ENVIRONMENT-LEVEL secrets (per DEV/QA/PROD/production):
+#   3 ENVIRONMENT-LEVEL variables (per DEV/QA/PROD/production):
 #     SNOWFLAKE_WAREHOUSE       -> Environment-specific warehouse
 #     SNOWFLAKE_ROLE            -> Environment-specific deploy role
 #     SNOWFLAKE_DATABASE        -> Environment-specific database
+#
+#   Variables (not secrets) are used for non-sensitive values so they
+#   appear in CI logs unmasked — critical for clickable Snowsight URLs.
 #
 #   All workflows use key-pair (JWT) auth. No password needed.
 #
@@ -71,7 +74,7 @@ echo "Setting SNOWFLAKE_PRIVATE_KEY_RAW..."
 gh secret set SNOWFLAKE_PRIVATE_KEY_RAW -R "$REPO" < "$KEY_PATH"
 
 echo ""
-echo "--- Environment-level secrets (3 per env) ---"
+echo "--- Environment-level variables (3 per env) ---"
 
 declare -A ENV_WH=(
   [DEV]="AM_SKI_RESORT_WH_DEV"
@@ -94,24 +97,24 @@ declare -A ENV_DB=(
 
 for ENV_NAME in DEV QA PROD production; do
   echo ""
-  echo "Setting secrets for environment: $ENV_NAME"
+  echo "Setting variables for environment: $ENV_NAME"
   echo "  SNOWFLAKE_WAREHOUSE = ${ENV_WH[$ENV_NAME]}"
   echo "  SNOWFLAKE_ROLE      = ${ENV_ROLE[$ENV_NAME]}"
   echo "  SNOWFLAKE_DATABASE  = ${ENV_DB[$ENV_NAME]}"
 
-  echo "${ENV_WH[$ENV_NAME]}" | gh secret set SNOWFLAKE_WAREHOUSE -R "$REPO" --env "$ENV_NAME"
-  echo "${ENV_ROLE[$ENV_NAME]}" | gh secret set SNOWFLAKE_ROLE -R "$REPO" --env "$ENV_NAME"
-  echo "${ENV_DB[$ENV_NAME]}" | gh secret set SNOWFLAKE_DATABASE -R "$REPO" --env "$ENV_NAME"
+  gh variable set SNOWFLAKE_WAREHOUSE -R "$REPO" --env "$ENV_NAME" --body "${ENV_WH[$ENV_NAME]}"
+  gh variable set SNOWFLAKE_ROLE -R "$REPO" --env "$ENV_NAME" --body "${ENV_ROLE[$ENV_NAME]}"
+  gh variable set SNOWFLAKE_DATABASE -R "$REPO" --env "$ENV_NAME" --body "${ENV_DB[$ENV_NAME]}"
 done
 
 echo ""
-echo "=== Done: 4 repo secrets + 12 environment secrets (3 x 4 envs) ==="
+echo "=== Done: 4 repo secrets + 12 environment variables (3 x 4 envs) ==="
 echo ""
 echo "Verify with:"
 echo "  gh secret list -R $REPO"
-echo "  gh secret list -R $REPO --env DEV"
-echo "  gh secret list -R $REPO --env QA"
-echo "  gh secret list -R $REPO --env PROD"
-echo "  gh secret list -R $REPO --env production"
+echo "  gh variable list -R $REPO --env DEV"
+echo "  gh variable list -R $REPO --env QA"
+echo "  gh variable list -R $REPO --env PROD"
+echo "  gh variable list -R $REPO --env production"
 echo ""
 echo "All workflows use key-pair (JWT) auth. No password needed."
