@@ -2,26 +2,22 @@
 set -euo pipefail
 
 #
-# Creates the 4 GitHub Environments required by the CI/CD workflows.
+# Creates the 3 GitHub Environments required by the CI/CD workflows.
 #
 # What this creates:
-#   4 environments in the GitHub repo Settings > Environments:
+#   3 environments in the GitHub repo Settings > Environments:
 #
 #   DEV         - Used by deploy-dev.yml
+#                 No protection rules (auto-deploys on push to dev)
+#                 Variables: SNOWFLAKE_WAREHOUSE, SNOWFLAKE_ROLE, SNOWFLAKE_DATABASE
+#
+#   QA          - Used by deploy-qa-on-main.yml
 #                 No protection rules (auto-deploys on push to main)
 #                 Variables: SNOWFLAKE_WAREHOUSE, SNOWFLAKE_ROLE, SNOWFLAKE_DATABASE
 #
-#   QA          - Used by promote-qa.yml
-#                 No protection rules
-#                 Variables: SNOWFLAKE_WAREHOUSE, SNOWFLAKE_ROLE, SNOWFLAKE_DATABASE
-#
-#   PROD        - Used by promote-prod.yml (deploy + eval jobs), daily_data_refresh.yml
-#                 No protection rules (approval handled by 'production' env)
-#                 Variables: SNOWFLAKE_WAREHOUSE, SNOWFLAKE_ROLE, SNOWFLAKE_DATABASE
-#
-#   production  - Used by promote-prod.yml pre-flight job as an approval gate
+#   PROD        - Used by promote-prod.yml (pre-flight, deploy, eval, rollback)
 #                 HAS required reviewer: repo owner must approve before prod deploy
-#                 Variables: same as PROD (SNOWFLAKE_WAREHOUSE, SNOWFLAKE_ROLE, SNOWFLAKE_DATABASE)
+#                 Variables: SNOWFLAKE_WAREHOUSE, SNOWFLAKE_ROLE, SNOWFLAKE_DATABASE
 #
 # After creating environments, run setup_github_secrets.sh to populate secrets.
 #
@@ -61,20 +57,16 @@ echo '{}' | gh api "repos/$REPO/environments/DEV" --method PUT --input - > /dev/
 echo "Creating environment: QA (no protection rules)..."
 echo '{}' | gh api "repos/$REPO/environments/QA" --method PUT --input - > /dev/null
 
-echo "Creating environment: PROD (no protection rules)..."
-echo '{}' | gh api "repos/$REPO/environments/PROD" --method PUT --input - > /dev/null
-
-echo "Creating environment: production (with required reviewer: $OWNER)..."
+echo "Creating environment: PROD (with required reviewer: $OWNER)..."
 echo "{\"reviewers\":[{\"type\":\"User\",\"id\":$GH_USER_ID}]}" \
-  | gh api "repos/$REPO/environments/production" --method PUT --input - > /dev/null
+  | gh api "repos/$REPO/environments/PROD" --method PUT --input - > /dev/null
 
 echo ""
-echo "=== Done: 4 environments created ==="
+echo "=== Done: 3 environments created ==="
 echo ""
-echo "  DEV         — deploy-dev.yml (no approval)"
-echo "  QA          — promote-qa.yml (no approval)"
-echo "  PROD        — promote-prod.yml, daily_data_refresh.yml (no approval)"
-echo "  production  — promote-prod.yml pre-flight gate (requires $OWNER approval)"
+echo "  DEV   — deploy-dev.yml (no approval)"
+echo "  QA    — deploy-qa-on-main.yml (no approval)"
+echo "  PROD  — promote-prod.yml (requires $OWNER approval)"
 echo ""
 echo "Next: run setup_github_secrets.sh to set repo secrets + environment variables"
 echo ""
