@@ -75,14 +75,24 @@ semantic-views/
 
 ## Dual Deployment Path
 
-Semantic views can be deployed two ways:
+Semantic views can be managed two ways, controlled by `semantic_views.source` in `environments/<env>.env.yml` and `project.yml`:
 
-| Method | Source | When to Use |
-|--------|--------|-------------|
-| `deploy_semantic_views.py` | `definitions/*.yaml` | Standalone definitions, full control over YAML |
-| dbt `semantic_view` materialization | `dbt_ski_resort/models/marts/semantic/` | Integrated with dbt DAG, inherits dbt conventions |
+| Source | Config value | How views are created | What `deploy_semantic_views.py` does |
+|--------|-------------|----------------------|--------------------------------------|
+| dbt | `semantic_views.source: dbt` | `dbt run` with semantic_view materialization | **Verifies** views exist in target schema (no YAML deploy) |
+| YAML | `semantic_views.source: yaml` | `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML` | **Deploys** from `definitions/*.yaml` via Jinja2 rendering |
 
-Both paths produce identical Snowflake objects. This repo uses **both** — the dbt models define the mart tables, and the standalone YAMLs here define the semantic views that reference those tables.
+This repo uses **dbt** as the source. The `definitions/` YAMLs here are maintained as reference definitions — dbt models in `dbt_ski_resort/models/marts/semantic/` are the actual source of truth for creating views.
+
+To switch an environment to YAML-based deployment, change the flag:
+
+```yaml
+# In environments/<env>.env.yml
+semantic_views:
+  source: yaml    # deploy from definitions/*.yaml
+```
+
+The flag is checked at two levels: env config takes precedence, then `project.yml`, defaulting to `yaml` if unset.
 
 ## Drift Detection
 
