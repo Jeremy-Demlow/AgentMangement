@@ -190,7 +190,7 @@ gh secret set SNOWFLAKE_ACCOUNT  --body "your-account"
 gh secret set SNOWFLAKE_USER     --body "your-user"
 gh secret set SNOWFLAKE_PRIVATE_KEY < ~/.snowflake/keys/rsa_key.p8
 
-# 2. Set per-environment secrets (DEV, QA, PROD)
+# 2. Set per-environment secrets and variables (DEV, QA, PROD)
 .github/scripts/setup_github_secrets.sh
 .github/scripts/setup_github_environments.sh
 
@@ -446,24 +446,28 @@ pytest tests/ -q
 
 All GitHub Actions workflows use **RSA key-pair (JWT) authentication** — no passwords in pipelines.
 
-Secrets are split between **repo-level** (shared across all workflows) and **environment-level** (per DEV/QA/PROD):
+Credentials are split between **repo-level secrets** and **environment-level variables**:
 
-| Level | Secret | Example Value |
-|-------|--------|---------------|
-| Repo | `SNOWFLAKE_ACCOUNT` | Your Snowflake account locator |
-| Repo | `SNOWFLAKE_USER` | Service account username |
-| Repo | `SNOWFLAKE_PRIVATE_KEY` | Contents of `.p8` file |
-| Env: DEV | `SNOWFLAKE_WAREHOUSE` | `AM_SKI_RESORT_WH_DEV` |
-| Env: DEV | `SNOWFLAKE_ROLE` | `AM_DEPLOY_ROLE_DEV` |
-| Env: DEV | `SNOWFLAKE_DATABASE` | `AM_SKI_RESORT_DEV` |
-| Env: QA | `SNOWFLAKE_WAREHOUSE` | `AM_SKI_RESORT_WH_QA` |
-| Env: QA | `SNOWFLAKE_ROLE` | `AM_DEPLOY_ROLE_QA` |
-| Env: QA | `SNOWFLAKE_DATABASE` | `AM_SKI_RESORT_QA` |
-| Env: PROD | `SNOWFLAKE_WAREHOUSE` | `AM_SKI_RESORT_WH` |
-| Env: PROD | `SNOWFLAKE_ROLE` | `AM_DEPLOY_ROLE` |
-| Env: PROD | `SNOWFLAKE_DATABASE` | `AM_SKI_RESORT` |
+| Level | Type | Name | Example Value |
+|-------|------|------|---------------|
+| Repo | Secret | `SNOWFLAKE_ACCOUNT` | Your Snowflake account locator |
+| Repo | Secret | `SNOWFLAKE_USER` | Service account username |
+| Repo | Secret | `SNOWFLAKE_PRIVATE_KEY` | Contents of `.p8` file |
+| Env: DEV | Variable | `SNOWFLAKE_WAREHOUSE` | `AM_SKI_RESORT_WH_DEV` |
+| Env: DEV | Variable | `SNOWFLAKE_ROLE` | `AM_DEPLOY_ROLE_DEV` |
+| Env: DEV | Variable | `SNOWFLAKE_DATABASE` | `AM_SKI_RESORT_DEV` |
+| Env: QA | Variable | `SNOWFLAKE_WAREHOUSE` | `AM_SKI_RESORT_WH_QA` |
+| Env: QA | Variable | `SNOWFLAKE_ROLE` | `AM_DEPLOY_ROLE_QA` |
+| Env: QA | Variable | `SNOWFLAKE_DATABASE` | `AM_SKI_RESORT_QA` |
+| Env: PROD | Variable | `SNOWFLAKE_WAREHOUSE` | `AM_SKI_RESORT_WH` |
+| Env: PROD | Variable | `SNOWFLAKE_ROLE` | `AM_DEPLOY_ROLE` |
+| Env: PROD | Variable | `SNOWFLAKE_DATABASE` | `AM_SKI_RESORT` |
 
-Each workflow job declares `environment: DEV` (or QA/PROD), and `${{ secrets.SNOWFLAKE_DATABASE }}` resolves to the correct value for that environment.
+> **Why variables, not secrets?** GitHub masks any secret value wherever it appears in logs.
+> Database names, roles, and warehouses are not sensitive — masking them breaks Snowsight
+> URLs and makes CI output harder to read.
+
+Each workflow job declares `environment: DEV` (or QA/PROD), and `${{ vars.SNOWFLAKE_DATABASE }}` resolves to the correct value for that environment.
 
 Setup: `.github/scripts/setup_github_secrets.sh` · Teardown: `.github/scripts/teardown.sh`
 

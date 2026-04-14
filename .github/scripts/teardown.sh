@@ -7,7 +7,7 @@ set -euo pipefail
 #
 # What this removes:
 #   Repo secrets:  SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_PRIVATE_KEY, SNOWFLAKE_PRIVATE_KEY_RAW
-#   Env secrets:   SNOWFLAKE_WAREHOUSE, SNOWFLAKE_ROLE, SNOWFLAKE_DATABASE (per DEV/QA/PROD/production)
+#   Env variables: SNOWFLAKE_WAREHOUSE, SNOWFLAKE_ROLE, SNOWFLAKE_DATABASE (per DEV/QA/PROD/production)
 #   Environments:  DEV, QA, PROD, production
 #
 # Usage:
@@ -33,15 +33,15 @@ for secret in "${REPO_SECRETS[@]}"; do
   gh secret delete "$secret" -R "$REPO" 2>/dev/null || echo "    (not found, skipping)"
 done
 
-ENV_SECRETS=(SNOWFLAKE_WAREHOUSE SNOWFLAKE_ROLE SNOWFLAKE_DATABASE)
+ENV_VARS=(SNOWFLAKE_WAREHOUSE SNOWFLAKE_ROLE SNOWFLAKE_DATABASE)
 ENVS=(DEV QA PROD production)
 
 echo ""
-echo "--- Removing environment-level secrets ---"
+echo "--- Removing environment-level variables ---"
 for env in "${ENVS[@]}"; do
-  for secret in "${ENV_SECRETS[@]}"; do
-    echo "  Removing $env/$secret..."
-    gh secret delete "$secret" -R "$REPO" --env "$env" 2>/dev/null || echo "    (not found, skipping)"
+  for var in "${ENV_VARS[@]}"; do
+    echo "  Removing $env/$var..."
+    gh variable delete "$var" -R "$REPO" --env "$env" 2>/dev/null || echo "    (not found, skipping)"
   done
 done
 

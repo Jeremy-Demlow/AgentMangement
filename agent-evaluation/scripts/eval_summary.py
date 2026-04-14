@@ -117,8 +117,8 @@ def find_latest_run(cursor, agent: dict) -> str | None:
         return None
 
 
-def query_latest_eval(cursor, agent: dict) -> tuple[str | None, dict]:
-    run_name = find_latest_run(cursor, agent)
+def query_latest_eval(cursor, agent: dict, explicit_run_name: str | None = None) -> tuple[str | None, dict]:
+    run_name = explicit_run_name or find_latest_run(cursor, agent)
     if not run_name:
         return None, {}
     try:
@@ -151,10 +151,17 @@ def main():
     parser.add_argument("--user", default=os.environ.get("SNOWFLAKE_USER"))
     parser.add_argument("--private-key-path", default=os.environ.get("SNOWFLAKE_PRIVATE_KEY_PATH"))
     parser.add_argument("--connection", default=os.environ.get("SNOWFLAKE_CONNECTION_NAME"))
+    parser.add_argument("--run-names", help="JSON file mapping agent names to specific eval run names")
     args = parser.parse_args()
 
     env_config = load_env_config(args.env)
     configs = get_eval_configs(env_config)
+
+    explicit_runs = {}
+    if args.run_names:
+        rn_path = Path(args.run_names)
+        if rn_path.exists():
+            explicit_runs = json.loads(rn_path.read_text())
 
     if not configs:
         print("No eval configs found — skipping")
@@ -179,7 +186,7 @@ def main():
         md_lines.append(f"### {agent_name}")
         md_lines.append("")
 
-        status, summary = query_latest_eval(cursor, agent)
+        status, summary = query_latest_eval(cursor, agent, explicit_runs.get(agent_name))
 
         if status is None:
             md_lines.append("⚠️ No evaluation data found")

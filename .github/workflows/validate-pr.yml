@@ -99,9 +99,9 @@ jobs:
     needs: [lint-and-unit, validate-specs, dbt-quality-gate]
     environment: DEV
     env:
-      SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
-      SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
-      SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
+      SNOWFLAKE_WAREHOUSE: ${{ vars.SNOWFLAKE_WAREHOUSE }}
+      SNOWFLAKE_ROLE: ${{ vars.SNOWFLAKE_ROLE }}
+      SNOWFLAKE_DATABASE: ${{ vars.SNOWFLAKE_DATABASE }}
     steps:
       - uses: actions/checkout@v6
 
@@ -127,9 +127,9 @@ jobs:
     environment: DEV
     continue-on-error: ${{ github.base_ref == 'dev' }}
     env:
-      SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
-      SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
-      SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
+      SNOWFLAKE_WAREHOUSE: ${{ vars.SNOWFLAKE_WAREHOUSE }}
+      SNOWFLAKE_ROLE: ${{ vars.SNOWFLAKE_ROLE }}
+      SNOWFLAKE_DATABASE: ${{ vars.SNOWFLAKE_DATABASE }}
     steps:
       - uses: actions/checkout@v6
 
@@ -145,7 +145,7 @@ jobs:
       - name: Query eval summary
         if: always()
         id: summary
-        run: python agent-evaluation/scripts/eval_summary.py --env dev
+        run: python agent-evaluation/scripts/eval_summary.py --env dev --run-names agent-evaluation/results/run_names.json
 
       - name: Upload evaluation results
         uses: actions/upload-artifact@v4

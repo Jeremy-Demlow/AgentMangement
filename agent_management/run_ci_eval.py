@@ -13,8 +13,10 @@ Usage (CI):
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -111,6 +113,11 @@ def run_single_eval(agent_name: str, cmd: list[str]) -> tuple[str, int, str, str
     return agent_name, result.returncode, result.stdout, result.stderr
 
 
+def extract_run_name(stdout: str) -> str | None:
+    m = re.search(r"Run started:\s+(\S+)", stdout)
+    return m.group(1) if m else None
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run agent evaluation in CI")
     parser.add_argument("--env", "-e", required=True, help="Environment (dev, qa, prod)")
@@ -174,7 +181,8 @@ def main():
                 logger.info("  Finished: %s — %s", agent_name, status)
 
         overall_passed = True
-        for agent_name, _, _ in prepared:
+        run_names = {}
+        for agent_name, parsed, _ in prepared:
             returncode, stdout, stderr = results[agent_name]
             logger.info("\n%s", "=" * 60)
             logger.info("--- %s ---", agent_name)
@@ -182,6 +190,9 @@ def main():
             if stdout:
                 for line in stdout.rstrip().split("\n"):
                     print(line)
+                rn = extract_run_name(stdout)
+                if rn:
+                    run_names[parsed["agent"]["name"]] = rn
             if stderr:
                 for line in stderr.rstrip().split("\n"):
                     print(line, file=sys.stderr)
@@ -190,6 +201,12 @@ def main():
                 overall_passed = False
             else:
                 logger.info("RESULT: %s PASSED", agent_name)
+
+        if run_names:
+            run_names_file = eval_dir() / "results" / "run_names.json"
+            run_names_file.parent.mkdir(parents=True, exist_ok=True)
+            run_names_file.write_text(json.dumps(run_names, indent=2))
+            logger.info("Run names written to %s", run_names_file)
 
     logger.info("\n%s", "=" * 60)
     status = "ALL PASSED" if overall_passed else "FAILURES DETECTED"
