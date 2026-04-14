@@ -271,7 +271,7 @@ jobs:
       # ─── Generate Data ──────────────────────────────────────────────────
       - name: Generate Incremental Data
         if: steps.plan.outputs.skip_generation != 'true'
-        working-directory: data_generation
+        working-directory: data-generation
         env:
           SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
           SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
