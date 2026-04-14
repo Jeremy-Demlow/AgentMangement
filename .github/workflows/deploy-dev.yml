@@ -84,7 +84,7 @@ jobs:
           dbt run --target dev --select "+marts.facts" --profiles-dir .
           dbt run --target dev --select "marts.semantic" --profiles-dir .
 
-      - name: Deploy semantic views to dev
+      - name: Deploy/verify semantic views (dev)
         run: python -m agent_management.deploy_semantic_views --env dev
 
       - name: Cleanup

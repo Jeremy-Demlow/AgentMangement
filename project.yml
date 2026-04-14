@@ -71,6 +71,9 @@ raw_tables:
   - LIFT_MAINTENANCE
   - GROOMING_LOGS
 
+semantic_views:
+  source: dbt
+
 dbt:
   project_dir: dbt_ski_resort
   profile: dbt_ski_resort

@@ -12,6 +12,10 @@ on:
       - 'tests/**'
       - 'dbt_ski_resort/**'
 
+permissions:
+  contents: read
+  pull-requests: write
+
 env:
   SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
   SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
@@ -106,7 +110,7 @@ jobs:
         with:
           snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
-      - name: Dry-run deploy semantic views (dev)
+      - name: Dry-run semantic views (dev)
         run: python -m agent_management.deploy_semantic_views --env dev --dry-run
 
       - name: Dry-run deploy agents (dev)
@@ -116,12 +120,12 @@ jobs:
         if: always()
         run: rm -f /tmp/snowflake_key.p8
 
-  dev-eval-summary:
-    name: DEV Eval Gate (main only)
+  agent-eval:
+    name: Agent Evaluation (DEV)
     runs-on: ubuntu-latest
-    if: github.base_ref == 'main'
     needs: [lint-and-unit, validate-specs, dbt-quality-gate, validate-snowflake]
     environment: DEV
+    continue-on-error: ${{ github.base_ref == 'dev' }}
     env:
       SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
       SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
@@ -134,40 +138,55 @@ jobs:
         with:
           snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
-      - name: Query latest DEV eval results
+      - name: Run agent evaluations
         id: eval
+        run: python -m agent_management.run_ci_eval --env dev
+
+      - name: Query eval summary
+        if: always()
+        id: summary
         run: python agent-evaluation/scripts/eval_summary.py --env dev
 
+      - name: Upload evaluation results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr-evaluation-results
+          path: agent-evaluation/results/
+          retention-days: 30
+
       - name: Comment PR with eval summary
-        if: always() && steps.eval.outputs.summary != ''
+        if: always()
         uses: actions/github-script@v7
         with:
           script: |
-            const body = `${{ steps.eval.outputs.summary }}`;
-            if (body) {
-              const { data: comments } = await github.rest.issues.listComments({
+            const fs = require('fs');
+            const path = '/tmp/eval_summary.md';
+            if (!fs.existsSync(path)) return;
+            const body = fs.readFileSync(path, 'utf8');
+            if (!body) return;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('DEV Evaluation Summary')
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: body,
+              });
+            } else {
+              await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: context.issue.number,
+                body: body,
               });
-              const existing = comments.find(c =>
-                c.user.type === 'Bot' && c.body.includes('DEV Evaluation Summary')
-              );
-              if (existing) {
-                await github.rest.issues.updateComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  comment_id: existing.id,
-                  body: body,
-                });
-              } else {
-                await github.rest.issues.createComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: context.issue.number,
-                  body: body,
-                });
-              }
             }
 
       - name: Cleanup
