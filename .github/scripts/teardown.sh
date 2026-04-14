@@ -7,8 +7,8 @@ set -euo pipefail
 #
 # What this removes:
 #   Repo secrets:  SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_PRIVATE_KEY, SNOWFLAKE_PRIVATE_KEY_RAW
-#   Env variables: SNOWFLAKE_WAREHOUSE, SNOWFLAKE_ROLE, SNOWFLAKE_DATABASE (per DEV/QA/PROD/production)
-#   Environments:  DEV, QA, PROD, production
+#   Env variables: SNOWFLAKE_WAREHOUSE, SNOWFLAKE_ROLE, SNOWFLAKE_DATABASE (per DEV/QA/PROD)
+#   Environments:  DEV, QA, PROD
 #
 # Usage:
 #   .github/scripts/teardown.sh
@@ -34,7 +34,7 @@ for secret in "${REPO_SECRETS[@]}"; do
 done
 
 ENV_VARS=(SNOWFLAKE_WAREHOUSE SNOWFLAKE_ROLE SNOWFLAKE_DATABASE)
-ENVS=(DEV QA PROD production)
+ENVS=(DEV QA PROD)
 
 echo ""
 echo "--- Removing environment-level variables ---"

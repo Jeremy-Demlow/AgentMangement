@@ -11,7 +11,7 @@ set -euo pipefail
 #     SNOWFLAKE_PRIVATE_KEY     -> PEM private key for JWT auth
 #     SNOWFLAKE_PRIVATE_KEY_RAW -> Same key (required by DCM reusable actions)
 #
-#   3 ENVIRONMENT-LEVEL variables (per DEV/QA/PROD/production):
+#   3 ENVIRONMENT-LEVEL variables (per DEV/QA/PROD):
 #     SNOWFLAKE_WAREHOUSE       -> Environment-specific warehouse
 #     SNOWFLAKE_ROLE            -> Environment-specific deploy role
 #     SNOWFLAKE_DATABASE        -> Environment-specific database
@@ -80,22 +80,19 @@ declare -A ENV_WH=(
   [DEV]="AM_SKI_RESORT_WH_DEV"
   [QA]="AM_SKI_RESORT_WH_QA"
   [PROD]="AM_SKI_RESORT_WH"
-  [production]="AM_SKI_RESORT_WH"
 )
 declare -A ENV_ROLE=(
   [DEV]="AM_DEPLOY_ROLE_DEV"
   [QA]="AM_DEPLOY_ROLE_QA"
   [PROD]="AM_DEPLOY_ROLE"
-  [production]="AM_DEPLOY_ROLE"
 )
 declare -A ENV_DB=(
   [DEV]="AM_SKI_RESORT_DEV"
   [QA]="AM_SKI_RESORT_QA"
   [PROD]="AM_SKI_RESORT"
-  [production]="AM_SKI_RESORT"
 )
 
-for ENV_NAME in DEV QA PROD production; do
+for ENV_NAME in DEV QA PROD; do
   echo ""
   echo "Setting variables for environment: $ENV_NAME"
   echo "  SNOWFLAKE_WAREHOUSE = ${ENV_WH[$ENV_NAME]}"
@@ -108,13 +105,12 @@ for ENV_NAME in DEV QA PROD production; do
 done
 
 echo ""
-echo "=== Done: 4 repo secrets + 12 environment variables (3 x 4 envs) ==="
+echo "=== Done: 4 repo secrets + 9 environment variables (3 x 3 envs) ==="
 echo ""
 echo "Verify with:"
 echo "  gh secret list -R $REPO"
 echo "  gh variable list -R $REPO --env DEV"
 echo "  gh variable list -R $REPO --env QA"
 echo "  gh variable list -R $REPO --env PROD"
-echo "  gh variable list -R $REPO --env production"
 echo ""
 echo "All workflows use key-pair (JWT) auth. No password needed."

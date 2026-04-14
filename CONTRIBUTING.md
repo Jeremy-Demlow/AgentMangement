@@ -69,7 +69,7 @@ When DEV looks good, open a PR from `dev` to `main` and merge. Then trigger **Pr
 
 ### 7. Promote to Production
 
-Trigger **Promote to Production** manually. Requires reviewer approval (the `production` environment has a protection rule). If post-deploy evals fail, auto-rollback kicks in.
+Trigger **Promote to Production** manually. Requires reviewer approval (the `PROD` environment has a protection rule). If post-deploy evals fail, auto-rollback kicks in.
 
 ## CI/CD Pipeline Architecture
 
@@ -90,12 +90,12 @@ Manual dispatch   →  dcm-deploy.yml       (infrastructure changes)
 |-------------|-------------------|-------------------|----------------|
 | `dev` | `DEV` | `AM_SKI_RESORT_DEV` | `AM_DEPLOY_ROLE_DEV` |
 | `qa` | `QA` | `AM_SKI_RESORT_QA` | `AM_DEPLOY_ROLE_QA` |
-| `prod` | `production` (with approval) or `PROD` | `AM_SKI_RESORT` | `AM_DEPLOY_ROLE` |
+| `prod` | `PROD` (with approval) | `AM_SKI_RESORT` | `AM_DEPLOY_ROLE` |
 
 ## Secrets & Variables Architecture
 
 - **Repo-level secrets**: `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, `SNOWFLAKE_PRIVATE_KEY`
-- **Environment-level variables** (per DEV/QA/PROD/production): `SNOWFLAKE_WAREHOUSE`, `SNOWFLAKE_ROLE`, `SNOWFLAKE_DATABASE`
+- **Environment-level variables** (per DEV/QA/PROD): `SNOWFLAKE_WAREHOUSE`, `SNOWFLAKE_ROLE`, `SNOWFLAKE_DATABASE`
 
 > **Why variables, not secrets?** GitHub Actions masks any value stored as a secret wherever it
 > appears in log output. Database names, roles, and warehouses are not sensitive, and masking
