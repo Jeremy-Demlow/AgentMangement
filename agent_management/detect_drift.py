@@ -138,7 +138,7 @@ def main():
                     logger.error("    [%s] %s", d['type'], d['detail'])
                 total_errors += len(errors)
             if warnings:
-                logger.warning("\n  %s — %d undeclared column(s) (info only):", sv_name, len(warnings))
+                logger.warning("\n  %s — %d unused table column(s) (available for future SV expansion):", sv_name, len(warnings))
                 for d in warnings:
                     logger.info("    [%s] %s", d['type'], d['detail'])
                 total_warnings += len(warnings)
@@ -147,7 +147,7 @@ def main():
 
         logger.info("\n%s", "=" * 60)
         if total_warnings:
-            logger.info("UNDECLARED COLUMNS: %d (SVs expose a curated subset — this is expected)", total_warnings)
+            logger.info("INFO: %d table column(s) not used in semantic views (available to add if needed)", total_warnings)
         if total_errors:
             logger.error("DRIFT DETECTED — %d breaking issue(s)", total_errors)
             sys.exit(1)
