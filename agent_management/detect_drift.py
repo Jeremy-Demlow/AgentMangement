@@ -36,8 +36,9 @@ def get_table_columns(cur, database: str, schema: str, table: str) -> dict[str, 
         return {}
 
 
-def check_drift_for_sv(cur, sv_yaml: dict, config: dict) -> list[dict]:
-    drifts = []
+def check_drift_for_sv(cur, sv_yaml: dict, config: dict) -> tuple[list[dict], list[dict]]:
+    errors = []
+    warnings = []
     sv_name = sv_yaml.get("name", "unknown")
 
     for table_def in sv_yaml.get("tables", []):
@@ -49,7 +50,7 @@ def check_drift_for_sv(cur, sv_yaml: dict, config: dict) -> list[dict]:
 
         actual_cols = get_table_columns(cur, db, schema, table)
         if not actual_cols:
-            drifts.append({
+            errors.append({
                 "sv": sv_name,
                 "table": table_fqn,
                 "type": "TABLE_NOT_FOUND",
@@ -75,7 +76,7 @@ def check_drift_for_sv(cur, sv_yaml: dict, config: dict) -> list[dict]:
 
         for col in declared_cols:
             if col not in actual_cols:
-                drifts.append({
+                errors.append({
                     "sv": sv_name,
                     "table": table_fqn,
                     "type": "COLUMN_MISSING",
@@ -84,14 +85,14 @@ def check_drift_for_sv(cur, sv_yaml: dict, config: dict) -> list[dict]:
 
         for actual_col in actual_cols:
             if actual_col not in declared_cols:
-                drifts.append({
+                warnings.append({
                     "sv": sv_name,
                     "table": table_fqn,
                     "type": "COLUMN_UNDECLARED",
                     "detail": f"Column {actual_col} in table but not declared in SV",
                 })
 
-    return drifts
+    return errors, warnings
 
 
 def main():
@@ -123,27 +124,35 @@ def main():
     cur = conn.cursor()
 
     try:
-        total_drifts = 0
+        total_errors = 0
+        total_warnings = 0
         for path in sv_files:
             rendered = render_file(path, config)
             sv_yaml = pyyaml.safe_load(rendered)
             sv_name = sv_yaml.get("name", path.stem)
 
-            drifts = check_drift_for_sv(cur, sv_yaml, config)
-            if drifts:
-                logger.warning("\n  %s — %d drift(s):", sv_name, len(drifts))
-                for d in drifts:
-                    logger.warning("    [%s] %s", d['type'], d['detail'])
-                total_drifts += len(drifts)
-            else:
+            errors, warnings = check_drift_for_sv(cur, sv_yaml, config)
+            if errors:
+                logger.error("\n  %s — %d error(s):", sv_name, len(errors))
+                for d in errors:
+                    logger.error("    [%s] %s", d['type'], d['detail'])
+                total_errors += len(errors)
+            if warnings:
+                logger.warning("\n  %s — %d undeclared column(s) (info only):", sv_name, len(warnings))
+                for d in warnings:
+                    logger.info("    [%s] %s", d['type'], d['detail'])
+                total_warnings += len(warnings)
+            if not errors and not warnings:
                 logger.info("  %s — no drift", sv_name)
 
         logger.info("\n%s", "=" * 60)
-        if total_drifts:
-            logger.error("DRIFT DETECTED — %d issue(s)", total_drifts)
+        if total_warnings:
+            logger.info("UNDECLARED COLUMNS: %d (SVs expose a curated subset — this is expected)", total_warnings)
+        if total_errors:
+            logger.error("DRIFT DETECTED — %d breaking issue(s)", total_errors)
             sys.exit(1)
         else:
-            logger.info("NO DRIFT — all SVs match table schemas")
+            logger.info("NO BREAKING DRIFT — all SV-declared columns exist in tables")
     finally:
         cur.close()
         conn.close()

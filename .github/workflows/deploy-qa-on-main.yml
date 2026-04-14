@@ -1,0 +1,103 @@
+name: Deploy to QA (Main Push)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'agents/specs/**'
+      - 'semantic-views/definitions/**'
+      - 'agent_management/**'
+      - 'agent-evaluation/**'
+      - 'environments/**'
+      - 'dbt_ski_resort/**'
+
+env:
+  SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+  SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+  SNOWFLAKE_PRIVATE_KEY_PATH: /tmp/snowflake_key.p8
+  PYTHONPATH: ${{ github.workspace }}
+
+jobs:
+  deploy-qa:
+    name: Deploy to QA
+    runs-on: ubuntu-latest
+    environment: QA
+    env:
+      SNOWFLAKE_WAREHOUSE: ${{ vars.SNOWFLAKE_WAREHOUSE }}
+      SNOWFLAKE_ROLE: ${{ vars.SNOWFLAKE_ROLE }}
+      SNOWFLAKE_DATABASE: ${{ vars.SNOWFLAKE_DATABASE }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Snowflake
+        uses: ./.github/actions/snowflake-setup
+        with:
+          snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+
+      - name: Snapshot current QA state
+        run: python -m agent_management.snapshot_state --env qa
+
+      - name: Upload snapshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-auto-deploy-snapshot
+          path: |
+            agents/snapshots/qa/
+            semantic-views/snapshots/qa/
+          retention-days: 90
+
+      - name: Schema drift check
+        run: python -m agent_management.detect_drift --env qa
+
+      - name: Run dbt (if dbt project exists)
+        if: hashFiles('dbt_ski_resort/dbt_project.yml') != ''
+        env:
+          DBT_TARGET: qa
+        run: |
+          pip install dbt-snowflake
+          cd dbt_ski_resort
+          dbt deps
+          dbt run --target qa --select "+marts.facts" --profiles-dir .
+          dbt run --target qa --select "marts.semantic" --profiles-dir .
+
+      - name: Deploy/verify semantic views (QA)
+        run: python -m agent_management.deploy_semantic_views --env qa
+
+      - name: Deploy agents to QA
+        run: python -m agent_management.deploy_agents --env qa
+
+      - name: Cleanup
+        if: always()
+        run: rm -f /tmp/snowflake_key.p8
+
+  qa-eval:
+    name: QA Evaluation Gate
+    runs-on: ubuntu-latest
+    needs: deploy-qa
+    environment: QA
+    env:
+      SNOWFLAKE_WAREHOUSE: ${{ vars.SNOWFLAKE_WAREHOUSE }}
+      SNOWFLAKE_ROLE: ${{ vars.SNOWFLAKE_ROLE }}
+      SNOWFLAKE_DATABASE: ${{ vars.SNOWFLAKE_DATABASE }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Snowflake
+        uses: ./.github/actions/snowflake-setup
+        with:
+          snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+
+      - name: Run agent evaluations (QA)
+        run: python -m agent_management.run_ci_eval --env qa
+
+      - name: Upload evaluation results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: qa-auto-evaluation-results
+          path: agent-evaluation/results/
+          retention-days: 90
+
+      - name: Cleanup
+        if: always()
+        run: rm -f /tmp/snowflake_key.p8
