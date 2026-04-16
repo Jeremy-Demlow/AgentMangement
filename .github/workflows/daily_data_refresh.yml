@@ -53,20 +53,15 @@ jobs:
   data-refresh:
     name: Generate Data & Run DBT
     runs-on: ubuntu-latest
-    environment: PROD
 
     env:
       SNOWFLAKE_CONNECTIONS_DEFAULT_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
       SNOWFLAKE_CONNECTIONS_DEFAULT_USER: ${{ secrets.SNOWFLAKE_USER }}
       SNOWFLAKE_CONNECTIONS_DEFAULT_AUTHENTICATOR: SNOWFLAKE_JWT
       SNOWFLAKE_CONNECTIONS_DEFAULT_PRIVATE_KEY_PATH: /tmp/snowflake_key.p8
-      SNOWFLAKE_CONNECTIONS_DEFAULT_WAREHOUSE: ${{ vars.SNOWFLAKE_WAREHOUSE }}
-      SNOWFLAKE_CONNECTIONS_DEFAULT_ROLE: ${{ vars.SNOWFLAKE_ROLE }}
       SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
       SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
       SNOWFLAKE_PRIVATE_KEY_PATH: /tmp/snowflake_key.p8
-      SNOWFLAKE_WAREHOUSE: ${{ vars.SNOWFLAKE_WAREHOUSE }}
-      SNOWFLAKE_ROLE: ${{ vars.SNOWFLAKE_ROLE }}
 
     steps:
       - name: Checkout Repository
@@ -85,13 +80,19 @@ jobs:
           import yaml, os
           with open('project.yml') as f:
               cfg = yaml.safe_load(f)
+          with open('environments/prod.env.yml') as f:
+              prod_env = yaml.safe_load(f)
           prod_db = cfg['environments']['prod']['database']
           raw_schema = cfg['defaults']['schemas']['raw']
           raw_tables = cfg.get('raw_tables', [])
+          warehouse = prod_env['snowflake']['warehouse']
+          role = prod_env['snowflake']['role']
           with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
               out.write(f'prod_database={prod_db}\n')
               out.write(f'raw_schema={raw_schema}\n')
               out.write(f'raw_tables={",".join(raw_tables)}\n')
+              out.write(f'warehouse={warehouse}\n')
+              out.write(f'role={role}\n')
           PYEOF
 
       - name: Create connections.toml
@@ -105,6 +106,8 @@ jobs:
         env:
           SNOWFLAKE_CONNECTIONS_DEFAULT_DATABASE: ${{ steps.config.outputs.prod_database }}
           SNOWFLAKE_CONNECTIONS_DEFAULT_SCHEMA: ${{ steps.config.outputs.raw_schema }}
+          SNOWFLAKE_CONNECTIONS_DEFAULT_WAREHOUSE: ${{ steps.config.outputs.warehouse }}
+          SNOWFLAKE_CONNECTIONS_DEFAULT_ROLE: ${{ steps.config.outputs.role }}
 
       - name: Test Snowflake Connection
         run: |
@@ -113,6 +116,8 @@ jobs:
         env:
           SNOWFLAKE_CONNECTIONS_DEFAULT_DATABASE: ${{ steps.config.outputs.prod_database }}
           SNOWFLAKE_CONNECTIONS_DEFAULT_SCHEMA: ${{ steps.config.outputs.raw_schema }}
+          SNOWFLAKE_CONNECTIONS_DEFAULT_WAREHOUSE: ${{ steps.config.outputs.warehouse }}
+          SNOWFLAKE_CONNECTIONS_DEFAULT_ROLE: ${{ steps.config.outputs.role }}
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -131,6 +136,9 @@ jobs:
         env:
           PROD_DB: ${{ steps.config.outputs.prod_database }}
           RAW_SCHEMA: ${{ steps.config.outputs.raw_schema }}
+          SNOWFLAKE_CONNECTIONS_DEFAULT_DATABASE: ${{ steps.config.outputs.prod_database }}
+          SNOWFLAKE_CONNECTIONS_DEFAULT_WAREHOUSE: ${{ steps.config.outputs.warehouse }}
+          SNOWFLAKE_CONNECTIONS_DEFAULT_ROLE: ${{ steps.config.outputs.role }}
         run: |
           DB="${PROD_DB}"
           SCHEMA="${RAW_SCHEMA}"
@@ -237,6 +245,9 @@ jobs:
         env:
           PROD_DB: ${{ steps.config.outputs.prod_database }}
           RAW_SCHEMA: ${{ steps.config.outputs.raw_schema }}
+          SNOWFLAKE_CONNECTIONS_DEFAULT_DATABASE: ${{ steps.config.outputs.prod_database }}
+          SNOWFLAKE_CONNECTIONS_DEFAULT_WAREHOUSE: ${{ steps.config.outputs.warehouse }}
+          SNOWFLAKE_CONNECTIONS_DEFAULT_ROLE: ${{ steps.config.outputs.role }}
         run: |
           DB="${PROD_DB}"
           SCHEMA="${RAW_SCHEMA}"
@@ -276,8 +287,8 @@ jobs:
           SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
           SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
           SNOWFLAKE_PRIVATE_KEY_PATH: /tmp/snowflake_key.p8
-          SNOWFLAKE_WAREHOUSE: ${{ vars.SNOWFLAKE_WAREHOUSE }}
-          SNOWFLAKE_ROLE: ${{ vars.SNOWFLAKE_ROLE }}
+          SNOWFLAKE_WAREHOUSE: ${{ steps.config.outputs.warehouse }}
+          SNOWFLAKE_ROLE: ${{ steps.config.outputs.role }}
           SNOWFLAKE_DATABASE: ${{ steps.config.outputs.prod_database }}
           SNOWFLAKE_SCHEMA: ${{ steps.config.outputs.raw_schema }}
         run: |
@@ -333,6 +344,9 @@ jobs:
         env:
           PROD_DB: ${{ steps.config.outputs.prod_database }}
           RAW_SCHEMA: ${{ steps.config.outputs.raw_schema }}
+          SNOWFLAKE_CONNECTIONS_DEFAULT_DATABASE: ${{ steps.config.outputs.prod_database }}
+          SNOWFLAKE_CONNECTIONS_DEFAULT_WAREHOUSE: ${{ steps.config.outputs.warehouse }}
+          SNOWFLAKE_CONNECTIONS_DEFAULT_ROLE: ${{ steps.config.outputs.role }}
         run: |
           DB="${PROD_DB}"
           SCHEMA="${RAW_SCHEMA}"
