@@ -43,6 +43,7 @@ GRANT USAGE ON DATABASE {{db}} TO DATABASE ROLE {{db}}.ANALYST;
 
 {{ schema_stage_write_grants(db, 'AGENTS' ~ agents_schema_suffix, 'DEVELOPER') }}
 {{ schema_stage_write_grants(db, 'AGENTS' ~ agents_schema_suffix, 'ADMIN') }}
+{{ schema_stage_write_grants(db, 'SEMANTIC' ~ semantic_schema_suffix, 'ADMIN') }}
 {{ schema_stage_write_grants(db, 'DOCS', 'ADMIN') }}
 
 {% for user_name in users %}
