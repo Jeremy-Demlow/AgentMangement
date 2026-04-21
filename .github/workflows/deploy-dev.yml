@@ -75,7 +75,7 @@ jobs:
           snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
       - name: Sync VQRs into dbt models
-        run: python -m agent_management.sync_vqrs_to_dbt
+        run: python -m agent_management.sync_vqrs_to_dbt --env dev
 
       - name: Run dbt (if dbt project exists)
         if: hashFiles('dbt_ski_resort/dbt_project.yml') != ''
@@ -114,7 +114,23 @@ jobs:
           snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
       - name: Run SV evaluations
+        id: sv_eval
+        continue-on-error: true
         run: python -m agent_management.run_sv_eval --env dev --run-name "CI-${{ github.sha }}"
+
+      - name: SV Eval Summary
+        if: always()
+        run: |
+          if [ "${{ steps.sv_eval.outcome }}" = "success" ]; then
+            echo "### ✅ SV Evaluation Gate: PASSED" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ⚠️ SV Evaluation Gate: FAILED (advisory in DEV)" >> $GITHUB_STEP_SUMMARY
+            echo "One or more semantic views scored below threshold." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Fail gate if evals failed
+        if: steps.sv_eval.outcome != 'success'
+        run: exit 1
 
       - name: Cleanup
         if: always()

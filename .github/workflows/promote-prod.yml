@@ -123,7 +123,7 @@ jobs:
           snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
       - name: Sync VQRs into dbt models
-        run: python -m agent_management.sync_vqrs_to_dbt
+        run: python -m agent_management.sync_vqrs_to_dbt --env prod
 
       - name: Run dbt (if dbt project exists)
         if: hashFiles('dbt_ski_resort/dbt_project.yml') != ''
