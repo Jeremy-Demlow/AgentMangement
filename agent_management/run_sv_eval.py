@@ -1,0 +1,370 @@
+"""Run Cortex Analyst semantic view evaluations end-to-end.
+
+Generates eval config YAML, uploads to stage, starts EXECUTE_AI_EVALUATION,
+polls until complete, fetches results via GET_ANALYST_AI_EVALUATION_DATA,
+and checks thresholds.
+
+Function reference:
+    SNOWFLAKE.LOCAL.GET_ANALYST_AI_EVALUATION_DATA(
+        <DATABASE>, <SCHEMA>, <OBJECT_NAME>, 'SEMANTIC VIEW', <RUN_NAME>
+    )
+    Returns: RECORD_ID, INPUT_ID, REQUEST_ID, TIMESTAMP, DURATION_MS,
+             INPUT, OUTPUT, ERROR, GROUND_TRUTH, METRIC_NAME,
+             EVAL_AGG_SCORE (1=correct, 0.5=partial, 0=wrong, NULL=error),
+             METRIC_TYPE, METRIC_STATUS, METRIC_CALLS
+
+    NOTE: GET_AI_EVALUATION_DATA does NOT work for semantic view evals.
+          Always use GET_ANALYST_AI_EVALUATION_DATA instead.
+
+Usage:
+    python -m agent_management.run_sv_eval --env prod
+    python -m agent_management.run_sv_eval --env prod --sv sem_revenue
+    python -m agent_management.run_sv_eval --env prod --agent ski_ops_assistant
+    python -m agent_management.run_sv_eval --env dev --dry-run
+    python -m agent_management.run_sv_eval --env prod --status --run-name "sv_eval_20260416"
+    python -m agent_management.run_sv_eval --env prod --results --run-name "sv_eval_20260416"
+
+Implements REQ-009: Semantic View Evaluation.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import logging
+import sys
+import time
+from datetime import datetime
+
+import yaml
+
+from agent_management import setup_logging
+from agent_management.utils.config import (
+    get_database,
+    get_semantic_schema,
+    get_sv_eval_config,
+    get_svs_for_agents,
+    get_thresholds,
+    load_env_config,
+)
+from agent_management.utils.snowflake_client import connect
+
+logger = logging.getLogger(__name__)
+
+POLL_INTERVAL_SECONDS = 30
+MAX_POLL_ATTEMPTS = 60
+
+
+def generate_eval_yaml(
+    database: str,
+    schema: str,
+    sv_name: str,
+    run_name: str,
+    label: str | None = None,
+) -> str:
+    return f"""evaluation:
+  analyst_params:
+    analyst_name: "{database}.{schema}.{sv_name}"
+    analyst_type: "SEMANTIC VIEW"
+  run_params:
+    label: "{label or f'{sv_name} evaluation'}"
+    description: "Automated SV evaluation - {run_name}"
+  source_metadata:
+    type: "verified_queries"
+
+metrics:
+  - "sql_correctness"
+"""
+
+
+def ensure_stage(cur, stage: str, file_format: str):
+    cur.execute(f"""
+        CREATE FILE FORMAT IF NOT EXISTS {file_format}
+          TYPE = 'CSV'
+          FIELD_DELIMITER = NONE
+          RECORD_DELIMITER = '\\n'
+          SKIP_HEADER = 0
+          FIELD_OPTIONALLY_ENCLOSED_BY = NONE
+          ESCAPE_UNENCLOSED_FIELD = NONE
+    """)
+    cur.execute(f"CREATE STAGE IF NOT EXISTS {stage} FILE_FORMAT = {file_format}")
+    logger.info("  Stage: %s", stage)
+
+
+def upload_yaml(cur, yaml_content: str, stage: str, filename: str):
+    escaped = yaml_content.replace("'", "''")
+    cur.execute(f"""
+        COPY INTO @{stage}/{filename}
+        FROM (SELECT '{escaped}')
+        FILE_FORMAT = (TYPE = 'CSV' FIELD_DELIMITER = NONE RECORD_DELIMITER = NONE COMPRESSION = NONE)
+        SINGLE = TRUE
+        OVERWRITE = TRUE
+    """)
+    logger.info("  Uploaded: @%s/%s", stage, filename)
+
+
+def start_eval(cur, run_name: str, stage: str, filename: str):
+    cur.execute(f"""
+        CALL EXECUTE_AI_EVALUATION(
+            'START',
+            OBJECT_CONSTRUCT('run_name', '{run_name}'),
+            '@{stage}/{filename}'
+        )
+    """)
+    row = cur.fetchone()
+    logger.info("  Eval started: %s", run_name)
+    if row:
+        logger.info("  Response: %s", row[0])
+    return row
+
+
+def check_status(cur, run_name: str, stage: str, filename: str) -> str:
+    cur.execute(f"""
+        CALL EXECUTE_AI_EVALUATION(
+            'STATUS',
+            OBJECT_CONSTRUCT('run_name', '{run_name}'),
+            '@{stage}/{filename}'
+        )
+    """)
+    row = cur.fetchone()
+    if not row:
+        return "UNKNOWN"
+    cols = [col[0].upper() for col in cur.description] if cur.description else []
+    if "STATUS" in cols:
+        idx = cols.index("STATUS")
+        status = str(row[idx])
+    elif len(row) > 3:
+        status = str(row[3])
+    else:
+        status = str(row[0])
+    logger.info("  Status: %s", status)
+    detail_idx = cols.index("STATUS_DETAILS") if "STATUS_DETAILS" in cols else (4 if len(row) > 4 else -1)
+    if detail_idx >= 0 and row[detail_idx]:
+        logger.info("  Detail: %s", row[detail_idx])
+    return status
+
+
+def get_eval_results(cur, database: str, schema: str, sv_name: str, run_name: str) -> list[dict]:
+    try:
+        cur.execute(f"""
+            SELECT *
+            FROM TABLE(SNOWFLAKE.LOCAL.GET_ANALYST_AI_EVALUATION_DATA(
+                '{database}', '{schema}', '{sv_name}', 'SEMANTIC VIEW', '{run_name}'
+            ))
+        """)
+        columns = [col[0] for col in cur.description]
+        return [dict(zip(columns, row)) for row in cur.fetchall()]
+    except Exception as e:
+        logger.error("  Error fetching eval data: %s", e)
+        return []
+
+
+def compute_score(results: list[dict]) -> dict:
+    if not results:
+        return {"total": 0, "scored": 0, "sum_score": 0.0, "score": 0.0, "errors": 0}
+
+    total = len(results)
+    sum_score = 0.0
+    scored = 0
+    errors = 0
+
+    for r in results:
+        agg = r.get("EVAL_AGG_SCORE")
+        if agg is not None:
+            sum_score += float(agg)
+            scored += 1
+        else:
+            errors += 1
+
+    return {
+        "total": total,
+        "scored": scored,
+        "sum_score": round(sum_score, 4),
+        "score": round(sum_score / scored, 4) if scored > 0 else 0.0,
+        "errors": errors,
+    }
+
+
+def run_eval_for_sv(
+    cur,
+    database: str,
+    schema: str,
+    sv_name: str,
+    stage: str,
+    file_format: str,
+    run_name: str,
+    no_wait: bool = False,
+    dry_run: bool = False,
+) -> dict | None:
+    logger.info("\n  === %s ===", sv_name)
+
+    eval_yaml = generate_eval_yaml(database, schema, sv_name, run_name)
+    filename = f"sv_eval_{sv_name.lower()}_{run_name}.yaml"
+
+    if dry_run:
+        logger.info("  [DRY RUN] Would upload eval config:")
+        logger.info("  %s", eval_yaml.replace("\n", "\n  "))
+        return None
+
+    ensure_stage(cur, stage, file_format)
+    upload_yaml(cur, eval_yaml, stage, filename)
+    start_eval(cur, run_name, stage, filename)
+
+    if no_wait:
+        logger.info("  Started (--no-wait). Check with --status --run-name %s", run_name)
+        return None
+
+    logger.info("  Polling for completion (interval=%ds, max=%d attempts)...",
+                POLL_INTERVAL_SECONDS, MAX_POLL_ATTEMPTS)
+
+    for attempt in range(1, MAX_POLL_ATTEMPTS + 1):
+        time.sleep(POLL_INTERVAL_SECONDS)
+        status = check_status(cur, run_name, stage, filename)
+
+        if status in ("COMPLETED", "SUCCEEDED"):
+            logger.info("  Completed after %d poll(s)", attempt)
+            results = get_eval_results(cur, database, schema, sv_name, run_name)
+            return compute_score(results)
+        elif status in ("FAILED", "ERROR", "CANCELLED"):
+            logger.error("  Eval %s after %d poll(s)", status, attempt)
+            return {"total": 0, "correct": 0, "score": 0.0, "regressions": 0, "error": status}
+
+        logger.info("    Poll %d/%d: %s", attempt, MAX_POLL_ATTEMPTS, status)
+
+    logger.error("  Timed out after %d polls", MAX_POLL_ATTEMPTS)
+    return {"total": 0, "correct": 0, "score": 0.0, "regressions": 0, "error": "TIMEOUT"}
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Run SV evaluations via EXECUTE_AI_EVALUATION")
+    parser.add_argument("--env", "-e", help="Environment (dev, qa, prod)")
+    parser.add_argument("--sv", help="Evaluate a single SV by name (e.g. SEM_REVENUE)")
+    parser.add_argument("--agent", action="append", help="Evaluate only SVs used by this agent (repeatable, from project.yml)")
+    parser.add_argument("--run-name", help="Custom run name (default: auto-generated)")
+    parser.add_argument("--no-wait", action="store_true", help="Start eval and exit without waiting")
+    parser.add_argument("--dry-run", action="store_true", help="Show eval config without executing")
+    parser.add_argument("--status", action="store_true", help="Check status of existing run")
+    parser.add_argument("--results", action="store_true", help="Fetch results of existing run")
+    parser.add_argument("-v", "--verbose", action="count", default=1)
+    args = parser.parse_args()
+
+    setup_logging(args.verbose)
+
+    config = load_env_config(args.env)
+    database = get_database(config)
+    schema = config["deployment"]["semantic_schema"]
+    thresholds = get_thresholds(config)
+
+    sv_eval_cfg = get_sv_eval_config(config)
+    stage = sv_eval_cfg["stage"]
+    file_format = sv_eval_cfg["file_format"]
+
+    sv_threshold = thresholds.get("sv_sql_correctness", 0.70)
+
+    run_name = args.run_name or f"sv_eval_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+
+    logger.info("Environment: %s", config["environment"])
+    logger.info("Database: %s.%s", database, schema)
+    logger.info("Run name: %s", run_name)
+    logger.info("Threshold: sql_correctness >= %s", sv_threshold)
+    logger.info("=" * 60)
+
+    conn = connect(config)
+    cur = conn.cursor()
+    cur.execute(f"USE DATABASE {database}")
+    cur.execute(f"USE SCHEMA {database}.{schema}")
+
+    try:
+        if args.sv:
+            sv_names = [args.sv.upper()]
+        elif args.agent:
+            sv_names = get_svs_for_agents(args.agent)
+            if not sv_names:
+                logger.error("No semantic views configured for agent(s): %s", ", ".join(args.agent))
+                logger.error("Check the 'agents' section in project.yml")
+                sys.exit(1)
+            logger.info("Agent scope: %s -> %d SVs", ", ".join(args.agent), len(sv_names))
+        else:
+            cur.execute(f"SHOW SEMANTIC VIEWS IN SCHEMA {database}.{schema}")
+            rows = cur.fetchall()
+            sv_names = [row[1] for row in rows if row[7]]
+
+        if args.status:
+            for sv_name in sv_names:
+                filename = f"sv_eval_{sv_name.lower()}_{run_name}.yaml"
+                logger.info("\n  %s:", sv_name)
+                check_status(cur, run_name, stage, filename)
+            return
+
+        if args.results:
+            all_passed = True
+            for sv_name in sv_names:
+                logger.info("\n  %s:", sv_name)
+                results = get_eval_results(cur, database, schema, sv_name, run_name)
+                if not results:
+                    logger.info("    No eval data found")
+                    continue
+                metrics = compute_score(results)
+                score_pass = metrics["score"] >= sv_threshold
+                logger.info("    VQRs: %d total, %d scored, %d errors", metrics["total"], metrics["scored"], metrics["errors"])
+                logger.info("    Score: %.1f%% (%s/%s) %s %s [%s]",
+                            metrics["score"] * 100, metrics["sum_score"], metrics["scored"],
+                            ">=" if score_pass else "<",
+                            f"{sv_threshold:.0%}", "PASS" if score_pass else "FAIL")
+                if not score_pass:
+                    all_passed = False
+
+            if not all_passed:
+                logger.error("\nSV EVAL GATE: FAILED")
+                sys.exit(1)
+            logger.info("\nSV EVAL GATE: PASSED")
+            return
+
+        logger.info("SVs to evaluate: %s", ", ".join(sv_names))
+        all_passed = True
+        total_checked = 0
+
+        for sv_name in sv_names:
+            sv_run_name = f"{run_name}_{sv_name.lower()}"
+            metrics = run_eval_for_sv(
+                cur, database, schema, sv_name, stage, file_format,
+                sv_run_name, args.no_wait, args.dry_run,
+            )
+
+            if metrics is None:
+                continue
+
+            if "error" in metrics:
+                all_passed = False
+                continue
+
+            total_checked += 1
+            score_pass = metrics["score"] >= sv_threshold
+
+            logger.info("    Score: %.1f%% (%s/%s) %s %s [%s]",
+                        metrics["score"] * 100, metrics["sum_score"], metrics["scored"],
+                        ">=" if score_pass else "<",
+                        f"{sv_threshold:.0%}", "PASS" if score_pass else "FAIL")
+
+            if not score_pass:
+                all_passed = False
+
+        logger.info("\n%s", "=" * 60)
+        if args.dry_run:
+            logger.info("DRY RUN complete — no evals started")
+        elif args.no_wait:
+            logger.info("All evals started — use --status to check progress")
+        elif total_checked == 0:
+            logger.warning("NO EVAL RESULTS — cannot determine pass/fail")
+            sys.exit(2)
+        elif all_passed:
+            logger.info("SV EVAL GATE: PASSED (%d views)", total_checked)
+        else:
+            logger.error("SV EVAL GATE: FAILED (%d views)", total_checked)
+            sys.exit(1)
+    finally:
+        cur.close()
+        conn.close()
+
+
+if __name__ == "__main__":
+    main()

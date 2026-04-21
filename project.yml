@@ -49,12 +49,37 @@ environments:
     agents_schema: AGENTS
     name_suffix: ""
 
+agents:
+  resort_executive:
+    semantic_views:
+      - SEM_DAILY_SUMMARY
+      - SEM_REVENUE
+      - SEM_CUSTOMER_BEHAVIOR
+      - SEM_OPERATIONS
+      - SEM_STAFFING_ANALYTICS
+      - SEM_WEATHER_ANALYTICS
+      - SEM_MARKETING_ANALYTICS
+      - SEM_CUSTOMER_SATISFACTION
+      - SEM_SAFETY_INCIDENTS
+      - SEM_LESSONS_ANALYTICS
+      - SEM_PASSHOLDER_ANALYTICS
+  ski_ops_assistant:
+    semantic_views:
+      - SEM_OPERATIONS
+      - SEM_STAFFING_ANALYTICS
+      - SEM_WEATHER_ANALYTICS
+      - SEM_SAFETY_INCIDENTS
+
 eval:
   source_schemas:
     marts: MARTS
     agents: AGENTS
   stage: eval_config_stage
   file_format: yaml_file_format
+  sv_eval:
+    stage: sv_eval_stage
+    file_format: yaml_file_format
+    default_scope: all
 
 raw_tables:
   - PASS_USAGE

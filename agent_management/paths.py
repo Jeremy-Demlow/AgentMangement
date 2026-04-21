@@ -57,6 +57,10 @@ def sv_snapshots_dir() -> Path:
     return project_root() / "semantic-views" / "snapshots"
 
 
+def sv_verified_queries_dir() -> Path:
+    return project_root() / "semantic-views" / "verified_queries"
+
+
 def eval_dir() -> Path:
     return project_root() / "agent-evaluation"
 

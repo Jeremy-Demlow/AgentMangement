@@ -249,17 +249,20 @@ flowchart TD
 
     subgraph qa ["QA — hard eval gate (threshold: 0.70)"]
         Q1["Pre-flight\nvalidate · drift · dry-run"] --> Q2["Snapshot"]
-        Q2 --> Q3["dbt + SVs + Agents"] --> Q4["Eval 🔒"]
+        Q2 --> Q3["dbt + Deploy SVs"] --> Q4["SV Eval 🔒"]
+        Q4 --> Q5["Deploy Agents"] --> Q6["Agent Eval 🔒"]
     end
 
     subgraph prod ["PROD — approval + auto-rollback (threshold: 0.80)"]
         P1["Pre-flight + Approval"] --> P2["Snapshot"]
-        P2 --> P3["dbt + SVs + Agents"] --> P4["Eval 🔒"]
-        P4 -->|failure| P5["Auto-Rollback"]
+        P2 --> P3["dbt + Deploy SVs"] --> P4["SV Eval 🔒"]
+        P4 --> P5["Deploy Agents"] --> P6["Agent Eval 🔒"]
+        P4 -->|failure| P7["Auto-Rollback"]
+        P6 -->|failure| P7
     end
 
     D6 -->|"manual dispatch"| Q1
-    Q4 -->|"manual dispatch"| P1
+    Q6 -->|"manual dispatch"| P1
 ```
 
 ## Repository Structure
@@ -285,6 +288,9 @@ AgentMangement/
 │   ├── detect_drift.py              #   Git vs Snowflake diff
 │   ├── compute_metrics.py           #   F1/precision/recall from eval
 │   ├── check_sv_eval.py             #   SV eval quality gate
+│   ├── run_sv_eval.py               #   Run SV evals end-to-end
+│   ├── get_sv_eval_scores.py        #   SV eval scorecard (GET_ANALYST_AI_EVALUATION_DATA)
+│   ├── check_sv_evals.py            #   Multi-env VQR + eval status
 │   ├── render_eval_templates.py     #   Render eval configs per env
 │   ├── ci/                          #   CI checks (test coverage, PK tests, lineage)
 │   └── utils/
@@ -411,6 +417,9 @@ After `pip install -e .`:
 | `agent-mgmt-render-eval` | Render eval templates for a target environment |
 | `agent-mgmt-detect-drift` | Detect Git vs Snowflake spec drift |
 | `agent-mgmt-check-sv-eval` | Check semantic view evaluation results |
+| `python -m agent_management.run_sv_eval` | Run SV evals end-to-end (start, poll, check) |
+| `python -m agent_management.get_sv_eval_scores` | Display SV eval scorecard with per-VQR detail |
+| `python -m agent_management.check_sv_evals` | Check VQR and eval status across environments |
 
 ## Evaluations
 
@@ -425,6 +434,143 @@ uv run python scripts/run_eval.py configs/resort_executive.yaml --dry-run
 # Full eval (polls, checks thresholds, saves JSON)
 uv run python scripts/run_eval.py configs/resort_executive.yaml --connection <your-connection> --env dev
 ```
+
+### Semantic View Evaluations
+
+SV evaluations use Snowflake's built-in `EXECUTE_AI_EVALUATION` to test Cortex Analyst accuracy against VQRs (Verified Query Representations). The framework manages the full lifecycle: generate VQRs, sync them into dbt models, deploy, start evals, poll for completion, and check scores against thresholds.
+
+#### Running SV Evals
+
+```bash
+# Run evals for all SVs (waits for completion, checks thresholds)
+python -m agent_management.run_sv_eval --env prod
+
+# Run for a single SV
+python -m agent_management.run_sv_eval --env prod --sv sem_revenue
+
+# Run only SVs used by a specific agent (from project.yml agents config)
+python -m agent_management.run_sv_eval --env prod --agent ski_ops_assistant
+
+# Run SVs for multiple agents
+python -m agent_management.run_sv_eval --env prod --agent ski_ops_assistant --agent resort_executive
+
+# Start evals without waiting
+python -m agent_management.run_sv_eval --env prod --no-wait
+
+# Check status of a running eval
+python -m agent_management.run_sv_eval --env prod --status --run-name "sv_eval_20260420"
+
+# Fetch results of a completed eval
+python -m agent_management.run_sv_eval --env prod --results --run-name "sv_eval_20260420"
+```
+
+#### Viewing Eval Scores
+
+```bash
+# Scorecard for all SVs (auto-detects latest run per SV)
+python -m agent_management.get_sv_eval_scores --env prod
+
+# With per-VQR detail
+python -m agent_management.get_sv_eval_scores --env prod --detail
+
+# JSON output for CI/CD pipelines
+python -m agent_management.get_sv_eval_scores --env prod --json
+
+# Override threshold (default from config)
+python -m agent_management.get_sv_eval_scores --env prod --threshold 0.80
+
+# Single SV with specific run name
+python -m agent_management.get_sv_eval_scores --env prod --sv sem_revenue --run-name eval_revenue_v9
+```
+
+#### Retrieving Eval Data with SQL
+
+Use `GET_ANALYST_AI_EVALUATION_DATA` to query eval results directly in SQL:
+
+```sql
+SELECT *
+FROM TABLE(SNOWFLAKE.LOCAL.GET_ANALYST_AI_EVALUATION_DATA(
+    'AM_SKI_RESORT',       -- database
+    'SEMANTIC',            -- schema
+    'SEM_REVENUE',         -- semantic view name
+    'SEMANTIC VIEW',       -- object type (always this value)
+    'eval_revenue_v9'      -- eval run name / label
+));
+```
+
+> **IMPORTANT:** Use `GET_ANALYST_AI_EVALUATION_DATA`, NOT `GET_AI_EVALUATION_DATA`.
+> The latter only works for `agent_type='CORTEX AGENT'` and returns empty results for semantic view evals.
+
+#### Column Reference
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `RECORD_ID` | VARCHAR | Unique identifier for this evaluation record |
+| `INPUT_ID` | VARCHAR | Unique identifier for this evaluation input |
+| `REQUEST_ID` | VARCHAR | Unique request identifier from Cortex Analyst |
+| `TIMESTAMP` | TIMESTAMP | Time the eval request was made |
+| `DURATION_MS` | INT | Time in milliseconds for Analyst to respond |
+| `INPUT` | VARCHAR | The natural language question sent to Analyst |
+| `OUTPUT` | VARCHAR | The SQL response generated by Cortex Analyst |
+| `ERROR` | VARCHAR | Error details (empty string on success; contains clarification text when Analyst asks for clarification instead of generating SQL) |
+| `GROUND_TRUTH` | VARCHAR | The expected SQL from the VQR |
+| `METRIC_NAME` | VARCHAR | Metric evaluated (e.g. `sql_correctness`) |
+| `EVAL_AGG_SCORE` | NUMBER | **The score**: `1` = correct, `0.5` = partial match, `0` = wrong, `NULL` = error during evaluation |
+| `METRIC_TYPE` | VARCHAR | `system` for built-in metrics, `custom` for custom |
+| `METRIC_STATUS` | VARIANT | Internal status object |
+| `METRIC_CALLS` | VARIANT | Internal metric call details |
+
+#### Useful SQL Patterns
+
+```sql
+-- Aggregate accuracy for a specific eval run
+SELECT
+    COUNT(*) AS total_vqrs,
+    COUNT(CASE WHEN EVAL_AGG_SCORE IS NOT NULL THEN 1 END) AS scored,
+    SUM(EVAL_AGG_SCORE) AS sum_score,
+    AVG(EVAL_AGG_SCORE) AS accuracy
+FROM TABLE(SNOWFLAKE.LOCAL.GET_ANALYST_AI_EVALUATION_DATA(
+    'AM_SKI_RESORT', 'SEMANTIC', 'SEM_REVENUE', 'SEMANTIC VIEW', 'eval_revenue_v9'
+));
+
+-- Show failing VQRs with error details
+SELECT
+    EVAL_AGG_SCORE,
+    LEFT(INPUT, 120) AS question,
+    LEFT(ERROR, 200) AS error_preview
+FROM TABLE(SNOWFLAKE.LOCAL.GET_ANALYST_AI_EVALUATION_DATA(
+    'AM_SKI_RESORT', 'SEMANTIC', 'SEM_REVENUE', 'SEMANTIC VIEW', 'eval_revenue_v9'
+))
+WHERE EVAL_AGG_SCORE < 1 OR EVAL_AGG_SCORE IS NULL;
+
+-- Compare generated SQL vs ground truth for debugging
+SELECT
+    EVAL_AGG_SCORE,
+    LEFT(INPUT, 100) AS question,
+    LEFT(OUTPUT, 300) AS generated_sql,
+    LEFT(GROUND_TRUTH, 300) AS expected_sql
+FROM TABLE(SNOWFLAKE.LOCAL.GET_ANALYST_AI_EVALUATION_DATA(
+    'AM_SKI_RESORT', 'SEMANTIC', 'SEM_REVENUE', 'SEMANTIC VIEW', 'eval_revenue_v9'
+))
+ORDER BY EVAL_AGG_SCORE ASC NULLS FIRST;
+```
+
+#### Eval Context Requirement
+
+When starting evals via `EXECUTE_AI_EVALUATION`, you **must** set the correct database/schema context first:
+
+```sql
+USE DATABASE AM_SKI_RESORT;
+USE SCHEMA SEMANTIC;
+
+CALL EXECUTE_AI_EVALUATION(
+    'START',
+    OBJECT_CONSTRUCT('run_name', 'eval_revenue_v9'),
+    '@AM_SKI_RESORT.SEMANTIC.sv_eval_stage/eval_sem_revenue.yaml'
+);
+```
+
+Without the `USE DATABASE` / `USE SCHEMA`, the eval task will look for the semantic view in your session's current database (e.g. `COCO_LIVE_DB.PUBLIC`) and fail with "does not exist".
 
 ## Adapting for Your Domain
 

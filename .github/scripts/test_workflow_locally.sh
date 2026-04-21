@@ -35,12 +35,18 @@ export SNOWFLAKE_ACCOUNT="${SNOWFLAKE_ACCOUNT:-trb65519}"
 export SNOWFLAKE_USER="${SNOWFLAKE_USER:-JDEMLOW}"
 export SNOWFLAKE_PRIVATE_KEY_PATH="${SNOWFLAKE_PRIVATE_KEY_PATH:-$HOME/.snowflake/keys/snowflake_tf_key.p8}"
 
-case "$TARGET_ENV" in
-    dev)  DEFAULT_WH="AM_SKI_RESORT_WH_DEV";  DEFAULT_ROLE="AM_DEPLOY_ROLE_DEV";  DEFAULT_DB="AM_SKI_RESORT_DEV" ;;
-    qa)   DEFAULT_WH="AM_SKI_RESORT_WH_QA";   DEFAULT_ROLE="AM_DEPLOY_ROLE_QA";   DEFAULT_DB="AM_SKI_RESORT_QA" ;;
-    prod) DEFAULT_WH="AM_SKI_RESORT_WH"; DEFAULT_ROLE="AM_DEPLOY_ROLE"; DEFAULT_DB="AM_SKI_RESORT" ;;
-    *)    DEFAULT_WH="AM_SKI_RESORT_WH_DEV";  DEFAULT_ROLE="AM_DEPLOY_ROLE_DEV";  DEFAULT_DB="AM_SKI_RESORT_DEV" ;;
-esac
+read -r DEFAULT_DB DEFAULT_WH DEFAULT_ROLE < <(
+  $PYTHON -c "
+import yaml, sys
+with open('project.yml') as f:
+    cfg = yaml.safe_load(f)
+env = cfg.get('environments', {}).get('$TARGET_ENV')
+if not env:
+    print('Unknown env: $TARGET_ENV', file=sys.stderr)
+    sys.exit(1)
+print(env['database'], env['warehouse'], env['role'])
+"
+)
 
 export SNOWFLAKE_WAREHOUSE="$DEFAULT_WH"
 export SNOWFLAKE_ROLE="$DEFAULT_ROLE"
@@ -102,8 +108,8 @@ fi
 
 # ── Step 4: SV eval gate ─────────────────────────────────────────────────────
 if should_run "sv-eval"; then
-    run_step "check_sv_eval --env $TARGET_ENV" \
-        $PYTHON -m agent_management.check_sv_eval --env "$TARGET_ENV" --run-name "local-test" || true
+    run_step "run_sv_eval --env $TARGET_ENV (dry-run)" \
+        $PYTHON -m agent_management.run_sv_eval --env "$TARGET_ENV" --dry-run || true
 fi
 
 # ── Step 5: Deploy agents ────────────────────────────────────────────────────

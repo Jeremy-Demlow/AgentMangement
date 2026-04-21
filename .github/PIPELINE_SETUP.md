@@ -103,13 +103,84 @@ openssl rsa -in snowflake_tf_key.p8 -pubout -out snowflake_tf_key.pub
 
 | Workflow | File | Trigger | Environment |
 |----------|------|---------|-------------|
-| **Deploy Dev** | `deploy-dev.yml` | Push to `main` (agents/SVs/envs changed) | `DEV` |
+| **Deploy Dev** | `deploy-dev.yml` | Push to `dev` (agents/SVs/envs changed) | `DEV` |
+| **Deploy QA (auto)** | `deploy-qa-on-main.yml` | Push to `main` | `QA` |
 | **Promote QA** | `promote-qa.yml` | Manual dispatch | `QA` |
 | **Promote Prod** | `promote-prod.yml` | Manual dispatch | `production` (pre-flight) + `PROD` |
 | **Daily Data Refresh** | `daily_data_refresh.yml` | Cron (5am PST) or manual | `PROD` |
 | **Validate PR** | `validate-pr.yml` | PR to `main` | — |
 | **Rollback** | `rollback.yml` | Manual dispatch | `production` (for prod) |
 | **DCM Deploy** | `dcm-deploy.yml` | Push/PR to `main` (dcm/ changed) | `DEV`/`QA`/`PROD` |
+
+## Pipeline Stage Ordering
+
+All deployment workflows follow this stage order:
+
+```
+snapshot → deploy-svs → sv-eval-gate → deploy-agents → agent-eval-gate
+```
+
+The SV eval gate runs **after** semantic views are deployed but **before** agents are deployed.
+This ensures agents are never deployed against semantic views that fail evaluation.
+
+| Environment | SV Eval Gate | Agent Eval Gate |
+|-------------|-------------|-----------------|
+| DEV | Advisory (`continue-on-error: true`) | Advisory |
+| QA | Hard gate (blocks agent deploy) | Hard gate |
+| PROD | Hard gate (triggers rollback on failure) | Hard gate (triggers rollback on failure) |
+
+## SV Eval Configuration
+
+### Agent-to-SV Mapping (`project.yml`)
+
+Define which semantic views each agent uses in `project.yml`:
+
+```yaml
+agents:
+  resort_executive:
+    semantic_views:
+      - SEM_DAILY_SUMMARY
+      - SEM_REVENUE
+      - SEM_OPERATIONS
+  ski_ops_assistant:
+    semantic_views:
+      - SEM_OPERATIONS
+      - SEM_STAFFING_ANALYTICS
+```
+
+This mapping enables scoped evaluation — when an agent changes, only its SVs are tested.
+
+### SV Eval Stage Config (`project.yml`)
+
+```yaml
+eval:
+  sv_eval:
+    stage: sv_eval_stage          # Stage in SEMANTIC schema for eval configs
+    file_format: yaml_file_format # File format for eval YAML upload
+    default_scope: all            # "all" or "agent" — default eval scope
+```
+
+### Running SV Evaluations
+
+```bash
+# Evaluate all semantic views
+python -m agent_management.run_sv_eval --env prod
+
+# Evaluate a single SV
+python -m agent_management.run_sv_eval --env prod --sv SEM_REVENUE
+
+# Evaluate only SVs used by a specific agent
+python -m agent_management.run_sv_eval --env prod --agent ski_ops_assistant
+
+# Dry run (show config without executing)
+python -m agent_management.run_sv_eval --env dev --dry-run
+
+# Check status of a running eval
+python -m agent_management.run_sv_eval --env prod --status --run-name "CI-abc123"
+
+# Fetch results of a completed eval
+python -m agent_management.run_sv_eval --env prod --results --run-name "CI-abc123"
+```
 
 ## Local Testing
 

@@ -1,0 +1,98 @@
+semantic_view: SEM_CUSTOMER_SATISFACTION
+verified_queries:
+  - name: feedback_by_category
+    question: "What is the total feedback count and average rating by feedback category?"
+    sql: >-
+      WITH __fact_feedback AS (
+        SELECT
+          category,
+          feedback_id,
+          rating
+        FROM AM_SKI_RESORT.MARTS.FACT_FEEDBACK
+      )
+      SELECT
+        category,
+        COUNT(feedback_id) AS total_feedback,
+        AVG(rating) AS average_rating
+      FROM __fact_feedback
+      GROUP BY
+        category
+      ORDER BY
+        total_feedback DESC NULLS LAST
+    verified_by: "Cortex Analyst"
+    verified_at: 1744900000
+    use_as_onboarding_question: true
+
+  - name: nps_by_segment
+    question: "What is the average NPS score and positive feedback count by customer segment?"
+    sql: >-
+      SELECT * FROM SEMANTIC_VIEW(
+        AM_SKI_RESORT.SEMANTIC.SEM_CUSTOMER_SATISFACTION
+        DIMENSIONS customer_segment
+        METRICS average_nps, positive_feedback_count
+      )
+    verified_by: "Cortex Analyst"
+    verified_at: 1744900000
+    use_as_onboarding_question: true
+
+  - name: monthly_feedback_trend
+    question: "What is the monthly total feedback count and average rating by month?"
+    sql: >-
+      WITH __fact_feedback AS (
+        SELECT
+          feedback_date,
+          feedback_id,
+          rating
+        FROM AM_SKI_RESORT.MARTS.FACT_FEEDBACK
+      )
+      SELECT
+        DATE_TRUNC('MONTH', feedback_date) AS month,
+        COUNT(feedback_id) AS total_feedback,
+        AVG(rating) AS average_rating
+      FROM __fact_feedback
+      GROUP BY
+        DATE_TRUNC('MONTH', feedback_date)
+      ORDER BY
+        month DESC NULLS LAST
+    verified_by: "Cortex Analyst"
+    verified_at: 1744900000
+    use_as_onboarding_question: false
+
+  - name: unresolved_negative_by_type
+    question: "What is the negative feedback count and total feedback by feedback type for unresolved feedback only?"
+    sql: >-
+      WITH __fact_feedback AS (
+        SELECT
+          feedback_type,
+          resolved,
+          sentiment,
+          feedback_id
+        FROM AM_SKI_RESORT.MARTS.FACT_FEEDBACK
+      )
+      SELECT
+        feedback_type,
+        COUNT(CASE WHEN sentiment = 'Negative' THEN 1 END) AS negative_feedback_count,
+        COUNT(feedback_id) AS total_feedback
+      FROM __fact_feedback
+      WHERE
+        resolved = FALSE
+      GROUP BY
+        feedback_type
+      ORDER BY
+        total_feedback DESC NULLS LAST
+    verified_by: "Cortex Analyst"
+    verified_at: 1744900000
+    use_as_onboarding_question: false
+
+  - name: rating_nps_by_sentiment_category
+    question: "What is the average rating and average NPS by sentiment and category?"
+    sql: >-
+      SELECT *
+      FROM SEMANTIC_VIEW(
+          AM_SKI_RESORT.SEMANTIC.SEM_CUSTOMER_SATISFACTION
+          DIMENSIONS sentiment, category
+          METRICS average_rating, average_nps
+      )
+    verified_by: "Cortex Analyst"
+    verified_at: 1744900000
+    use_as_onboarding_question: false

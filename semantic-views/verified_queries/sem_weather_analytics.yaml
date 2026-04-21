@@ -1,0 +1,68 @@
+semantic_view: SEM_WEATHER_ANALYTICS
+verified_queries:
+  - name: snowfall_powder_by_zone
+    question: "What is the total snowfall and powder day count by mountain zone?"
+    sql: >-
+      SELECT *
+      FROM SEMANTIC_VIEW(
+          AM_SKI_RESORT.SEMANTIC.SEM_WEATHER_ANALYTICS
+          DIMENSIONS weather.mountain_zone
+          METRICS total_snowfall, powder_day_count
+      )
+    verified_by: "Cortex Analyst"
+    verified_at: 1744900000
+    use_as_onboarding_question: true
+
+  - name: monthly_snowfall_depth_by_season
+    question: "What is the monthly total snowfall and max base depth by ski season?"
+    sql: >-
+      SELECT *
+      FROM SEMANTIC_VIEW(
+          AM_SKI_RESORT.SEMANTIC.SEM_WEATHER_ANALYTICS
+          METRICS total_snowfall, max_base_depth
+          DIMENSIONS dates.ski_season, DATE_TRUNC('month', dates.full_date) AS month
+      )
+      ORDER BY ski_season, month DESC NULLS LAST
+    verified_by: "Cortex Analyst"
+    verified_at: 1744900000
+    use_as_onboarding_question: true
+
+  - name: avg_snowfall_by_month_condition
+    question: "What is the average snowfall and observation count by month name and snow condition?"
+    sql: >-
+      SELECT *
+      FROM SEMANTIC_VIEW(
+        AM_SKI_RESORT.SEMANTIC.SEM_WEATHER_ANALYTICS
+        METRICS avg_snowfall, observation_count
+        DIMENSIONS dates.month_name, weather.snow_condition
+      )
+    verified_by: "Cortex Analyst"
+    verified_at: 1744900000
+    use_as_onboarding_question: false
+
+  - name: powder_storm_by_season
+    question: "What are the powder day count and storm count by ski season?"
+    sql: >-
+      SELECT *
+      FROM SEMANTIC_VIEW(
+        AM_SKI_RESORT.SEMANTIC.SEM_WEATHER_ANALYTICS
+        METRICS powder_day_count, storm_count
+        DIMENSIONS dates.ski_season
+      )
+    verified_by: "Cortex Analyst"
+    verified_at: 1744900000
+    use_as_onboarding_question: false
+
+  - name: temp_wind_by_zone_high_wind
+    question: "What is the min temperature, max temperature, and max wind speed by mountain zone for days with high wind?"
+    sql: >-
+      SELECT *
+      FROM SEMANTIC_VIEW(
+          AM_SKI_RESORT.SEMANTIC.SEM_WEATHER_ANALYTICS
+          METRICS min_temp, max_temp, max_wind
+          DIMENSIONS weather.mountain_zone
+          WHERE weather.wind_speed_mph >= 25
+      )
+    verified_by: "Cortex Analyst"
+    verified_at: 1744900000
+    use_as_onboarding_question: false

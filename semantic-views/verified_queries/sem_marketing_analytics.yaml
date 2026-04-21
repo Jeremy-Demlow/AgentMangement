@@ -1,0 +1,80 @@
+semantic_view: SEM_MARKETING_ANALYTICS
+verified_queries:
+  - name: revenue_conversions_by_channel
+    question: "What is the total revenue and total conversions by campaign channel?"
+    sql: >-
+      SELECT *
+      FROM SEMANTIC_VIEW(
+          AM_SKI_RESORT.SEMANTIC.SEM_MARKETING_ANALYTICS
+          METRICS total_revenue, total_conversions
+          DIMENSIONS marketing.campaign_channel
+      )
+    verified_by: "Cortex Analyst"
+    verified_at: 1744900000
+    use_as_onboarding_question: true
+
+  - name: revenue_conversion_rate_by_type_segment
+    question: "What is the total revenue and average conversion rate by campaign type and audience segment?"
+    sql: >-
+      WITH __marketing AS (
+        SELECT
+          audience_segment,
+          campaign_type,
+          conversion_rate,
+          revenue_attributed
+        FROM AM_SKI_RESORT.MARTS.FACT_MARKETING
+      )
+      SELECT
+        m.campaign_type,
+        m.audience_segment,
+        SUM(m.revenue_attributed) AS total_revenue,
+        AVG(m.conversion_rate) AS avg_conversion_rate
+      FROM __marketing AS m
+      GROUP BY
+        m.campaign_type,
+        m.audience_segment
+      ORDER BY
+        total_revenue DESC NULLS LAST
+    verified_by: "Cortex Analyst"
+    verified_at: 1744900000
+    use_as_onboarding_question: true
+
+  - name: monthly_revenue_campaign_count
+    question: "What is the monthly total revenue and campaign count by month name?"
+    sql: >-
+      SELECT *
+      FROM SEMANTIC_VIEW(
+          AM_SKI_RESORT.SEMANTIC.SEM_MARKETING_ANALYTICS
+          METRICS total_revenue, campaign_count
+          DIMENSIONS dates.month_name
+      )
+    verified_by: "Cortex Analyst"
+    verified_at: 1744900000
+    use_as_onboarding_question: false
+
+  - name: open_click_rate_by_channel_type
+    question: "What is the average open rate and average click rate by campaign channel and campaign type?"
+    sql: >-
+      SELECT *
+      FROM SEMANTIC_VIEW(
+          AM_SKI_RESORT.SEMANTIC.SEM_MARKETING_ANALYTICS
+          METRICS avg_open_rate, avg_click_rate
+          DIMENSIONS marketing.campaign_channel, marketing.campaign_type
+      )
+    verified_by: "Cortex Analyst"
+    verified_at: 1744900000
+    use_as_onboarding_question: false
+
+  - name: revenue_per_conversion_by_segment
+    question: "What is the revenue per conversion and total conversions by audience segment?"
+    sql: >-
+      SELECT *
+      FROM SEMANTIC_VIEW(
+          AM_SKI_RESORT.SEMANTIC.SEM_MARKETING_ANALYTICS
+          METRICS revenue_per_conversion, total_conversions
+          DIMENSIONS marketing.audience_segment
+      )
+      ORDER BY total_conversions DESC NULLS LAST
+    verified_by: "Cortex Analyst"
+    verified_at: 1744900000
+    use_as_onboarding_question: false

@@ -63,7 +63,15 @@ DIMENSIONS (
       COMMENT = 'Pass or ticket product held',
     DIM_CUSTOMER.STATE AS STATE
       WITH SYNONYMS ('home_state')
-      COMMENT = 'Home state for the guest'
+      COMMENT = 'Home state for the guest',
+    DIM_DATE.DATE_KEY AS DATE_KEY
+      COMMENT = 'Date surrogate key',
+    DIM_CUSTOMER.CUSTOMER_KEY AS CUSTOMER_KEY
+      COMMENT = 'Customer surrogate key',
+    FACT_PASS_USAGE.DATE_KEY AS DATE_KEY
+      COMMENT = 'Pass usage FK to date',
+    FACT_PASS_USAGE.CUSTOMER_KEY AS CUSTOMER_KEY
+      COMMENT = 'Pass usage FK to customer'
 )
 
 METRICS (
@@ -113,6 +121,48 @@ WITH EXTENSION (CA = $$
   "module_custom_instructions": {
     "question_categorization": "Route lift wait or terrain utilization questions to SKI_RESORT_DB.SEMANTIC.SEM_OPERATIONS. Route revenue, pricing, or transaction questions to SKI_RESORT_DB.SEMANTIC.SEM_REVENUE. Route pass value, ROI, or renewal questions to SKI_RESORT_DB.SEMANTIC.SEM_PASSHOLDER_ANALYTICS. If a request references a specific guest without a CUSTOMER_ID or clear customer name, ask the user to supply that identifier before proceeding. Clarify whether the user wants day visitors, pass holders, or all guests when the persona scope is unclear. When no time frame is provided, default to the current SKI_SEASON and confirm with the user.",
     "sql_generation": "Filter seasonal analyses with DIM_DATE.SKI_SEASON; use DIM_DATE.FULL_DATE with DATE_TRUNC or DATEADD for calendar windows. Use DIM_DATE.IS_WEEKEND or FACT_PASS_USAGE.IS_WEEKEND to split weekend versus weekday behavior instead of recalculating flags. Aggregate visit metrics from FACT_PASS_USAGE and guard any division with DIV0(...). Break down personas with DIM_CUSTOMER.CUSTOMER_SEGMENT, STATE, and PASS_TYPE rather than ad-hoc string filters. When profiling specific cohorts, join only the declared tables and apply explicit filters (for example DIM_CUSTOMER.IS_PASS_HOLDER = TRUE) before aggregating."
-  }
+  },
+  "verified_queries": [
+    {
+      "name": "visits_by_segment",
+      "question": "What are the total visits and unique customers by customer segment?",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    AM_SKI_RESORT.SEMANTIC.SEM_CUSTOMER_BEHAVIOR\n    DIMENSIONS dim_customer.customer_segment\n    METRICS total_visits, unique_customers\n)",
+      "verified_by": "Cortex Analyst",
+      "verified_at": 1744900000,
+      "use_as_onboarding_question": true
+    },
+    {
+      "name": "weekend_hours_by_season_pass",
+      "question": "What is the weekend share percentage and average hours per visit by ski season and pass type?",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    AM_SKI_RESORT.SEMANTIC.SEM_CUSTOMER_BEHAVIOR\n    DIMENSIONS dim_date.ski_season, dim_customer.pass_type\n    METRICS weekend_share_pct, average_hours_per_visit\n) ORDER BY ski_season DESC NULLS LAST, pass_type NULLS LAST",
+      "verified_by": "Cortex Analyst",
+      "verified_at": 1744900000,
+      "use_as_onboarding_question": true
+    },
+    {
+      "name": "retention_by_season",
+      "question": "What are the total visits, pass holder visits, and pass retention percentage by ski season?",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    AM_SKI_RESORT.SEMANTIC.SEM_CUSTOMER_BEHAVIOR\n    DIMENSIONS ski_season\n    METRICS total_visits, pass_holder_visits, pass_retention_pct\n) ORDER BY ski_season DESC NULLS LAST",
+      "verified_by": "Cortex Analyst",
+      "verified_at": 1744900000,
+      "use_as_onboarding_question": false
+    },
+    {
+      "name": "engagement_by_age_passholder",
+      "question": "What are the visits per customer and average lift rides per visit by age group and pass holder status?",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    AM_SKI_RESORT.SEMANTIC.SEM_CUSTOMER_BEHAVIOR\n    METRICS visits_per_customer, average_lift_rides_per_visit\n    DIMENSIONS dim_customer.age_group, dim_customer.is_pass_holder\n)",
+      "verified_by": "Cortex Analyst",
+      "verified_at": 1744900000,
+      "use_as_onboarding_question": false
+    },
+    {
+      "name": "passholder_visits_by_state",
+      "question": "What is the total visits and weekend visits by state for pass holders only?",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    AM_SKI_RESORT.SEMANTIC.SEM_CUSTOMER_BEHAVIOR\n    METRICS total_visits, weekend_visits\n    DIMENSIONS dim_customer.state\n    WHERE dim_customer.is_pass_holder = TRUE\n)",
+      "verified_by": "Cortex Analyst",
+      "verified_at": 1744900000,
+      "use_as_onboarding_question": false
+    }
+  ]
 }
 $$)

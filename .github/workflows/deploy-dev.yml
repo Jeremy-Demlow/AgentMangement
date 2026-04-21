@@ -6,6 +6,7 @@ on:
     paths:
       - 'agents/specs/**'
       - 'semantic-views/definitions/**'
+      - 'semantic-views/verified_queries/**'
       - 'agent_management/**'
       - 'environments/**'
 
@@ -73,6 +74,9 @@ jobs:
         with:
           snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
+      - name: Sync VQRs into dbt models
+        run: python -m agent_management.sync_vqrs_to_dbt
+
       - name: Run dbt (if dbt project exists)
         if: hashFiles('dbt_ski_resort/dbt_project.yml') != ''
         env:
@@ -109,10 +113,10 @@ jobs:
         with:
           snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
-      - name: Check SV eval results
+      - name: Run SV evaluations
         id: sv_eval
         run: |
-          python -m agent_management.check_sv_eval --env dev --run-name "CI-${{ github.sha }}" || echo "sv_eval_available=false" >> $GITHUB_OUTPUT
+          python -m agent_management.run_sv_eval --env dev --run-name "CI-${{ github.sha }}" || echo "sv_eval_failed=true" >> $GITHUB_OUTPUT
 
       - name: Cleanup
         if: always()
