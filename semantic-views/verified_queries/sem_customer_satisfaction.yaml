@@ -8,7 +8,7 @@ verified_queries:
           category,
           feedback_id,
           rating
-        FROM AM_SKI_RESORT.MARTS.FACT_FEEDBACK
+        FROM MARTS.FACT_FEEDBACK
       )
       SELECT
         category,
@@ -27,7 +27,7 @@ verified_queries:
     question: "What is the average NPS score and positive feedback count by customer segment?"
     sql: >-
       SELECT * FROM SEMANTIC_VIEW(
-        AM_SKI_RESORT.SEMANTIC.SEM_CUSTOMER_SATISFACTION
+        SEMANTIC.SEM_CUSTOMER_SATISFACTION
         DIMENSIONS customer_segment
         METRICS average_nps, positive_feedback_count
       )
@@ -43,7 +43,7 @@ verified_queries:
           feedback_date,
           feedback_id,
           rating
-        FROM AM_SKI_RESORT.MARTS.FACT_FEEDBACK
+        FROM MARTS.FACT_FEEDBACK
       )
       SELECT
         DATE_TRUNC('MONTH', feedback_date) AS month,
@@ -67,7 +67,7 @@ verified_queries:
           resolved,
           sentiment,
           feedback_id
-        FROM AM_SKI_RESORT.MARTS.FACT_FEEDBACK
+        FROM MARTS.FACT_FEEDBACK
       )
       SELECT
         feedback_type,
@@ -89,7 +89,7 @@ verified_queries:
     sql: >-
       SELECT *
       FROM SEMANTIC_VIEW(
-          AM_SKI_RESORT.SEMANTIC.SEM_CUSTOMER_SATISFACTION
+          SEMANTIC.SEM_CUSTOMER_SATISFACTION
           DIMENSIONS sentiment, category
           METRICS average_rating, average_nps
       )

@@ -7,7 +7,6 @@ Usage:
     python -m agent_management.sync_vqrs_to_dbt
     python -m agent_management.sync_vqrs_to_dbt --dry-run
     python -m agent_management.sync_vqrs_to_dbt --sv sem_revenue
-    python -m agent_management.sync_vqrs_to_dbt --database AM_SKI_RESORT_DEV
 
 Implements REQ-009: Semantic View Evaluation.
 """
@@ -18,15 +17,11 @@ import json
 import logging
 import re
 import sys
-from pathlib import Path
 
 import yaml
 
 from agent_management import setup_logging
 from agent_management.paths import project_root
-from agent_management.utils.config import load_env_config, get_database
-
-PROD_DATABASE = "AM_SKI_RESORT"
 
 logger = logging.getLogger(__name__)
 
@@ -58,24 +53,13 @@ def load_vqr_files(sv_filter: str | None = None) -> dict[str, list[dict]]:
     return results
 
 
-def rewrite_vqr_sql(sql: str, target_database: str) -> str:
-    if not target_database or target_database.upper() == PROD_DATABASE:
-        return sql
-    result = sql.replace(PROD_DATABASE + ".", target_database.upper() + ".")
-    result = result.replace(PROD_DATABASE.lower() + ".", target_database.upper() + ".")
-    return result
-
-
-def vqrs_to_ca_json(vqrs: list[dict], target_database: str | None = None) -> list[dict]:
+def vqrs_to_ca_json(vqrs: list[dict]) -> list[dict]:
     ca_vqrs = []
     for vq in vqrs:
-        sql = vq["sql"]
-        if target_database:
-            sql = rewrite_vqr_sql(sql, target_database)
         entry = {
             "name": vq["name"],
             "question": vq["question"],
-            "sql": sql,
+            "sql": vq["sql"],
             "verified_by": vq.get("verified_by", "agent_management"),
             "verified_at": vq.get("verified_at", 0),
         }
@@ -85,7 +69,7 @@ def vqrs_to_ca_json(vqrs: list[dict], target_database: str | None = None) -> lis
     return ca_vqrs
 
 
-def inject_vqrs_into_model(sql_content: str, vqrs: list[dict], target_database: str | None = None) -> str | None:
+def inject_vqrs_into_model(sql_content: str, vqrs: list[dict]) -> str | None:
     match = CA_BLOCK_PATTERN.search(sql_content)
     if not match:
         return None
@@ -100,14 +84,14 @@ def inject_vqrs_into_model(sql_content: str, vqrs: list[dict], target_database: 
         logger.error("    Failed to parse existing CA JSON")
         return None
 
-    ca_obj["verified_queries"] = vqrs_to_ca_json(vqrs, target_database)
+    ca_obj["verified_queries"] = vqrs_to_ca_json(vqrs)
     new_json = json.dumps(ca_obj, indent=2)
     new_block = f"{prefix}\n{new_json}\n{suffix}"
 
     return sql_content[:match.start()] + new_block + sql_content[match.end():]
 
 
-def sync(sv_filter: str | None = None, dry_run: bool = False, target_database: str | None = None) -> int:
+def sync(sv_filter: str | None = None, dry_run: bool = False) -> int:
     vqr_map = load_vqr_files(sv_filter)
     if not vqr_map:
         logger.warning("No VQR files found")
@@ -120,10 +104,9 @@ def sync(sv_filter: str | None = None, dry_run: bool = False, target_database: s
             logger.warning("  dbt model not found: %s", model_path.name)
             continue
 
-        db_label = f" [db={target_database}]" if target_database else ""
-        logger.info("\n  Syncing %s (%d VQRs) -> %s%s", sv_name, len(vqrs), model_path.name, db_label)
+        logger.info("\n  Syncing %s (%d VQRs) -> %s", sv_name, len(vqrs), model_path.name)
         sql_content = model_path.read_text()
-        updated = inject_vqrs_into_model(sql_content, vqrs, target_database)
+        updated = inject_vqrs_into_model(sql_content, vqrs)
 
         if updated is None:
             logger.error("    No WITH EXTENSION (CA=...) block found in %s", model_path.name)
@@ -147,25 +130,14 @@ def sync(sv_filter: str | None = None, dry_run: bool = False, target_database: s
 def main():
     parser = argparse.ArgumentParser(description="Sync VQRs into dbt semantic view models")
     parser.add_argument("--sv", help="Sync a single semantic view by name (e.g. sem_revenue)")
-    parser.add_argument("--database", help="Target database name (rewrites PROD refs in VQR SQL)")
-    parser.add_argument("--env", help="Resolve target database from environment config")
     parser.add_argument("--dry-run", action="store_true", help="Preview changes without writing")
     parser.add_argument("-v", "--verbose", action="count", default=1)
     args = parser.parse_args()
 
     setup_logging(args.verbose)
+    logger.info("Syncing verified queries into dbt models...")
 
-    target_database = args.database
-    if not target_database and args.env:
-        config = load_env_config(args.env)
-        target_database = get_database(config)
-
-    if target_database:
-        logger.info("Syncing verified queries into dbt models (target db: %s)...", target_database)
-    else:
-        logger.info("Syncing verified queries into dbt models...")
-
-    count = sync(sv_filter=args.sv, dry_run=args.dry_run, target_database=target_database)
+    count = sync(sv_filter=args.sv, dry_run=args.dry_run)
     logger.info("\n%d model(s) %s", count, "would be updated" if args.dry_run else "updated")
 
     if count == 0 and args.sv:

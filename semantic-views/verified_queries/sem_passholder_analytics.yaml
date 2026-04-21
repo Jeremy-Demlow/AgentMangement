@@ -5,7 +5,7 @@ verified_queries:
     sql: >-
       SELECT *
       FROM SEMANTIC_VIEW(
-        AM_SKI_RESORT.SEMANTIC.SEM_PASSHOLDER_ANALYTICS
+        SEMANTIC.SEM_PASSHOLDER_ANALYTICS
         METRICS pass_holder_visits, active_pass_holders
         DIMENSIONS dim_customer.pass_type
       )
@@ -18,7 +18,7 @@ verified_queries:
     sql: >-
       SELECT *
       FROM SEMANTIC_VIEW(
-          AM_SKI_RESORT.SEMANTIC.SEM_PASSHOLDER_ANALYTICS
+          SEMANTIC.SEM_PASSHOLDER_ANALYTICS
           DIMENSIONS dim_date.ski_season
           METRICS pass_revenue_total, average_pass_price
       )
@@ -32,7 +32,7 @@ verified_queries:
     sql: >-
       SELECT *
       FROM SEMANTIC_VIEW(
-          AM_SKI_RESORT.SEMANTIC.SEM_PASSHOLDER_ANALYTICS
+          SEMANTIC.SEM_PASSHOLDER_ANALYTICS
           METRICS pass_usage_per_holder, average_pass_session_hours
           DIMENSIONS dim_customer.customer_segment
           WHERE dim_customer.is_pass_holder = TRUE
@@ -46,7 +46,7 @@ verified_queries:
     sql: >-
       SELECT *
       FROM SEMANTIC_VIEW(
-        AM_SKI_RESORT.SEMANTIC.SEM_PASSHOLDER_ANALYTICS
+        SEMANTIC.SEM_PASSHOLDER_ANALYTICS
         DIMENSIONS ticket_category
         METRICS advance_pass_share_pct, pass_revenue_total
       )
@@ -59,7 +59,7 @@ verified_queries:
     sql: >-
       SELECT *
       FROM SEMANTIC_VIEW(
-        AM_SKI_RESORT.SEMANTIC.SEM_PASSHOLDER_ANALYTICS
+        SEMANTIC.SEM_PASSHOLDER_ANALYTICS
         METRICS active_pass_holders, pass_lift_rides_total
         DIMENSIONS dim_customer.state
       )

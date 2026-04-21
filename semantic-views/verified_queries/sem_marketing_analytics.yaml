@@ -5,7 +5,7 @@ verified_queries:
     sql: >-
       SELECT *
       FROM SEMANTIC_VIEW(
-          AM_SKI_RESORT.SEMANTIC.SEM_MARKETING_ANALYTICS
+          SEMANTIC.SEM_MARKETING_ANALYTICS
           METRICS total_revenue, total_conversions
           DIMENSIONS marketing.campaign_channel
       )
@@ -22,7 +22,7 @@ verified_queries:
           campaign_type,
           conversion_rate,
           revenue_attributed
-        FROM AM_SKI_RESORT.MARTS.FACT_MARKETING
+        FROM MARTS.FACT_MARKETING
       )
       SELECT
         m.campaign_type,
@@ -44,7 +44,7 @@ verified_queries:
     sql: >-
       SELECT *
       FROM SEMANTIC_VIEW(
-          AM_SKI_RESORT.SEMANTIC.SEM_MARKETING_ANALYTICS
+          SEMANTIC.SEM_MARKETING_ANALYTICS
           METRICS total_revenue, campaign_count
           DIMENSIONS dates.month_name
       )
@@ -57,7 +57,7 @@ verified_queries:
     sql: >-
       SELECT *
       FROM SEMANTIC_VIEW(
-          AM_SKI_RESORT.SEMANTIC.SEM_MARKETING_ANALYTICS
+          SEMANTIC.SEM_MARKETING_ANALYTICS
           METRICS avg_open_rate, avg_click_rate
           DIMENSIONS marketing.campaign_channel, marketing.campaign_type
       )
@@ -70,7 +70,7 @@ verified_queries:
     sql: >-
       SELECT *
       FROM SEMANTIC_VIEW(
-          AM_SKI_RESORT.SEMANTIC.SEM_MARKETING_ANALYTICS
+          SEMANTIC.SEM_MARKETING_ANALYTICS
           METRICS revenue_per_conversion, total_conversions
           DIMENSIONS marketing.audience_segment
       )

@@ -5,11 +5,11 @@ verified_queries:
     sql: >-
       WITH __fact_lift_maintenance AS (
         SELECT lift_key, maintenance_key, total_cost
-        FROM AM_SKI_RESORT.MARTS.FACT_LIFT_MAINTENANCE
+        FROM MARTS.FACT_LIFT_MAINTENANCE
       ),
       __dim_lift AS (
         SELECT lift_key, lift_name
-        FROM AM_SKI_RESORT.MARTS.DIM_LIFT
+        FROM MARTS.DIM_LIFT
       )
       SELECT l.lift_name,
       COUNT(m.maintenance_key) AS total_maintenance_events,
@@ -26,7 +26,7 @@ verified_queries:
     question: "What is the average wait time minutes and total scans by terrain type?"
     sql: >-
       SELECT * FROM SEMANTIC_VIEW(
-        AM_SKI_RESORT.SEMANTIC.SEM_OPERATIONS
+        SEMANTIC.SEM_OPERATIONS
         METRICS avg_wait_minutes, total_scans
         DIMENSIONS terrain_type
       )
@@ -38,7 +38,7 @@ verified_queries:
     question: "What is the total lift scans and average wait time minutes by lift name?"
     sql: >-
       SELECT * FROM SEMANTIC_VIEW(
-        AM_SKI_RESORT.SEMANTIC.SEM_OPERATIONS
+        SEMANTIC.SEM_OPERATIONS
         METRICS total_scans, avg_wait_minutes
         DIMENSIONS lift_name
       )
@@ -51,7 +51,7 @@ verified_queries:
     sql: >-
       WITH __fact_grooming AS (
         SELECT condition_improved, grooming_key, grooming_type, trail_name
-        FROM AM_SKI_RESORT.MARTS.FACT_GROOMING
+        FROM MARTS.FACT_GROOMING
       )
       SELECT g.trail_name, g.grooming_type,
       COUNT(g.grooming_key) AS total_runs,

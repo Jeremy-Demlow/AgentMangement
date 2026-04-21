@@ -5,7 +5,7 @@ verified_queries:
     sql: >-
       SELECT *
       FROM SEMANTIC_VIEW(
-          AM_SKI_RESORT.SEMANTIC.SEM_WEATHER_ANALYTICS
+          SEMANTIC.SEM_WEATHER_ANALYTICS
           DIMENSIONS weather.mountain_zone
           METRICS total_snowfall, powder_day_count
       )
@@ -18,7 +18,7 @@ verified_queries:
     sql: >-
       SELECT *
       FROM SEMANTIC_VIEW(
-          AM_SKI_RESORT.SEMANTIC.SEM_WEATHER_ANALYTICS
+          SEMANTIC.SEM_WEATHER_ANALYTICS
           METRICS total_snowfall, max_base_depth
           DIMENSIONS dates.ski_season, DATE_TRUNC('month', dates.full_date) AS month
       )
@@ -32,7 +32,7 @@ verified_queries:
     sql: >-
       SELECT *
       FROM SEMANTIC_VIEW(
-        AM_SKI_RESORT.SEMANTIC.SEM_WEATHER_ANALYTICS
+        SEMANTIC.SEM_WEATHER_ANALYTICS
         METRICS avg_snowfall, observation_count
         DIMENSIONS dates.month_name, weather.snow_condition
       )
@@ -45,7 +45,7 @@ verified_queries:
     sql: >-
       SELECT *
       FROM SEMANTIC_VIEW(
-        AM_SKI_RESORT.SEMANTIC.SEM_WEATHER_ANALYTICS
+        SEMANTIC.SEM_WEATHER_ANALYTICS
         METRICS powder_day_count, storm_count
         DIMENSIONS dates.ski_season
       )
@@ -58,7 +58,7 @@ verified_queries:
     sql: >-
       SELECT *
       FROM SEMANTIC_VIEW(
-          AM_SKI_RESORT.SEMANTIC.SEM_WEATHER_ANALYTICS
+          SEMANTIC.SEM_WEATHER_ANALYTICS
           METRICS min_temp, max_temp, max_wind
           DIMENSIONS weather.mountain_zone
           WHERE weather.wind_speed_mph >= 25

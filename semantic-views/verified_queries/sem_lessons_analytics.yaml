@@ -9,7 +9,7 @@ verified_queries:
           sport_type,
           lesson_id,
           total_lesson_revenue
-        FROM AM_SKI_RESORT.MARTS.FACT_LESSONS
+        FROM MARTS.FACT_LESSONS
       )
       SELECT
         lesson_type,
@@ -32,7 +32,7 @@ verified_queries:
     sql: >-
       SELECT *
       FROM SEMANTIC_VIEW(
-          AM_SKI_RESORT.SEMANTIC.SEM_LESSONS_ANALYTICS
+          SEMANTIC.SEM_LESSONS_ANALYTICS
           METRICS avg_student_rating
           DIMENSIONS instructor_name
       )
@@ -46,7 +46,7 @@ verified_queries:
     sql: >-
       SELECT *
       FROM SEMANTIC_VIEW(
-          AM_SKI_RESORT.SEMANTIC.SEM_LESSONS_ANALYTICS
+          SEMANTIC.SEM_LESSONS_ANALYTICS
           DIMENSIONS DATE_TRUNC('month', fact_lessons.lesson_date) AS lesson_month
           METRICS total_revenue
       )
@@ -60,7 +60,7 @@ verified_queries:
     sql: >-
       SELECT *
       FROM SEMANTIC_VIEW(
-          AM_SKI_RESORT.SEMANTIC.SEM_LESSONS_ANALYTICS
+          SEMANTIC.SEM_LESSONS_ANALYTICS
           DIMENSIONS booking_channel, customer_segment
           METRICS total_lessons, total_revenue
       )
@@ -73,7 +73,7 @@ verified_queries:
     sql: >-
       SELECT *
       FROM SEMANTIC_VIEW(
-          AM_SKI_RESORT.SEMANTIC.SEM_LESSONS_ANALYTICS
+          SEMANTIC.SEM_LESSONS_ANALYTICS
           DIMENSIONS skill_level
           METRICS private_lessons, group_lessons
       )

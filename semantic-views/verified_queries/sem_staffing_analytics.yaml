@@ -5,7 +5,7 @@ verified_queries:
     sql: >-
       SELECT *
       FROM SEMANTIC_VIEW(
-          AM_SKI_RESORT.SEMANTIC.SEM_STAFFING_ANALYTICS
+          SEMANTIC.SEM_STAFFING_ANALYTICS
           METRICS total_actual_hours, total_scheduled_hours
           DIMENSIONS department
       )
@@ -18,7 +18,7 @@ verified_queries:
     sql: >-
       SELECT *
       FROM SEMANTIC_VIEW(
-        AM_SKI_RESORT.SEMANTIC.SEM_STAFFING_ANALYTICS
+        SEMANTIC.SEM_STAFFING_ANALYTICS
         METRICS avg_coverage
         DIMENSIONS department, day_name
       )
@@ -33,7 +33,7 @@ verified_queries:
       WITH holiday_coverage AS (
         SELECT *
         FROM SEMANTIC_VIEW(
-          AM_SKI_RESORT.SEMANTIC.SEM_STAFFING_ANALYTICS
+          SEMANTIC.SEM_STAFFING_ANALYTICS
           METRICS avg_coverage
           DIMENSIONS department, is_holiday
         )
@@ -63,7 +63,7 @@ verified_queries:
     sql: >-
       WITH __staffing AS (
         SELECT job_role, staffing_key, coverage_ratio, is_understaffed
-        FROM AM_SKI_RESORT.MARTS.FACT_STAFFING
+        FROM MARTS.FACT_STAFFING
       )
       SELECT s.job_role,
       COUNT(CASE WHEN s.is_understaffed THEN 1 END) AS understaffed_shift_count,
@@ -80,15 +80,15 @@ verified_queries:
     sql: >-
       WITH __staffing AS (
         SELECT date_key, location_key, is_understaffed
-        FROM AM_SKI_RESORT.MARTS.FACT_STAFFING
+        FROM MARTS.FACT_STAFFING
       ),
       __dates AS (
         SELECT date_key, full_date
-        FROM AM_SKI_RESORT.MARTS.DIM_DATE
+        FROM MARTS.DIM_DATE
       ),
       __locations AS (
         SELECT location_key, location_name
-        FROM AM_SKI_RESORT.MARTS.DIM_LOCATION
+        FROM MARTS.DIM_LOCATION
       ),
       monthly_understaffed AS (
         SELECT l.location_name,

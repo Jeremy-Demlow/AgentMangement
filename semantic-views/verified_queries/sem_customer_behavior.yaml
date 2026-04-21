@@ -5,7 +5,7 @@ verified_queries:
     sql: >-
       SELECT *
       FROM SEMANTIC_VIEW(
-          AM_SKI_RESORT.SEMANTIC.SEM_CUSTOMER_BEHAVIOR
+          SEMANTIC.SEM_CUSTOMER_BEHAVIOR
           DIMENSIONS dim_customer.customer_segment
           METRICS total_visits, unique_customers
       )
@@ -18,7 +18,7 @@ verified_queries:
     sql: >-
       SELECT *
       FROM SEMANTIC_VIEW(
-          AM_SKI_RESORT.SEMANTIC.SEM_CUSTOMER_BEHAVIOR
+          SEMANTIC.SEM_CUSTOMER_BEHAVIOR
           DIMENSIONS dim_date.ski_season, dim_customer.pass_type
           METRICS weekend_share_pct, average_hours_per_visit
       )
@@ -32,7 +32,7 @@ verified_queries:
     sql: >-
       SELECT *
       FROM SEMANTIC_VIEW(
-          AM_SKI_RESORT.SEMANTIC.SEM_CUSTOMER_BEHAVIOR
+          SEMANTIC.SEM_CUSTOMER_BEHAVIOR
           DIMENSIONS ski_season
           METRICS total_visits, pass_holder_visits, pass_retention_pct
       )
@@ -46,7 +46,7 @@ verified_queries:
     sql: >-
       SELECT *
       FROM SEMANTIC_VIEW(
-          AM_SKI_RESORT.SEMANTIC.SEM_CUSTOMER_BEHAVIOR
+          SEMANTIC.SEM_CUSTOMER_BEHAVIOR
           METRICS visits_per_customer, average_lift_rides_per_visit
           DIMENSIONS dim_customer.age_group, dim_customer.is_pass_holder
       )
@@ -59,7 +59,7 @@ verified_queries:
     sql: >-
       SELECT *
       FROM SEMANTIC_VIEW(
-          AM_SKI_RESORT.SEMANTIC.SEM_CUSTOMER_BEHAVIOR
+          SEMANTIC.SEM_CUSTOMER_BEHAVIOR
           METRICS total_visits, weekend_visits
           DIMENSIONS dim_customer.state
           WHERE dim_customer.is_pass_holder = TRUE

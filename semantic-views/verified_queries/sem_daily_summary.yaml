@@ -5,11 +5,11 @@ verified_queries:
     sql: >-
       WITH __fact_pass_usage AS (
         SELECT customer_key, date_key, usage_key
-        FROM AM_SKI_RESORT.MARTS.FACT_PASS_USAGE
+        FROM MARTS.FACT_PASS_USAGE
       ),
       __dim_date AS (
         SELECT date_key, day_name
-        FROM AM_SKI_RESORT.MARTS.DIM_DATE
+        FROM MARTS.DIM_DATE
       )
       SELECT d.day_name,
       COUNT(pu.usage_key) AS total_visits,
@@ -27,11 +27,11 @@ verified_queries:
     sql: >-
       WITH __fact_pass_usage AS (
         SELECT customer_key, date_key, usage_key
-        FROM AM_SKI_RESORT.MARTS.FACT_PASS_USAGE
+        FROM MARTS.FACT_PASS_USAGE
       ),
       __dim_date AS (
         SELECT date_key, ski_season
-        FROM AM_SKI_RESORT.MARTS.DIM_DATE
+        FROM MARTS.DIM_DATE
       )
       SELECT d.ski_season,
       COUNT(pu.usage_key) AS total_visits,
@@ -51,11 +51,11 @@ verified_queries:
     sql: >-
       WITH __fact_pass_usage AS (
         SELECT customer_key, date_key, usage_key, hours_on_mountain
-        FROM AM_SKI_RESORT.MARTS.FACT_PASS_USAGE
+        FROM MARTS.FACT_PASS_USAGE
       ),
       __dim_date AS (
         SELECT date_key, snow_condition
-        FROM AM_SKI_RESORT.MARTS.DIM_DATE
+        FROM MARTS.DIM_DATE
       )
       SELECT d.snow_condition,
       COUNT(pu.usage_key) AS total_visits,
@@ -74,11 +74,11 @@ verified_queries:
     sql: >-
       WITH __fact_pass_usage AS (
         SELECT customer_key, date_key, usage_key
-        FROM AM_SKI_RESORT.MARTS.FACT_PASS_USAGE
+        FROM MARTS.FACT_PASS_USAGE
       ),
       __dim_date AS (
         SELECT date_key, is_weekend, ski_season
-        FROM AM_SKI_RESORT.MARTS.DIM_DATE
+        FROM MARTS.DIM_DATE
       )
       SELECT d.ski_season,
       COUNT(CASE WHEN d.is_weekend THEN 1 END) AS weekend_visits,
@@ -95,7 +95,7 @@ verified_queries:
     question: "What is the average lift rides per visit and average hours per visit by ski season?"
     sql: >-
       SELECT * FROM SEMANTIC_VIEW(
-        AM_SKI_RESORT.SEMANTIC.SEM_DAILY_SUMMARY
+        SEMANTIC.SEM_DAILY_SUMMARY
         METRICS avg_rides_per_visit, avg_hours_per_visit
         DIMENSIONS ski_season
       )

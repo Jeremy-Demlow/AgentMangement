@@ -4,7 +4,7 @@ verified_queries:
     question: "What are the total incidents and average severity by incident type?"
     sql: >-
       SELECT * FROM SEMANTIC_VIEW(
-        AM_SKI_RESORT.SEMANTIC.SEM_SAFETY_INCIDENTS
+        SEMANTIC.SEM_SAFETY_INCIDENTS
         DIMENSIONS incident_type
         METRICS total_incidents, average_severity
       )
@@ -17,7 +17,7 @@ verified_queries:
     sql: >-
       SELECT *
       FROM SEMANTIC_VIEW(
-          AM_SKI_RESORT.SEMANTIC.SEM_SAFETY_INCIDENTS
+          SEMANTIC.SEM_SAFETY_INCIDENTS
           METRICS total_incidents, critical_incidents
           DIMENSIONS trail_name
           WHERE trail_name IS NOT NULL
@@ -36,7 +36,7 @@ verified_queries:
           incident_date,
           incident_id,
           patrol_response_minutes
-        FROM AM_SKI_RESORT.MARTS.FACT_INCIDENTS
+        FROM MARTS.FACT_INCIDENTS
       )
       SELECT
         DATE_TRUNC('MONTH', incident_date) AS month,
@@ -55,7 +55,7 @@ verified_queries:
     question: "What is the average severity and total incidents by customer skill level and severity level?"
     sql: >-
       SELECT * FROM SEMANTIC_VIEW(
-        AM_SKI_RESORT.SEMANTIC.SEM_SAFETY_INCIDENTS
+        SEMANTIC.SEM_SAFETY_INCIDENTS
         METRICS average_severity, total_incidents
         DIMENSIONS customer_skill_level, severity
       )
@@ -68,7 +68,7 @@ verified_queries:
     sql: >-
       SELECT *
       FROM SEMANTIC_VIEW(
-          AM_SKI_RESORT.SEMANTIC.SEM_SAFETY_INCIDENTS
+          SEMANTIC.SEM_SAFETY_INCIDENTS
           DIMENSIONS fact_incidents.customer_segment
           METRICS total_incidents, critical_incidents
           WHERE fact_incidents.transport_required = TRUE

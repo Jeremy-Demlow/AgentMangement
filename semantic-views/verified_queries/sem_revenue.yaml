@@ -4,7 +4,7 @@ verified_queries:
     question: "What is the total ticket sales revenue by ticket category?"
     sql: >-
       SELECT * FROM SEMANTIC_VIEW(
-        AM_SKI_RESORT.SEMANTIC.SEM_REVENUE
+        SEMANTIC.SEM_REVENUE
         METRICS ticket_revenue
         DIMENSIONS ticket_category
       )
@@ -18,11 +18,11 @@ verified_queries:
     sql: >-
       WITH __fact_rentals AS (
         SELECT product_key, rental_amount
-        FROM AM_SKI_RESORT.MARTS.FACT_RENTALS
+        FROM MARTS.FACT_RENTALS
       ),
       __dim_product AS (
         SELECT product_category, product_key
-        FROM AM_SKI_RESORT.MARTS.DIM_PRODUCT
+        FROM MARTS.DIM_PRODUCT
       )
       SELECT dp.product_category,
       SUM(fr.rental_amount) AS total_rental_revenue
@@ -38,7 +38,7 @@ verified_queries:
     question: "What is the total food and beverage revenue by location name?"
     sql: >-
       SELECT * FROM SEMANTIC_VIEW(
-        AM_SKI_RESORT.SEMANTIC.SEM_REVENUE
+        SEMANTIC.SEM_REVENUE
         METRICS fnb_revenue
         DIMENSIONS location_name
       )
@@ -51,7 +51,7 @@ verified_queries:
     question: "What is the rental revenue and rental markup dollars by ski season?"
     sql: >-
       SELECT * FROM SEMANTIC_VIEW(
-        AM_SKI_RESORT.SEMANTIC.SEM_REVENUE
+        SEMANTIC.SEM_REVENUE
         METRICS rental_revenue, rental_markup_dollars
         DIMENSIONS ski_season
       )
@@ -64,7 +64,7 @@ verified_queries:
     question: "How does the advance purchase rate and average ticket price differ between pass holders and non-pass holders by ticket category?"
     sql: >-
       SELECT * FROM SEMANTIC_VIEW(
-        AM_SKI_RESORT.SEMANTIC.SEM_REVENUE
+        SEMANTIC.SEM_REVENUE
         METRICS advance_sales_share_pct, average_ticket_price
         DIMENSIONS is_pass_holder, ticket_category
       )
