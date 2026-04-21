@@ -114,9 +114,7 @@ jobs:
           snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
       - name: Run SV evaluations
-        id: sv_eval
-        run: |
-          python -m agent_management.run_sv_eval --env dev --run-name "CI-${{ github.sha }}" || echo "sv_eval_failed=true" >> $GITHUB_OUTPUT
+        run: python -m agent_management.run_sv_eval --env dev --run-name "CI-${{ github.sha }}"
 
       - name: Cleanup
         if: always()
