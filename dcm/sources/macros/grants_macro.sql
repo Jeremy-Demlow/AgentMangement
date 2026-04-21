@@ -17,6 +17,7 @@
     GRANT CREATE DYNAMIC TABLE ON SCHEMA {{db}}.{{schema}} TO DATABASE ROLE {{db}}.{{role}};
     GRANT CREATE STAGE ON SCHEMA {{db}}.{{schema}} TO DATABASE ROLE {{db}}.{{role}};
     GRANT CREATE FILE FORMAT ON SCHEMA {{db}}.{{schema}} TO DATABASE ROLE {{db}}.{{role}};
+    GRANT CREATE DATASET ON SCHEMA {{db}}.{{schema}} TO DATABASE ROLE {{db}}.{{role}};
     GRANT CREATE FUNCTION ON SCHEMA {{db}}.{{schema}} TO DATABASE ROLE {{db}}.{{role}};
     GRANT CREATE PROCEDURE ON SCHEMA {{db}}.{{schema}} TO DATABASE ROLE {{db}}.{{role}};
     GRANT CREATE AGENT ON SCHEMA {{db}}.{{schema}} TO DATABASE ROLE {{db}}.{{role}};
