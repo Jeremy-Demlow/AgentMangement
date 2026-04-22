@@ -20,6 +20,7 @@ GRANT ROLE {{wh_role}} TO ROLE {{deploy_role}};
 GRANT ROLE {{deploy_role}} TO ROLE SYSADMIN;
 
 GRANT USAGE ON WAREHOUSE {{wh_name}} TO ROLE {{wh_role}};
+GRANT EXECUTE TASK ON ACCOUNT TO ROLE {{deploy_role}};
 GRANT USAGE ON DATABASE {{db}} TO DATABASE ROLE {{db}}.ANALYST;
 
 {{ schema_read_grants(db, 'RAW', 'ANALYST') }}
@@ -43,6 +44,7 @@ GRANT USAGE ON DATABASE {{db}} TO DATABASE ROLE {{db}}.ANALYST;
 
 {{ schema_stage_write_grants(db, 'AGENTS' ~ agents_schema_suffix, 'DEVELOPER') }}
 {{ schema_stage_write_grants(db, 'AGENTS' ~ agents_schema_suffix, 'ADMIN') }}
+{{ schema_stage_write_grants(db, 'SEMANTIC' ~ semantic_schema_suffix, 'ADMIN') }}
 {{ schema_stage_write_grants(db, 'DOCS', 'ADMIN') }}
 
 {% for user_name in users %}

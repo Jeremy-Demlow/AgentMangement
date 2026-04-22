@@ -60,7 +60,11 @@ DIMENSIONS (
       COMMENT = 'Campaign type (Acquisition, Retention, etc)',
     MARKETING.AUDIENCE_SEGMENT AS AUDIENCE_SEGMENT
       WITH SYNONYMS ('segment', 'audience')
-      COMMENT = 'Target audience segment'
+      COMMENT = 'Target audience segment',
+    DATES.DATE_KEY AS DATE_KEY
+      COMMENT = 'Date surrogate key',
+    MARKETING.SEND_DATE_KEY AS SEND_DATE_KEY
+      COMMENT = 'Marketing FK to date'
 )
 
 METRICS (
@@ -98,6 +102,48 @@ WITH EXTENSION (CA = $$
   "module_custom_instructions": {
     "question_categorization": "Use this view for marketing questions: campaign performance, conversion rates, revenue attribution, and channel effectiveness. For customer-level campaign impact, join with customer dimension.",
     "sql_generation": "Group by CAMPAIGN_CHANNEL for channel analysis. Use CAMPAIGN_TYPE to compare acquisition vs retention. Calculate ROI as (TOTAL_REVENUE - campaign_cost) / campaign_cost when cost data available. Use DIV0 for safe division."
-  }
+  },
+  "verified_queries": [
+    {
+      "name": "revenue_conversions_by_channel",
+      "question": "What is the total revenue and total conversions by campaign channel?",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    AM_SKI_RESORT.SEMANTIC.SEM_MARKETING_ANALYTICS\n    METRICS total_revenue, total_conversions\n    DIMENSIONS marketing.campaign_channel\n)",
+      "verified_by": "Cortex Analyst",
+      "verified_at": 1744900000,
+      "use_as_onboarding_question": true
+    },
+    {
+      "name": "revenue_conversion_rate_by_type_segment",
+      "question": "What is the total revenue and average conversion rate by campaign type and audience segment?",
+      "sql": "WITH __marketing AS (\n  SELECT\n    audience_segment,\n    campaign_type,\n    conversion_rate,\n    revenue_attributed\n  FROM AM_SKI_RESORT.MARTS.FACT_MARKETING\n) SELECT\n  m.campaign_type,\n  m.audience_segment,\n  SUM(m.revenue_attributed) AS total_revenue,\n  AVG(m.conversion_rate) AS avg_conversion_rate\nFROM __marketing AS m GROUP BY\n  m.campaign_type,\n  m.audience_segment\nORDER BY\n  total_revenue DESC NULLS LAST",
+      "verified_by": "Cortex Analyst",
+      "verified_at": 1744900000,
+      "use_as_onboarding_question": true
+    },
+    {
+      "name": "monthly_revenue_campaign_count",
+      "question": "What is the monthly total revenue and campaign count by month name?",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    AM_SKI_RESORT.SEMANTIC.SEM_MARKETING_ANALYTICS\n    METRICS total_revenue, campaign_count\n    DIMENSIONS dates.month_name\n)",
+      "verified_by": "Cortex Analyst",
+      "verified_at": 1744900000,
+      "use_as_onboarding_question": false
+    },
+    {
+      "name": "open_click_rate_by_channel_type",
+      "question": "What is the average open rate and average click rate by campaign channel and campaign type?",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    AM_SKI_RESORT.SEMANTIC.SEM_MARKETING_ANALYTICS\n    METRICS avg_open_rate, avg_click_rate\n    DIMENSIONS marketing.campaign_channel, marketing.campaign_type\n)",
+      "verified_by": "Cortex Analyst",
+      "verified_at": 1744900000,
+      "use_as_onboarding_question": false
+    },
+    {
+      "name": "revenue_per_conversion_by_segment",
+      "question": "What is the revenue per conversion and total conversions by audience segment?",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    AM_SKI_RESORT.SEMANTIC.SEM_MARKETING_ANALYTICS\n    METRICS revenue_per_conversion, total_conversions\n    DIMENSIONS marketing.audience_segment\n) ORDER BY total_conversions DESC NULLS LAST",
+      "verified_by": "Cortex Analyst",
+      "verified_at": 1744900000,
+      "use_as_onboarding_question": false
+    }
+  ]
 }
 $$)

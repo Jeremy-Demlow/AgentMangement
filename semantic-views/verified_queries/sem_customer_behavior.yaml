@@ -1,0 +1,69 @@
+semantic_view: SEM_CUSTOMER_BEHAVIOR
+verified_queries:
+  - name: visits_by_segment
+    question: "What are the total visits and unique customers by customer segment?"
+    sql: >-
+      SELECT *
+      FROM SEMANTIC_VIEW(
+          SEMANTIC.SEM_CUSTOMER_BEHAVIOR
+          DIMENSIONS dim_customer.customer_segment
+          METRICS total_visits, unique_customers
+      )
+    verified_by: "Cortex Analyst"
+    verified_at: 1744900000
+    use_as_onboarding_question: true
+
+  - name: weekend_hours_by_season_pass
+    question: "What is the weekend share percentage and average hours per visit by ski season and pass type?"
+    sql: >-
+      SELECT *
+      FROM SEMANTIC_VIEW(
+          SEMANTIC.SEM_CUSTOMER_BEHAVIOR
+          DIMENSIONS dim_date.ski_season, dim_customer.pass_type
+          METRICS weekend_share_pct, average_hours_per_visit
+      )
+      ORDER BY ski_season DESC NULLS LAST, pass_type NULLS LAST
+    verified_by: "Cortex Analyst"
+    verified_at: 1744900000
+    use_as_onboarding_question: true
+
+  - name: retention_by_season
+    question: "What are the total visits, pass holder visits, and pass retention percentage by ski season?"
+    sql: >-
+      SELECT *
+      FROM SEMANTIC_VIEW(
+          SEMANTIC.SEM_CUSTOMER_BEHAVIOR
+          DIMENSIONS ski_season
+          METRICS total_visits, pass_holder_visits, pass_retention_pct
+      )
+      ORDER BY ski_season DESC NULLS LAST
+    verified_by: "Cortex Analyst"
+    verified_at: 1744900000
+    use_as_onboarding_question: false
+
+  - name: engagement_by_age_passholder
+    question: "What are the visits per customer and average lift rides per visit by age group and pass holder status?"
+    sql: >-
+      SELECT *
+      FROM SEMANTIC_VIEW(
+          SEMANTIC.SEM_CUSTOMER_BEHAVIOR
+          METRICS visits_per_customer, average_lift_rides_per_visit
+          DIMENSIONS dim_customer.age_group, dim_customer.is_pass_holder
+      )
+    verified_by: "Cortex Analyst"
+    verified_at: 1744900000
+    use_as_onboarding_question: false
+
+  - name: passholder_visits_by_state
+    question: "What is the total visits and weekend visits by state for pass holders only?"
+    sql: >-
+      SELECT *
+      FROM SEMANTIC_VIEW(
+          SEMANTIC.SEM_CUSTOMER_BEHAVIOR
+          METRICS total_visits, weekend_visits
+          DIMENSIONS dim_customer.state
+          WHERE dim_customer.is_pass_holder = TRUE
+      )
+    verified_by: "Cortex Analyst"
+    verified_at: 1744900000
+    use_as_onboarding_question: false

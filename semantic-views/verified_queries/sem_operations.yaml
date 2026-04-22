@@ -1,0 +1,65 @@
+semantic_view: SEM_OPERATIONS
+verified_queries:
+  - name: maintenance_cost_by_lift
+    question: "What is the total maintenance cost and maintenance event count by lift name?"
+    sql: >-
+      WITH __fact_lift_maintenance AS (
+        SELECT lift_key, maintenance_key, total_cost
+        FROM MARTS.FACT_LIFT_MAINTENANCE
+      ),
+      __dim_lift AS (
+        SELECT lift_key, lift_name
+        FROM MARTS.DIM_LIFT
+      )
+      SELECT l.lift_name,
+      COUNT(m.maintenance_key) AS total_maintenance_events,
+      SUM(m.total_cost) AS total_maintenance_cost
+      FROM __fact_lift_maintenance AS m
+      LEFT OUTER JOIN __dim_lift AS l ON m.lift_key = l.lift_key
+      GROUP BY l.lift_name
+      ORDER BY total_maintenance_cost DESC NULLS LAST
+    verified_by: "Cortex Analyst"
+    verified_at: 1745200000
+    use_as_onboarding_question: true
+
+  - name: scans_wait_by_terrain
+    question: "What is the average wait time minutes and total scans by terrain type?"
+    sql: >-
+      SELECT * FROM SEMANTIC_VIEW(
+        SEMANTIC.SEM_OPERATIONS
+        METRICS avg_wait_minutes, total_scans
+        DIMENSIONS terrain_type
+      )
+    verified_by: "Cortex Analyst"
+    verified_at: 1745200000
+    use_as_onboarding_question: true
+
+  - name: scans_wait_by_lift
+    question: "What is the total lift scans and average wait time minutes by lift name?"
+    sql: >-
+      SELECT * FROM SEMANTIC_VIEW(
+        SEMANTIC.SEM_OPERATIONS
+        METRICS total_scans, avg_wait_minutes
+        DIMENSIONS lift_name
+      )
+    verified_by: "Cortex Analyst"
+    verified_at: 1745200000
+    use_as_onboarding_question: false
+
+  - name: grooming_effectiveness_by_type
+    question: "Which trails have the best grooming condition improvement rate, and what grooming types are most effective?"
+    sql: >-
+      WITH __fact_grooming AS (
+        SELECT condition_improved, grooming_key, grooming_type, trail_name
+        FROM MARTS.FACT_GROOMING
+      )
+      SELECT g.trail_name, g.grooming_type,
+      COUNT(g.grooming_key) AS total_runs,
+      COUNT(CASE WHEN g.condition_improved THEN 1 END) AS improved_runs,
+      COUNT(CASE WHEN g.condition_improved THEN 1 END) * 100.0 / NULLIF(NULLIF(COUNT(g.grooming_key), 0), 0) AS improvement_rate_pct
+      FROM __fact_grooming AS g
+      GROUP BY g.trail_name, g.grooming_type
+      ORDER BY improvement_rate_pct DESC NULLS LAST, total_runs DESC NULLS LAST
+    verified_by: "Cortex Analyst"
+    verified_at: 1744900000
+    use_as_onboarding_question: false

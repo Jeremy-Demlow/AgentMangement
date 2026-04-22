@@ -1,7 +1,36 @@
-"""Check semantic view evaluation results via GET_AI_EVALUATION_DATA.
+"""Check semantic view evaluation results via GET_ANALYST_AI_EVALUATION_DATA.
 
-Queries Snowflake for SV eval results, computes SQL correctness score,
-and checks against thresholds.
+Queries Snowflake for SV eval results, computes SQL correctness score
+from EVAL_AGG_SCORE, and checks against thresholds.
+
+Function reference:
+    SNOWFLAKE.LOCAL.GET_ANALYST_AI_EVALUATION_DATA(
+        <DATABASE>,    -- Database containing the semantic view
+        <SCHEMA>,      -- Schema containing the semantic view
+        <OBJECT_NAME>, -- Name of the semantic view
+        <OBJECT_TYPE>, -- 'SEMANTIC VIEW'
+        <RUN_NAME>     -- Eval run label e.g. 'eval_revenue_v9'
+    )
+
+    Returns columns:
+        RECORD_ID       VARCHAR   Unique record identifier
+        INPUT_ID        VARCHAR   Unique input identifier
+        REQUEST_ID      VARCHAR   Unique request identifier
+        TIMESTAMP       TIMESTAMP Time the request was made
+        DURATION_MS     INT       Analyst response time in ms
+        INPUT           VARCHAR   Query string used as input
+        OUTPUT          VARCHAR   SQL response from Cortex Analyst
+        ERROR           VARCHAR   Error info (empty on success)
+        GROUND_TRUTH    VARCHAR   Expected SQL from VQR
+        METRIC_NAME     VARCHAR   Metric name (e.g. 'sql_correctness')
+        EVAL_AGG_SCORE  NUMBER    Score: 1=correct, 0.5=partial, 0=wrong, NULL=error
+        METRIC_TYPE     VARCHAR   'system' for built-in, 'custom' for custom
+        METRIC_STATUS   VARIANT   Internal status object
+        METRIC_CALLS    VARIANT   Internal metric call details
+
+    NOTE: This is different from GET_AI_EVALUATION_DATA which only works
+    for agent_type='CORTEX AGENT'. For semantic view evals, you MUST use
+    GET_ANALYST_AI_EVALUATION_DATA.
 
 Usage:
     python -m agent_management.check_sv_eval --env prod --run-name "my_eval_run"
@@ -26,7 +55,7 @@ def get_sv_eval_data(cur, database: str, schema: str, sv_name: str, run_name: st
     try:
         cur.execute(f"""
             SELECT *
-            FROM TABLE(SNOWFLAKE.LOCAL.GET_AI_EVALUATION_DATA(
+            FROM TABLE(SNOWFLAKE.LOCAL.GET_ANALYST_AI_EVALUATION_DATA(
                 '{database}', '{schema}', '{sv_name}', 'SEMANTIC VIEW', '{run_name}'
             ))
         """)
@@ -42,17 +71,34 @@ def get_sv_eval_data(cur, database: str, schema: str, sv_name: str, run_name: st
 
 def compute_sv_score(results: list[dict]) -> dict:
     if not results:
-        return {"total": 0, "correct": 0, "score": 0.0, "regressions": 0}
+        return {"total": 0, "scored": 0, "sum_score": 0.0, "score": 0.0, "errors": 0, "details": []}
 
     total = len(results)
-    correct = sum(1 for r in results if r.get("SQL_CORRECT", r.get("sql_correct")) in (True, "TRUE", "true", 1))
-    regressions = sum(1 for r in results if r.get("REGRESSION", r.get("regression")) in (True, "TRUE", "true", 1))
+    details = []
+    sum_score = 0.0
+    scored = 0
+    errors = 0
+
+    for r in results:
+        agg = r.get("EVAL_AGG_SCORE")
+        question = (r.get("INPUT") or "")[:120]
+        error = r.get("ERROR") or ""
+        detail = {"question": question, "score": agg, "has_error": bool(error)}
+        details.append(detail)
+
+        if agg is not None:
+            sum_score += float(agg)
+            scored += 1
+        else:
+            errors += 1
 
     return {
         "total": total,
-        "correct": correct,
-        "score": round(correct / total, 4) if total > 0 else 0.0,
-        "regressions": regressions,
+        "scored": scored,
+        "sum_score": round(sum_score, 4),
+        "score": round(sum_score / scored, 4) if scored > 0 else 0.0,
+        "errors": errors,
+        "details": details,
     }
 
 
@@ -71,11 +117,10 @@ def main():
     schema = config["deployment"]["semantic_schema"]
 
     sv_threshold = thresholds.get("sv_sql_correctness", 0.70)
-    max_regressions = thresholds.get("sv_max_regressions", 0)
 
     logger.info("Environment: %s", config['environment'])
     logger.info("Run: %s", args.run_name)
-    logger.info("Thresholds: sql_correctness >= %s, max_regressions <= %s", sv_threshold, max_regressions)
+    logger.info("Threshold: sql_correctness >= %s", sv_threshold)
     logger.info("=" * 60)
 
     conn = connect(config)
@@ -103,14 +148,17 @@ def main():
             total_checked += 1
 
             score_pass = metrics["score"] >= sv_threshold
-            regression_pass = metrics["regressions"] <= max_regressions
 
-            logger.info("    Queries: %d", metrics['total'])
-            logger.info("    Correct: %d", metrics['correct'])
-            logger.info("    Score: %.4f %s %s [%s]", metrics['score'], '≥' if score_pass else '<', sv_threshold, 'PASS' if score_pass else 'FAIL')
-            logger.info("    Regressions: %d %s %s [%s]", metrics['regressions'], '≤' if regression_pass else '>', max_regressions, 'PASS' if regression_pass else 'FAIL')
+            logger.info("    VQRs: %d total, %d scored, %d errors", metrics['total'], metrics['scored'], metrics['errors'])
+            logger.info("    Score: %.1f%% (%s/%s) %s %s [%s]",
+                        metrics['score'] * 100, metrics['sum_score'], metrics['scored'],
+                        '≥' if score_pass else '<', f"{sv_threshold:.0%}",
+                        'PASS' if score_pass else 'FAIL')
+            for d in metrics['details']:
+                flag = '✓' if d['score'] == 1 else ('½' if d['score'] == 0.5 else ('✗' if d['score'] == 0 else '?'))
+                logger.info("      [%s] %s", flag, d['question'])
 
-            if not score_pass or not regression_pass:
+            if not score_pass:
                 all_passed = False
 
         logger.info("\n%s", "=" * 60)

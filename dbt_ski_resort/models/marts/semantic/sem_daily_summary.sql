@@ -36,6 +36,16 @@ FACTS (
 )
 
 DIMENSIONS (
+    DIM_DATE.DATE_KEY AS DATE_KEY
+      COMMENT = 'Date surrogate key',
+    DIM_CUSTOMER.CUSTOMER_KEY AS CUSTOMER_KEY
+      COMMENT = 'Customer surrogate key',
+    FACT_PASS_USAGE.USAGE_KEY AS USAGE_KEY
+      COMMENT = 'Pass usage surrogate key',
+    FACT_PASS_USAGE.DATE_KEY AS DATE_KEY
+      COMMENT = 'Pass usage FK to date',
+    FACT_PASS_USAGE.CUSTOMER_KEY AS CUSTOMER_KEY
+      COMMENT = 'Pass usage FK to customer',
     -- Date dimensions
     DIM_DATE.FULL_DATE AS FULL_DATE
       WITH SYNONYMS ('date', 'day', 'visit_date')
@@ -145,6 +155,48 @@ WITH EXTENSION (CA = $$
   "module_custom_instructions": {
     "question_categorization": "This is the primary view for overall resort performance, visitor trends, and attendance patterns. Use it for questions about daily visitors, seasonal comparisons, weekend vs weekday patterns, and guest segment mix. Route detailed lift wait times to SEM_OPERATIONS. Route revenue and spend questions to SEM_REVENUE. Route pass holder ROI questions to SEM_PASSHOLDER_ANALYTICS. Route customer journey questions to SEM_CUSTOMER_BEHAVIOR. When no date is specified, default to the current SKI_SEASON.",
     "sql_generation": "Use DIM_DATE.FULL_DATE for daily analysis, DIM_DATE.SKI_SEASON for seasonal comparisons, and DATE_TRUNC for weekly/monthly trends. Segment by DIM_CUSTOMER.CUSTOMER_SEGMENT for persona insights and DIM_CUSTOMER.IS_PASS_HOLDER for pass vs day ticket analysis. Use DIM_DATE.IS_WEEKEND and DIM_DATE.IS_HOLIDAY for pattern analysis. All division should use DIV0() to handle zeros. For year-over-year, compare by WEEK_OF_SEASON across different SKI_SEASON values."
-  }
+  },
+  "verified_queries": [
+    {
+      "name": "visits_by_day_of_week",
+      "question": "What is the total visits and unique visitors by day of week?",
+      "sql": "WITH __fact_pass_usage AS (\n  SELECT customer_key, date_key, usage_key\n  FROM AM_SKI_RESORT.MARTS.FACT_PASS_USAGE\n), __dim_date AS (\n  SELECT date_key, day_name\n  FROM AM_SKI_RESORT.MARTS.DIM_DATE\n) SELECT d.day_name, COUNT(pu.usage_key) AS total_visits, COUNT(DISTINCT pu.customer_key) AS unique_visitors FROM __fact_pass_usage AS pu LEFT OUTER JOIN __dim_date AS d ON pu.date_key = d.date_key GROUP BY d.day_name ORDER BY total_visits DESC NULLS LAST",
+      "verified_by": "Cortex Analyst",
+      "verified_at": 1745200000,
+      "use_as_onboarding_question": true
+    },
+    {
+      "name": "season_visits_per_guest",
+      "question": "What is the total visits and unique visitors per ski season, and what is the visits per guest ratio for each season?",
+      "sql": "WITH __fact_pass_usage AS (\n  SELECT customer_key, date_key, usage_key\n  FROM AM_SKI_RESORT.MARTS.FACT_PASS_USAGE\n), __dim_date AS (\n  SELECT date_key, ski_season\n  FROM AM_SKI_RESORT.MARTS.DIM_DATE\n) SELECT d.ski_season, COUNT(pu.usage_key) AS total_visits, COUNT(DISTINCT pu.customer_key) AS unique_visitors, IFF(COUNT(DISTINCT pu.customer_key) = 0 AND NOT COUNT(pu.usage_key) IS NULL, 0,\n  COUNT(pu.usage_key) / NULLIF(COUNT(DISTINCT pu.customer_key), 0)) AS visits_per_guest\nFROM __fact_pass_usage AS pu LEFT OUTER JOIN __dim_date AS d ON pu.date_key = d.date_key GROUP BY d.ski_season ORDER BY d.ski_season DESC NULLS LAST",
+      "verified_by": "Cortex Analyst",
+      "verified_at": 1744900000,
+      "use_as_onboarding_question": true
+    },
+    {
+      "name": "visits_by_snow_condition",
+      "question": "What is the total visits and average hours per visit by snow condition?",
+      "sql": "WITH __fact_pass_usage AS (\n  SELECT customer_key, date_key, usage_key, hours_on_mountain\n  FROM AM_SKI_RESORT.MARTS.FACT_PASS_USAGE\n), __dim_date AS (\n  SELECT date_key, snow_condition\n  FROM AM_SKI_RESORT.MARTS.DIM_DATE\n) SELECT d.snow_condition, COUNT(pu.usage_key) AS total_visits, IFF(COUNT(pu.usage_key) = 0 AND NOT SUM(pu.hours_on_mountain) IS NULL, 0,\n  SUM(pu.hours_on_mountain) / NULLIF(COUNT(pu.usage_key), 0)) AS avg_hours_per_visit\nFROM __fact_pass_usage AS pu LEFT OUTER JOIN __dim_date AS d ON pu.date_key = d.date_key GROUP BY d.snow_condition ORDER BY total_visits DESC NULLS LAST",
+      "verified_by": "Cortex Analyst",
+      "verified_at": 1745200000,
+      "use_as_onboarding_question": false
+    },
+    {
+      "name": "weekend_weekday_by_season",
+      "question": "What are the total weekend visits and total weekday visits by ski season?",
+      "sql": "WITH __fact_pass_usage AS (\n  SELECT customer_key, date_key, usage_key\n  FROM AM_SKI_RESORT.MARTS.FACT_PASS_USAGE\n), __dim_date AS (\n  SELECT date_key, is_weekend, ski_season\n  FROM AM_SKI_RESORT.MARTS.DIM_DATE\n) SELECT d.ski_season, COUNT(CASE WHEN d.is_weekend THEN 1 END) AS weekend_visits, COUNT(CASE WHEN NOT d.is_weekend THEN 1 END) AS weekday_visits FROM __fact_pass_usage AS pu LEFT OUTER JOIN __dim_date AS d ON pu.date_key = d.date_key GROUP BY d.ski_season ORDER BY d.ski_season DESC NULLS LAST",
+      "verified_by": "Cortex Analyst",
+      "verified_at": 1745200000,
+      "use_as_onboarding_question": false
+    },
+    {
+      "name": "avg_rides_by_season",
+      "question": "What is the average lift rides per visit and average hours per visit by ski season?",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n  AM_SKI_RESORT.SEMANTIC.SEM_DAILY_SUMMARY\n  METRICS avg_rides_per_visit, avg_hours_per_visit\n  DIMENSIONS ski_season\n) ORDER BY ski_season DESC NULLS LAST",
+      "verified_by": "Cortex Analyst",
+      "verified_at": 1745200000,
+      "use_as_onboarding_question": false
+    }
+  ]
 }
 $$)

@@ -6,6 +6,7 @@ on:
     paths:
       - 'agents/specs/**'
       - 'semantic-views/definitions/**'
+      - 'semantic-views/verified_queries/**'
       - 'agent_management/**'
       - 'environments/**'
 
@@ -73,6 +74,9 @@ jobs:
         with:
           snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
+      - name: Sync VQRs into dbt models
+        run: python -m agent_management.sync_vqrs_to_dbt
+
       - name: Run dbt (if dbt project exists)
         if: hashFiles('dbt_ski_resort/dbt_project.yml') != ''
         env:
@@ -109,10 +113,24 @@ jobs:
         with:
           snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
-      - name: Check SV eval results
+      - name: Run SV evaluations
         id: sv_eval
+        continue-on-error: true
+        run: python -m agent_management.run_sv_eval --env dev --run-name "CI-${{ github.sha }}"
+
+      - name: SV Eval Summary
+        if: always()
         run: |
-          python -m agent_management.check_sv_eval --env dev --run-name "CI-${{ github.sha }}" || echo "sv_eval_available=false" >> $GITHUB_OUTPUT
+          if [ "${{ steps.sv_eval.outcome }}" = "success" ]; then
+            echo "### ✅ SV Evaluation Gate: PASSED" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ⚠️ SV Evaluation Gate: FAILED (advisory in DEV)" >> $GITHUB_STEP_SUMMARY
+            echo "One or more semantic views scored below threshold." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Fail gate if evals failed
+        if: steps.sv_eval.outcome != 'success'
+        run: exit 1
 
       - name: Cleanup
         if: always()
@@ -166,7 +184,17 @@ jobs:
           snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
       - name: Run agent evaluations
+        id: agent_eval
         run: python -m agent_management.run_ci_eval --env dev
+
+      - name: Agent Eval Summary
+        if: always()
+        run: |
+          if [ "${{ steps.agent_eval.outcome }}" = "success" ]; then
+            echo "### ✅ Agent Evaluation Gate: PASSED" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ⚠️ Agent Evaluation Gate: FAILED (advisory in DEV)" >> $GITHUB_STEP_SUMMARY
+          fi
 
       - name: Upload evaluation results
         uses: actions/upload-artifact@v4

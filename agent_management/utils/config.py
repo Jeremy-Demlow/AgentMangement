@@ -174,6 +174,43 @@ def get_project_schemas() -> dict[str, str]:
     })
 
 
+def discover_vqr_views() -> list[str]:
+    from agent_management.paths import sv_verified_queries_dir
+    vqr_dir = sv_verified_queries_dir()
+    return sorted(p.stem.upper() for p in vqr_dir.glob("sem_*.yaml"))
+
+
+def get_agent_semantic_views(agent_name: str) -> list[str]:
+    project = load_project_config()
+    agents = project.get("agents", {})
+    agent = agents.get(agent_name.lower()) or agents.get(agent_name.upper()) or {}
+    return [sv.upper() for sv in agent.get("semantic_views", [])]
+
+
+def get_svs_for_agents(agent_names: list[str]) -> list[str]:
+    svs: set[str] = set()
+    for name in agent_names:
+        svs.update(get_agent_semantic_views(name))
+    return sorted(svs)
+
+
+def get_all_configured_agents() -> list[str]:
+    project = load_project_config()
+    return list(project.get("agents", {}).keys())
+
+
+def get_sv_eval_config(config: dict) -> dict:
+    project = load_project_config()
+    sv_eval = project.get("eval", {}).get("sv_eval", {})
+    db = get_database(config)
+    semantic_schema = config["deployment"].get("semantic_schema", "SEMANTIC")
+    return {
+        "stage": f"{db}.{semantic_schema}.{sv_eval.get('stage', 'sv_eval_stage')}",
+        "file_format": f"{db}.{semantic_schema}.{sv_eval.get('file_format', 'yaml_file_format')}",
+        "default_scope": sv_eval.get("default_scope", "all"),
+    }
+
+
 def get_sv_source(config: dict) -> str:
     source = config.get("semantic_views", {}).get("source")
     if source:
