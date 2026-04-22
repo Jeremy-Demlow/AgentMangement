@@ -141,7 +141,7 @@ jobs:
       - name: Run SV evaluations
         id: sv_eval
         continue-on-error: true
-        run: python -m agent_management.run_sv_eval --env dev --run-name "PR-${{ github.event.pull_request.number }}-${{ github.sha }}"
+        run: python -m agent_management.run_sv_eval --env dev --run-name "PR-${{ github.event.pull_request.number }}-${{ github.run_id }}"
 
       - name: SV Eval Summary
         if: always()
