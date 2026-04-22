@@ -184,7 +184,17 @@ jobs:
           snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
       - name: Run agent evaluations
+        id: agent_eval
         run: python -m agent_management.run_ci_eval --env dev
+
+      - name: Agent Eval Summary
+        if: always()
+        run: |
+          if [ "${{ steps.agent_eval.outcome }}" = "success" ]; then
+            echo "### ✅ Agent Evaluation Gate: PASSED" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ⚠️ Agent Evaluation Gate: FAILED (advisory in DEV)" >> $GITHUB_STEP_SUMMARY
+          fi
 
       - name: Upload evaluation results
         uses: actions/upload-artifact@v4
