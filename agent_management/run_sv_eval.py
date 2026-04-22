@@ -4,6 +4,10 @@ Generates eval config YAML, uploads to stage, starts EXECUTE_AI_EVALUATION,
 polls until complete, fetches results via GET_ANALYST_AI_EVALUATION_DATA,
 and checks thresholds.
 
+When evaluating multiple SVs, evals are started sequentially then polled
+in parallel using a thread pool (each thread gets its own Snowflake
+connection). This cuts wall time from ~25 min to ~3-5 min for 11 SVs.
+
 Function reference:
     SNOWFLAKE.LOCAL.GET_ANALYST_AI_EVALUATION_DATA(
         <DATABASE>, <SCHEMA>, <OBJECT_NAME>, 'SEMANTIC VIEW', <RUN_NAME>
@@ -21,6 +25,7 @@ Usage:
     python -m agent_management.run_sv_eval --env prod --sv sem_revenue
     python -m agent_management.run_sv_eval --env prod --agent ski_ops_assistant
     python -m agent_management.run_sv_eval --env dev --dry-run
+    python -m agent_management.run_sv_eval --env dev --max-parallel 4
     python -m agent_management.run_sv_eval --env prod --status --run-name "sv_eval_20260416"
     python -m agent_management.run_sv_eval --env prod --results --run-name "sv_eval_20260416"
 
@@ -29,18 +34,15 @@ Implements REQ-009: Semantic View Evaluation.
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-
-import yaml
 
 from agent_management import setup_logging
 from agent_management.utils.config import (
     get_database,
-    get_semantic_schema,
     get_sv_eval_config,
     get_svs_for_agents,
     get_thresholds,
@@ -184,6 +186,63 @@ def compute_score(results: list[dict]) -> dict:
     }
 
 
+def start_sv_eval(
+    cur,
+    database: str,
+    schema: str,
+    sv_name: str,
+    stage: str,
+    file_format: str,
+    run_name: str,
+) -> str:
+    logger.info("\n  === %s ===", sv_name)
+    eval_yaml = generate_eval_yaml(database, schema, sv_name, run_name)
+    filename = f"sv_eval_{sv_name.lower()}_{run_name}.yaml"
+    ensure_stage(cur, stage, file_format)
+    upload_yaml(cur, eval_yaml, stage, filename)
+    start_eval(cur, run_name, stage, filename)
+    return filename
+
+
+def poll_and_collect(
+    config: dict,
+    database: str,
+    schema: str,
+    sv_name: str,
+    stage: str,
+    filename: str,
+    run_name: str,
+) -> dict:
+    conn = connect(config)
+    cur = conn.cursor()
+    try:
+        cur.execute(f"USE DATABASE {database}")
+        cur.execute(f"USE SCHEMA {database}.{schema}")
+
+        logger.info("  [%s] Polling (interval=%ds, max=%d attempts)...",
+                    sv_name, POLL_INTERVAL_SECONDS, MAX_POLL_ATTEMPTS)
+
+        for attempt in range(1, MAX_POLL_ATTEMPTS + 1):
+            time.sleep(POLL_INTERVAL_SECONDS)
+            status = check_status(cur, run_name, stage, filename)
+
+            if status in ("COMPLETED", "SUCCEEDED"):
+                logger.info("  [%s] Completed after %d poll(s)", sv_name, attempt)
+                results = get_eval_results(cur, database, schema, sv_name, run_name)
+                return compute_score(results)
+            elif status in ("FAILED", "ERROR", "CANCELLED"):
+                logger.error("  [%s] Eval %s after %d poll(s)", sv_name, status, attempt)
+                return {"total": 0, "scored": 0, "score": 0.0, "errors": 0, "error": status}
+
+            logger.info("    [%s] Poll %d/%d: %s", sv_name, attempt, MAX_POLL_ATTEMPTS, status)
+
+        logger.error("  [%s] Timed out after %d polls", sv_name, MAX_POLL_ATTEMPTS)
+        return {"total": 0, "scored": 0, "score": 0.0, "errors": 0, "error": "TIMEOUT"}
+    finally:
+        cur.close()
+        conn.close()
+
+
 def run_eval_for_sv(
     cur,
     database: str,
@@ -226,12 +285,12 @@ def run_eval_for_sv(
             return compute_score(results)
         elif status in ("FAILED", "ERROR", "CANCELLED"):
             logger.error("  Eval %s after %d poll(s)", status, attempt)
-            return {"total": 0, "correct": 0, "score": 0.0, "regressions": 0, "error": status}
+            return {"total": 0, "scored": 0, "score": 0.0, "errors": 0, "error": status}
 
         logger.info("    Poll %d/%d: %s", attempt, MAX_POLL_ATTEMPTS, status)
 
     logger.error("  Timed out after %d polls", MAX_POLL_ATTEMPTS)
-    return {"total": 0, "correct": 0, "score": 0.0, "regressions": 0, "error": "TIMEOUT"}
+    return {"total": 0, "scored": 0, "score": 0.0, "errors": 0, "error": "TIMEOUT"}
 
 
 def main():
@@ -244,6 +303,7 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Show eval config without executing")
     parser.add_argument("--status", action="store_true", help="Check status of existing run")
     parser.add_argument("--results", action="store_true", help="Fetch results of existing run")
+    parser.add_argument("--max-parallel", type=int, default=11, help="Max concurrent SV evaluations (default: 11)")
     parser.add_argument("-v", "--verbose", action="count", default=1)
     args = parser.parse_args()
 
@@ -323,30 +383,87 @@ def main():
         all_passed = True
         total_checked = 0
 
-        for sv_name in sv_names:
-            sv_run_name = f"{run_name}_{sv_name.lower()}"
-            metrics = run_eval_for_sv(
-                cur, database, schema, sv_name, stage, file_format,
-                sv_run_name, args.no_wait, args.dry_run,
-            )
+        if args.dry_run or len(sv_names) == 1:
+            for sv_name in sv_names:
+                sv_run_name = f"{run_name}_{sv_name.lower()}"
+                metrics = run_eval_for_sv(
+                    cur, database, schema, sv_name, stage, file_format,
+                    sv_run_name, args.no_wait, args.dry_run,
+                )
 
-            if metrics is None:
-                continue
+                if metrics is None:
+                    continue
 
-            if "error" in metrics:
-                all_passed = False
-                continue
+                if "error" in metrics:
+                    all_passed = False
+                    continue
 
-            total_checked += 1
-            score_pass = metrics["score"] >= sv_threshold
+                total_checked += 1
+                score_pass = metrics["score"] >= sv_threshold
 
-            logger.info("    Score: %.1f%% (%s/%s) %s %s [%s]",
-                        metrics["score"] * 100, metrics["sum_score"], metrics["scored"],
-                        ">=" if score_pass else "<",
-                        f"{sv_threshold:.0%}", "PASS" if score_pass else "FAIL")
+                logger.info("    Score: %.1f%% (%s/%s) %s %s [%s]",
+                            metrics["score"] * 100, metrics["sum_score"], metrics["scored"],
+                            ">="  if score_pass else "<",
+                            f"{sv_threshold:.0%}", "PASS" if score_pass else "FAIL")
 
-            if not score_pass:
-                all_passed = False
+                if not score_pass:
+                    all_passed = False
+        else:
+            started: list[tuple[str, str, str]] = []
+            for sv_name in sv_names:
+                sv_run_name = f"{run_name}_{sv_name.lower()}"
+                try:
+                    filename = start_sv_eval(
+                        cur, database, schema, sv_name, stage, file_format, sv_run_name,
+                    )
+                    started.append((sv_name, sv_run_name, filename))
+                except Exception as e:
+                    logger.error("  [%s] Failed to start: %s", sv_name, e)
+                    all_passed = False
+
+            if args.no_wait:
+                logger.info("\nStarted %d eval(s) — use --status to check progress", len(started))
+            else:
+                workers = min(args.max_parallel, len(started))
+                logger.info("\nPolling %d eval(s) in parallel (workers=%d)...", len(started), workers)
+
+                sv_metrics: dict[str, dict] = {}
+                with ThreadPoolExecutor(max_workers=workers) as pool:
+                    futures = {}
+                    for sv_name, sv_run_name, filename in started:
+                        future = pool.submit(
+                            poll_and_collect, config, database, schema,
+                            sv_name, stage, filename, sv_run_name,
+                        )
+                        futures[future] = sv_name
+
+                    for future in as_completed(futures):
+                        sv_name = futures[future]
+                        try:
+                            metrics = future.result()
+                        except Exception as e:
+                            logger.error("  [%s] Thread error: %s", sv_name, e)
+                            metrics = {"total": 0, "scored": 0, "score": 0.0, "errors": 0, "error": str(e)}
+                        sv_metrics[sv_name] = metrics
+
+                for sv_name, _, _ in started:
+                    metrics = sv_metrics.get(sv_name, {})
+                    if "error" in metrics:
+                        logger.error("  %s: ERROR — %s", sv_name, metrics["error"])
+                        all_passed = False
+                        continue
+
+                    total_checked += 1
+                    score_pass = metrics["score"] >= sv_threshold
+
+                    logger.info("  %s: %.1f%% (%s/%s) %s %s [%s]",
+                                sv_name,
+                                metrics["score"] * 100, metrics["sum_score"], metrics["scored"],
+                                ">=" if score_pass else "<",
+                                f"{sv_threshold:.0%}", "PASS" if score_pass else "FAIL")
+
+                    if not score_pass:
+                        all_passed = False
 
         logger.info("\n%s", "=" * 60)
         if args.dry_run:
