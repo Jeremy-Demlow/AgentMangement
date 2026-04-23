@@ -58,8 +58,7 @@ questions:
       ORDER BY avg_wait DESC
       LIMIT 3
     answer_template: >-
-      The lifts with the longest average wait times were {lift_name} at {avg_wait} minutes
-      ({scan_count:,} scans) last season.
+      {lift_name} averaged {avg_wait} minutes wait time ({scan_count:,} scans).
 
   - question: "How do weekend wait times compare to weekday wait times across all lifts?"
     expected_tools: ["LiftOperationsAnalytics"]
@@ -127,8 +126,7 @@ questions:
       ORDER BY understaffed_count DESC
       LIMIT 3
     answer_template: >-
-      {dept} had the most understaffed shifts with {understaffed_count}
-      out of {total_shifts:,} total shifts last season.
+      {dept} had {understaffed_count} understaffed shifts out of {total_shifts:,} total.
 
   # ===========================================================================
   # WEATHER — Snowfall and Conditions
@@ -145,14 +143,15 @@ questions:
       )
       SELECT d.SKI_SEASON AS season,
              ROUND(SUM(w.SNOWFALL_INCHES), 1) AS total_snowfall,
-             SUM(CASE WHEN w.IS_POWDER_DAY THEN 1 ELSE 0 END) AS powder_days
+             SUM(CASE WHEN w.IS_POWDER_DAY THEN 1 ELSE 0 END) AS powder_zone_days,
+             COUNT(DISTINCT CASE WHEN w.IS_POWDER_DAY THEN d.FULL_DATE END) AS powder_calendar_days
       FROM {{ eval.source_database }}.MARTS.FACT_WEATHER w
       JOIN {{ eval.source_database }}.MARTS.DIM_DATE d ON w.DATE_KEY = d.DATE_KEY
       WHERE d.SKI_SEASON = (SELECT season FROM most_recent_complete)
       GROUP BY d.SKI_SEASON
     answer_template: >-
-      Total snowfall for the {season} season was {total_snowfall:,.1f} inches
-      with {powder_days} powder days.
+      Total snowfall for the {season} season was {total_snowfall:,.1f} inches across all mountain zones
+      with {powder_zone_days} powder day observations ({powder_calendar_days} unique calendar powder days).
 
   - question: "What were the wind conditions like last season? How many high wind days?"
     expected_tools: ["WeatherAnalytics"]
@@ -167,14 +166,16 @@ questions:
       SELECT d.SKI_SEASON AS season,
              ROUND(AVG(w.WIND_SPEED_MPH), 1) AS avg_wind,
              ROUND(MAX(w.WIND_SPEED_MPH), 1) AS max_wind,
-             SUM(CASE WHEN w.IS_HIGH_WIND THEN 1 ELSE 0 END) AS high_wind_days
+             SUM(CASE WHEN w.IS_HIGH_WIND THEN 1 ELSE 0 END) AS high_wind_zone_days,
+             COUNT(DISTINCT CASE WHEN w.IS_HIGH_WIND THEN d.FULL_DATE END) AS high_wind_calendar_days
       FROM {{ eval.source_database }}.MARTS.FACT_WEATHER w
       JOIN {{ eval.source_database }}.MARTS.DIM_DATE d ON w.DATE_KEY = d.DATE_KEY
       WHERE d.SKI_SEASON = (SELECT season FROM most_recent_complete)
       GROUP BY d.SKI_SEASON
     answer_template: >-
       During the {season} season, average wind speed was {avg_wind} mph
-      with a peak gust of {max_wind} mph. There were {high_wind_days} high wind days.
+      with a peak gust of {max_wind} mph. There were {high_wind_zone_days} high wind
+      observations across zones ({high_wind_calendar_days} unique high wind days).
 
   # ===========================================================================
   # SAFETY — Incidents and Response
@@ -199,8 +200,7 @@ questions:
       GROUP BY d.SKI_SEASON
     answer_template: >-
       There were {incident_count} safety incidents during the {season} season
-      with average severity of {avg_severity} and average patrol response time
-      of {avg_response} minutes.
+      with average patrol response time of {avg_response} minutes.
 
   - question: "What were the most common incident types last season?"
     expected_tools: ["SafetyIncidentsAnalytics"]
@@ -221,8 +221,7 @@ questions:
       ORDER BY count DESC
       LIMIT 3
     answer_template: >-
-      The most common incident type was {incident_type} with {count} occurrences
-      last season.
+      {incident_type} had {count} incidents.
 
   # ===========================================================================
   # CROSS-DOMAIN — Operational Summary

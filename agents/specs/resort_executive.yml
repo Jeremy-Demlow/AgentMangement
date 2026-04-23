@@ -1,6 +1,6 @@
 metadata:
   name: resort_executive
-  version: "1.0.1"
+  version: "1.1.0"
   owner: executive_team
   status: active
 
@@ -31,42 +31,61 @@ tools:
     warehouse: {{ env.warehouse }}
     description: >
       Executive daily summary — visitation, revenue, operations KPIs. PRIMARY TOOL for
-      high-level performance. KEY METRICS: TOTAL_VISITS, UNIQUE_VISITORS, TOTAL_LIFT_SCANS,
+      high-level resort performance.
+      KEY METRICS: TOTAL_VISITS, UNIQUE_VISITORS, TOTAL_LIFT_SCANS,
       AVG_WAIT_TIME_MINUTES, TOTAL_TICKET_REVENUE, TOTAL_RENTAL_REVENUE, TOTAL_FNB_REVENUE,
       TOTAL_DAILY_REVENUE, AVG_RIDES_PER_VISIT, PASS_HOLDER_PCT.
       KEY DIMENSIONS: FULL_DATE, SKI_SEASON, DAY_NAME, MONTH_NAME, IS_WEEKEND, IS_HOLIDAY.
-      USE FOR: Resort performance, executive summaries, revenue trends, season comparisons.
+      USE FOR: Resort performance, executive summaries, revenue trends, season comparisons,
+      daily/weekly/monthly KPI tracking.
+      NOT FOR: Revenue breakdowns by ticket type or product (use RevenueAnalytics).
+      NOT FOR: Individual lift or maintenance details (use LiftOperations).
+      Data: Daily granularity, refreshed nightly, covers 4+ ski seasons.
 
   - name: RevenueAnalytics
     type: cortex_analyst_text_to_sql
     semantic_view: {{ env.semantic_schema }}.SEM_REVENUE
     warehouse: {{ env.warehouse }}
     description: >
-      Revenue across tickets, rentals, and F&B.
+      Detailed revenue across tickets, rentals, and F&B with product-level breakdowns.
       KEY METRICS: TOTAL_TICKET_REVENUE, TOTAL_RENTAL_REVENUE, TOTAL_FNB_REVENUE,
-      AVG_TICKET_PRICE, AVG_RENTAL_VALUE, AVG_FNB_SPEND.
-      KEY DIMENSIONS: TICKET_TYPE, PURCHASE_CHANNEL, PRODUCT_CATEGORY, LOCATION_NAME.
-      USE FOR: Revenue by category, channel analysis, pricing, product mix.
+      AVG_TICKET_PRICE, AVG_RENTAL_VALUE, AVG_FNB_SPEND, TICKET_COUNT, RENTAL_COUNT.
+      KEY DIMENSIONS: TICKET_TYPE, PURCHASE_CHANNEL, PRODUCT_CATEGORY, LOCATION_NAME,
+      FULL_DATE, SKI_SEASON.
+      USE FOR: Revenue by category, channel analysis, pricing, product mix,
+      ticket type breakdowns, rental equipment analysis, F&B category performance.
+      NOT FOR: High-level daily totals (use DailySummaryKPIs).
+      NOT FOR: Customer demographics (use CustomerAnalytics).
+      Data: Transaction-level, refreshed nightly.
 
   - name: CustomerAnalytics
     type: cortex_analyst_text_to_sql
     semantic_view: {{ env.semantic_schema }}.SEM_CUSTOMER_BEHAVIOR
     warehouse: {{ env.warehouse }}
     description: >
-      Customer segmentation, demographics, visit behavior.
+      Customer segmentation, demographics, and visit behavior patterns.
       KEY METRICS: TOTAL_VISITS, UNIQUE_CUSTOMERS, AVG_VISITS_PER_CUSTOMER.
       KEY DIMENSIONS: CUSTOMER_SEGMENT, AGE_GROUP, HOME_STATE, IS_PASS_HOLDER.
+      USE FOR: Customer segment analysis, demographics, visit frequency,
+      geographic distribution, segment size comparisons.
+      NOT FOR: Pass holder retention or utilization (use PassholderAnalytics).
+      NOT FOR: Customer satisfaction or NPS (use CustomerSatisfaction).
 
   - name: LiftOperations
     type: cortex_analyst_text_to_sql
     semantic_view: {{ env.semantic_schema }}.SEM_OPERATIONS
     warehouse: {{ env.warehouse }}
     description: >
-      Lift performance, wait times, capacity utilization, maintenance, and grooming.
+      Lift performance, wait times, capacity, maintenance, and trail grooming.
       LIFT METRICS: TOTAL_SCANS, AVG_WAIT_MINUTES, CAPACITY_UTILIZATION_PCT.
       MAINTENANCE METRICS: TOTAL_MAINTENANCE_EVENTS, TOTAL_MAINTENANCE_COST, TOTAL_DOWNTIME_MINUTES.
       GROOMING METRICS: TOTAL_GROOMING_RUNS, CONDITION_IMPROVEMENT_RATE.
-      KEY DIMENSIONS: LIFT_NAME, TERRAIN_TYPE, MAINTENANCE_TYPE, GROOMING_TRAIL_NAME.
+      KEY DIMENSIONS: LIFT_NAME, TERRAIN_TYPE, MAINTENANCE_TYPE, GROOMING_TRAIL_NAME,
+      FULL_DATE, SKI_SEASON, IS_WEEKEND.
+      USE FOR: Wait times, lift bottlenecks, capacity analysis, maintenance costs,
+      downtime tracking, grooming effectiveness.
+      NOT FOR: Staffing levels (use StaffingAnalytics).
+      NOT FOR: Revenue impact of operations (use DailySummaryKPIs).
 
   - name: StaffingAnalytics
     type: cortex_analyst_text_to_sql
@@ -74,62 +93,94 @@ tools:
     warehouse: {{ env.warehouse }}
     description: >
       Staffing coverage, labor hours, workforce efficiency by department.
-      KEY METRICS: TOTAL_SCHEDULED, TOTAL_ACTUAL, AVG_COVERAGE, UNDERSTAFFED_COUNT.
-      KEY DIMENSIONS: DEPARTMENT, JOB_ROLE, FULL_DATE, IS_WEEKEND.
+      KEY METRICS: TOTAL_SCHEDULED, TOTAL_ACTUAL, AVG_COVERAGE, UNDERSTAFFED_COUNT,
+      TOTAL_SCHEDULED_HOURS, TOTAL_ACTUAL_HOURS.
+      KEY DIMENSIONS: DEPARTMENT, JOB_ROLE, FULL_DATE, IS_WEEKEND, SKI_SEASON.
+      USE FOR: Staffing levels, coverage ratios, understaffing analysis, labor hours,
+      department comparisons, weekend vs weekday staffing.
+      NOT FOR: Individual employee HR data or payroll.
+      NOT FOR: Operational performance (use LiftOperations).
 
   - name: WeatherAnalytics
     type: cortex_analyst_text_to_sql
     semantic_view: {{ env.semantic_schema }}.SEM_WEATHER_ANALYTICS
     warehouse: {{ env.warehouse }}
     description: >
-      Historical weather — snowfall, temperature, wind.
-      KEY METRICS: TOTAL_SNOWFALL, POWDER_DAY_COUNT, MAX_WIND, MIN_TEMP, MAX_TEMP.
-      KEY DIMENSIONS: MOUNTAIN_ZONE, SNOW_CONDITION, MONTH_NAME.
+      Historical weather conditions by mountain zone. Data is per-zone per-day
+      (4 mountain zones), so totals represent cumulative across all zones.
+      KEY METRICS: TOTAL_SNOWFALL, POWDER_DAY_COUNT, MAX_WIND, MIN_TEMP, MAX_TEMP,
+      MAX_BASE_DEPTH, STORM_COUNT, HIGH_WIND_COUNT.
+      KEY DIMENSIONS: MOUNTAIN_ZONE, SNOW_CONDITION, MONTH_NAME, FULL_DATE, SKI_SEASON.
+      USE FOR: Snowfall totals, powder days, storms, temperature, wind, weather by zone,
+      seasonal weather comparisons.
+      NOT FOR: Weather forecasts (historical data only).
+      NOT FOR: Revenue or visitor impact (use DailySummaryKPIs for that).
+      NOTE: Group by MOUNTAIN_ZONE for zone-specific analysis. Without zone grouping,
+      metrics aggregate across all zones.
 
   - name: MarketingAnalytics
     type: cortex_analyst_text_to_sql
     semantic_view: {{ env.semantic_schema }}.SEM_MARKETING_ANALYTICS
     warehouse: {{ env.warehouse }}
     description: >
-      Marketing campaign performance, conversion rates, ROI.
+      Marketing campaign performance, conversion rates, and ROI.
       KEY METRICS: TOTAL_CONVERSIONS, TOTAL_REVENUE, AVG_CONVERSION_RATE, CAMPAIGN_COUNT.
-      KEY DIMENSIONS: CAMPAIGN_CHANNEL, CAMPAIGN_TYPE, AUDIENCE_SEGMENT.
+      KEY DIMENSIONS: CAMPAIGN_CHANNEL, CAMPAIGN_TYPE, AUDIENCE_SEGMENT, CAMPAIGN_NAME,
+      FULL_DATE, SKI_SEASON.
+      USE FOR: Campaign effectiveness, conversion rates, channel ROI, audience targeting.
+      NOT FOR: Customer demographics (use CustomerAnalytics).
+      NOT FOR: Revenue totals (use RevenueAnalytics or DailySummaryKPIs).
 
   - name: CustomerSatisfaction
     type: cortex_analyst_text_to_sql
     semantic_view: {{ env.semantic_schema }}.SEM_CUSTOMER_SATISFACTION
     warehouse: {{ env.warehouse }}
     description: >
-      Customer feedback, NPS scores, satisfaction metrics.
+      Customer feedback, NPS scores, and satisfaction metrics.
       KEY METRICS: TOTAL_FEEDBACK, AVERAGE_RATING, AVERAGE_NPS, POSITIVE_FEEDBACK_COUNT.
-      KEY DIMENSIONS: CATEGORY, SENTIMENT, FEEDBACK_TYPE, CUSTOMER_SEGMENT.
+      KEY DIMENSIONS: CATEGORY, SENTIMENT, FEEDBACK_TYPE, CUSTOMER_SEGMENT, FULL_DATE, SKI_SEASON.
+      USE FOR: NPS trends, satisfaction scores, feedback analysis, sentiment by category.
+      NOT FOR: Customer demographics or visit behavior (use CustomerAnalytics).
 
   - name: SafetyIncidents
     type: cortex_analyst_text_to_sql
     semantic_view: {{ env.semantic_schema }}.SEM_SAFETY_INCIDENTS
     warehouse: {{ env.warehouse }}
     description: >
-      Safety incidents, severity, patrol response times.
-      KEY METRICS: TOTAL_INCIDENTS, AVERAGE_SEVERITY, AVG_PATROL_RESPONSE.
-      KEY DIMENSIONS: INCIDENT_TYPE, SEVERITY, LOCATION_ID, TRAIL_NAME.
+      Safety incidents, severity, and ski patrol response times.
+      KEY METRICS: TOTAL_INCIDENTS, AVERAGE_SEVERITY, AVG_PATROL_RESPONSE, CRITICAL_INCIDENTS.
+      KEY DIMENSIONS: INCIDENT_TYPE, SEVERITY, LOCATION_ID, TRAIL_NAME,
+      CUSTOMER_SKILL_LEVEL, SKI_SEASON, FULL_DATE.
+      USE FOR: Incident trends, patrol response times, safety hotspots, severity analysis,
+      seasonal safety comparisons.
+      NOT FOR: Operational details like lift maintenance (use LiftOperations).
 
   - name: SkiSchoolAnalytics
     type: cortex_analyst_text_to_sql
     semantic_view: {{ env.semantic_schema }}.SEM_LESSONS_ANALYTICS
     warehouse: {{ env.warehouse }}
     description: >
-      Ski school — lesson bookings, instructor utilization, student ratings.
-      KEY METRICS: TOTAL_LESSONS, TOTAL_REVENUE, AVG_STUDENT_RATING.
-      KEY DIMENSIONS: LESSON_TYPE, SPORT_TYPE, SKILL_LEVEL, INSTRUCTOR_NAME.
+      Ski school — lesson bookings, instructor utilization, student ratings, and revenue.
+      KEY METRICS: TOTAL_LESSONS, TOTAL_REVENUE, AVG_STUDENT_RATING, TOTAL_STUDENTS.
+      KEY DIMENSIONS: LESSON_TYPE, SPORT_TYPE, SKILL_LEVEL, INSTRUCTOR_NAME,
+      FULL_DATE, SKI_SEASON.
+      USE FOR: Lesson volume, ski school revenue, instructor performance, student ratings,
+      lesson type breakdowns.
+      NOT FOR: General resort revenue (use RevenueAnalytics).
 
   - name: PassholderAnalytics
     type: cortex_analyst_text_to_sql
     semantic_view: {{ env.semantic_schema }}.SEM_PASSHOLDER_ANALYTICS
     warehouse: {{ env.warehouse }}
     description: >
-      Season pass holder behavior, utilization, ROI, retention.
-      KEY METRICS: PASS_HOLDER_VISITS, PASS_HOLDER_COUNT, AVG_VISITS_PER_PASS_HOLDER.
-      KEY DIMENSIONS: CUSTOMER_SEGMENT, AGE_GROUP, HOME_STATE, SKI_SEASON.
+      Season pass holder behavior, utilization, sales, and retention.
+      KEY METRICS: PASS_HOLDER_VISITS, PASS_HOLDER_COUNT, AVG_VISITS_PER_PASS_HOLDER,
+      TOTAL_PASS_REVENUE.
+      KEY DIMENSIONS: CUSTOMER_SEGMENT, AGE_GROUP, HOME_STATE, SKI_SEASON, PASS_TYPE.
+      USE FOR: Pass sales, pass holder visit frequency, utilization rates, retention,
+      segment analysis of pass holders.
+      NOT FOR: General customer demographics (use CustomerAnalytics).
+      NOT FOR: Daily pass ticket sales (use RevenueAnalytics).
 
 instructions:
   response: >
@@ -154,6 +205,14 @@ instructions:
 
     CROSS-DOMAIN: Query multiple tools and synthesize. Start with DailySummaryKPIs
     for the big picture, drill into specific tools for detail.
+
+
+    BUSINESS RULES:
+    "Last season" = the most recent completed season (Nov 1 - Apr 30).
+    "This season" or "current season" = season in progress.
+    When asked about revenue, always specify the season and date range in your answer.
+    For YoY comparisons, compare equivalent date ranges (season-to-date vs season-to-date).
+    Weather data is per mountain zone — totals aggregate across 4 zones.
 
 
     BOUNDARIES:

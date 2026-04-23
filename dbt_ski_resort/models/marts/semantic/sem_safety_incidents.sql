@@ -27,6 +27,8 @@ FACTS (
 )
 
 DIMENSIONS (
+    FACT_INCIDENTS.DATE_KEY AS DATE_KEY
+      COMMENT = 'Date surrogate key',
     FACT_INCIDENTS.INCIDENT_DATE AS INCIDENT_DATE
       COMMENT = 'Date of incident',
     DIM_DATE.SKI_SEASON AS SKI_SEASON
@@ -86,22 +88,6 @@ WITH EXTENSION (CA = $$
       "sql": "SELECT * FROM SEMANTIC_VIEW(\n    AM_SKI_RESORT.SEMANTIC.SEM_SAFETY_INCIDENTS\n    METRICS total_incidents, critical_incidents\n    DIMENSIONS trail_name\n    WHERE trail_name IS NOT NULL\n) WHERE critical_incidents >= 1 ORDER BY critical_incidents DESC NULLS LAST",
       "verified_by": "Cortex Analyst",
       "verified_at": 1744900000,
-      "use_as_onboarding_question": true
-    },
-    {
-      "name": "monthly_incidents_response",
-      "question": "What is the monthly total incidents and average patrol response time by month?",
-      "sql": "WITH __fact_incidents AS (\n  SELECT\n    incident_date,\n    incident_id,\n    patrol_response_minutes\n  FROM AM_SKI_RESORT.MARTS.FACT_INCIDENTS\n) SELECT\n  DATE_TRUNC('MONTH', incident_date) AS month,\n  COUNT(incident_id) AS total_incidents,\n  AVG(patrol_response_minutes) AS avg_patrol_response\nFROM __fact_incidents GROUP BY\n  DATE_TRUNC('MONTH', incident_date)\nORDER BY\n  month DESC NULLS LAST",
-      "verified_by": "Cortex Analyst",
-      "verified_at": 1744900000,
-      "use_as_onboarding_question": false
-    },
-    {
-      "name": "incidents_by_season",
-      "question": "What are the total incidents, average severity, and average patrol response time by ski season?",
-      "sql": "SELECT * FROM SEMANTIC_VIEW(\n  AM_SKI_RESORT.SEMANTIC.SEM_SAFETY_INCIDENTS\n  DIMENSIONS ski_season\n  METRICS total_incidents, average_severity, avg_patrol_response\n) ORDER BY ski_season DESC NULLS LAST",
-      "verified_by": "Cortex Analyst",
-      "verified_at": 1745400000,
       "use_as_onboarding_question": true
     },
     {

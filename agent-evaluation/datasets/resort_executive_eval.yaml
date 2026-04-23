@@ -154,6 +154,7 @@ questions:
       SELECT d.SKI_SEASON AS season,
              ROUND(SUM(w.SNOWFALL_INCHES), 1) AS total_snowfall,
              SUM(CASE WHEN w.IS_POWDER_DAY THEN 1 ELSE 0 END) AS powder_days,
+             COUNT(DISTINCT CASE WHEN w.IS_POWDER_DAY THEN d.FULL_DATE END) AS powder_calendar_days,
              ROUND(AVG(w.TEMP_HIGH_F), 1) AS avg_high,
              ROUND(AVG(w.TEMP_LOW_F), 1) AS avg_low
       FROM {{ eval.source_database }}.MARTS.FACT_WEATHER w
@@ -161,8 +162,9 @@ questions:
       WHERE d.SKI_SEASON = (SELECT season FROM most_recent_complete)
       GROUP BY d.SKI_SEASON
     answer_template: >-
-      The resort received {total_snowfall:,.1f} inches of total snowfall during the
-      {season} season with {powder_days} powder days.
+      The resort received {total_snowfall:,.1f} inches of cumulative snowfall across all mountain zones
+      during the {season} season with {powder_days} powder day observations across zones
+      ({powder_calendar_days} unique calendar powder days).
       Average high temperature was {avg_high}F and average low was {avg_low}F.
 
   # ===========================================================================
@@ -207,8 +209,7 @@ questions:
       ORDER BY count1 DESC
       LIMIT 1
     answer_template: >-
-      {day1} was the busiest day with {count1:,} lift scans last season.
-    ground_truth: ""
+      {day1} had {count1:,} lift scans last season.
 
   # ===========================================================================
   # STAFFING (StaffingAnalytics)
@@ -307,8 +308,7 @@ questions:
       GROUP BY d.SKI_SEASON
     answer_template: >-
       There were {incident_count} safety incidents during the {season} season
-      with an average severity score of {avg_severity} and
-      average patrol response time of {avg_response_time} minutes.
+      with average patrol response time of {avg_response_time} minutes.
 
   # ===========================================================================
   # SKI SCHOOL (SkiSchoolAnalytics)
@@ -358,8 +358,8 @@ questions:
       WHERE sp.VALID_SEASON = (SELECT season FROM most_recent_complete)
     answer_template: >-
       {passes_sold:,} season passes were sold for the {season} season
-      generating approximately ${total_revenue:,.0f} in revenue,
-      with an average pass price of ${avg_price:,.2f}. {renewals:,} were renewals.
+      generating approximately ${total_revenue:,.0f} in total pass revenue.
+      Average pass price was ${avg_price:,.2f} with {renewals:,} renewals.
 
   # ===========================================================================
   # CUSTOMER SEGMENTS (CustomerAnalytics) — Static (dimension data, not time-dependent)

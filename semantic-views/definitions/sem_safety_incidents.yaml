@@ -8,55 +8,20 @@ tables:
       - safety
     description: Safety incident records
     base_table:
-      database: {{ env.database }}
+      database: "{{ env.database }}"
       schema: MARTS
       table: FACT_INCIDENTS
     primary_key:
       columns:
         - INCIDENT_ID
-  - name: DIM_DATE
-    synonyms:
-      - calendar
-    description: Calendar dimension with ski season awareness
-    base_table:
-      database: {{ env.database }}
-      schema: MARTS
-      table: DIM_DATE
-    primary_key:
-      columns:
-        - DATE_KEY
-relationships:
-  - name: INCIDENTS_TO_DATE
-    left_table: FACT_INCIDENTS
-    left_columns:
-      - DATE_KEY
-    right_table: DIM_DATE
-    right_columns:
-      - DATE_KEY
-    relationship_type: many_to_one
-    join_type: inner
     dimensions:
-      - name: CUSTOMER_SEGMENT
-        description: Customer segment
-        expr: CUSTOMER_SEGMENT
-        data_type: VARCHAR(50)
-      - name: CUSTOMER_SKILL_LEVEL
-        description: Customer skill level
-        expr: CUSTOMER_SKILL_LEVEL
-        data_type: VARCHAR(20)
+      - name: DATE_KEY
+        description: Date surrogate key
+        expr: DATE_KEY
+        data_type: "NUMBER(38,0)"
       - name: INCIDENT_DATE
         description: Date of incident
         expr: INCIDENT_DATE
-        data_type: DATE
-      - name: SKI_SEASON
-        description: Ski season identifier (e.g. 2024-2025)
-        expr: DIM_DATE.SKI_SEASON
-        data_type: VARCHAR(16777216)
-      - name: FULL_DATE
-        synonyms:
-          - date
-        description: Calendar date
-        expr: DIM_DATE.FULL_DATE
         data_type: DATE
       - name: INCIDENT_TYPE
         synonyms:
@@ -64,21 +29,29 @@ relationships:
         description: Type of incident
         expr: INCIDENT_TYPE
         data_type: VARCHAR(30)
-      - name: LIFT_ID
-        description: Lift associated
-        expr: LIFT_ID
-        data_type: VARCHAR(10)
-      - name: LOCATION_ID
-        description: Location ID
-        expr: LOCATION_ID
-        data_type: VARCHAR(20)
       - name: SEVERITY
         description: Severity level
         expr: SEVERITY
         data_type: VARCHAR(20)
+      - name: LOCATION_ID
+        description: Location ID
+        expr: LOCATION_ID
+        data_type: VARCHAR(20)
+      - name: LIFT_ID
+        description: Lift associated
+        expr: LIFT_ID
+        data_type: VARCHAR(10)
       - name: TRAIL_NAME
         description: Trail name
         expr: TRAIL_NAME
+        data_type: VARCHAR(50)
+      - name: CUSTOMER_SKILL_LEVEL
+        description: Customer skill level
+        expr: CUSTOMER_SKILL_LEVEL
+        data_type: VARCHAR(20)
+      - name: CUSTOMER_SEGMENT
+        description: Customer segment
+        expr: CUSTOMER_SEGMENT
         data_type: VARCHAR(50)
       - name: TRANSPORT_REQUIRED
         description: Transport required
@@ -96,19 +69,55 @@ relationships:
         data_type: "NUMBER(1,0)"
         access_modifier: public_access
     metrics:
+      - name: TOTAL_INCIDENTS
+        description: Total incidents
+        expr: COUNT(FACT_INCIDENTS.INCIDENT_ID)
+        access_modifier: public_access
       - name: AVERAGE_SEVERITY
         description: Average severity
         expr: AVG(FACT_INCIDENTS.SEVERITY_SCORE)
-        access_modifier: public_access
-      - name: AVG_PATROL_RESPONSE
-        description: Avg patrol response time
-        expr: AVG(FACT_INCIDENTS.PATROL_RESPONSE_MINUTES)
         access_modifier: public_access
       - name: CRITICAL_INCIDENTS
         description: Critical incidents
         expr: COUNT(CASE WHEN FACT_INCIDENTS.SEVERITY = 'Critical' THEN 1 END)
         access_modifier: public_access
-      - name: TOTAL_INCIDENTS
-        description: Total incidents
-        expr: COUNT(FACT_INCIDENTS.INCIDENT_ID)
+      - name: AVG_PATROL_RESPONSE
+        description: Avg patrol response time
+        expr: AVG(FACT_INCIDENTS.PATROL_RESPONSE_MINUTES)
         access_modifier: public_access
+  - name: DIM_DATE
+    synonyms:
+      - calendar
+    description: Calendar dimension with ski season awareness
+    base_table:
+      database: "{{ env.database }}"
+      schema: MARTS
+      table: DIM_DATE
+    primary_key:
+      columns:
+        - DATE_KEY
+    dimensions:
+      - name: DATE_KEY
+        description: Date surrogate key
+        expr: DATE_KEY
+        data_type: "NUMBER(38,0)"
+      - name: FULL_DATE
+        synonyms:
+          - date
+        description: Calendar date
+        expr: FULL_DATE
+        data_type: DATE
+      - name: SKI_SEASON
+        description: Ski season identifier (e.g. 2024-2025)
+        expr: SKI_SEASON
+        data_type: VARCHAR(16777216)
+relationships:
+  - name: INCIDENTS_TO_DATE
+    left_table: FACT_INCIDENTS
+    left_columns:
+      - DATE_KEY
+    right_table: DIM_DATE
+    right_columns:
+      - DATE_KEY
+    relationship_type: many_to_one
+    join_type: inner
