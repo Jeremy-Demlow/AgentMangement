@@ -14,6 +14,27 @@ tables:
     primary_key:
       columns:
         - INCIDENT_ID
+  - name: DIM_DATE
+    synonyms:
+      - calendar
+    description: Calendar dimension with ski season awareness
+    base_table:
+      database: {{ env.database }}
+      schema: MARTS
+      table: DIM_DATE
+    primary_key:
+      columns:
+        - DATE_KEY
+relationships:
+  - name: INCIDENTS_TO_DATE
+    left_table: FACT_INCIDENTS
+    left_columns:
+      - DATE_KEY
+    right_table: DIM_DATE
+    right_columns:
+      - DATE_KEY
+    relationship_type: many_to_one
+    join_type: inner
     dimensions:
       - name: CUSTOMER_SEGMENT
         description: Customer segment
@@ -26,6 +47,16 @@ tables:
       - name: INCIDENT_DATE
         description: Date of incident
         expr: INCIDENT_DATE
+        data_type: DATE
+      - name: SKI_SEASON
+        description: Ski season identifier (e.g. 2024-2025)
+        expr: DIM_DATE.SKI_SEASON
+        data_type: VARCHAR(16777216)
+      - name: FULL_DATE
+        synonyms:
+          - date
+        description: Calendar date
+        expr: DIM_DATE.FULL_DATE
         data_type: DATE
       - name: INCIDENT_TYPE
         synonyms:

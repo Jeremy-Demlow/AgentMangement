@@ -6,7 +6,17 @@ TABLES (
     FACT_INCIDENTS AS {{ ref('fact_incidents') }}
       PRIMARY KEY (INCIDENT_ID)
       WITH SYNONYMS ('incidents', 'accidents', 'safety')
-      COMMENT = 'Safety incident records'
+      COMMENT = 'Safety incident records',
+
+    DIM_DATE AS {{ ref('dim_date') }}
+      PRIMARY KEY (DATE_KEY)
+      WITH SYNONYMS ('calendar')
+      COMMENT = 'Calendar dimension with ski season awareness'
+)
+
+RELATIONSHIPS (
+    INCIDENTS_TO_DATE AS
+      FACT_INCIDENTS (DATE_KEY) REFERENCES DIM_DATE
 )
 
 FACTS (
@@ -19,6 +29,11 @@ FACTS (
 DIMENSIONS (
     FACT_INCIDENTS.INCIDENT_DATE AS INCIDENT_DATE
       COMMENT = 'Date of incident',
+    DIM_DATE.SKI_SEASON AS SKI_SEASON
+      COMMENT = 'Ski season identifier (e.g. 2024-2025)',
+    DIM_DATE.FULL_DATE AS FULL_DATE
+      WITH SYNONYMS ('date')
+      COMMENT = 'Calendar date',
     FACT_INCIDENTS.INCIDENT_TYPE AS INCIDENT_TYPE
       WITH SYNONYMS ('type')
       COMMENT = 'Type of incident',
@@ -54,7 +69,7 @@ COMMENT = 'Safety incident tracking'
 WITH EXTENSION (CA = $$
 {
   "module_custom_instructions": {
-    "sql_generation": "Use FACT_INCIDENTS for all safety and incident queries. Filter by SEVERITY for critical analysis. Use PATROL_RESPONSE_MINUTES for response time metrics. Guard division with DIV0()."
+    "sql_generation": "Use FACT_INCIDENTS for all safety and incident queries. Use DIM_DATE.SKI_SEASON for seasonal filtering (e.g. 'last season'). Filter by SEVERITY for critical analysis. Use PATROL_RESPONSE_MINUTES for response time metrics. Guard division with DIV0()."
   },
   "verified_queries": [
     {
@@ -80,6 +95,14 @@ WITH EXTENSION (CA = $$
       "verified_by": "Cortex Analyst",
       "verified_at": 1744900000,
       "use_as_onboarding_question": false
+    },
+    {
+      "name": "incidents_by_season",
+      "question": "What are the total incidents, average severity, and average patrol response time by ski season?",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n  AM_SKI_RESORT.SEMANTIC.SEM_SAFETY_INCIDENTS\n  DIMENSIONS ski_season\n  METRICS total_incidents, average_severity, avg_patrol_response\n) ORDER BY ski_season DESC NULLS LAST",
+      "verified_by": "Cortex Analyst",
+      "verified_at": 1745400000,
+      "use_as_onboarding_question": true
     },
     {
       "name": "severity_by_skill_level",
