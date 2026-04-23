@@ -31,6 +31,8 @@ DIMENSIONS (
       COMMENT = 'Date surrogate key',
     FACT_INCIDENTS.INCIDENT_DATE AS INCIDENT_DATE
       COMMENT = 'Date of incident',
+    DIM_DATE.DATE_KEY AS DIM_DATE_KEY
+      COMMENT = 'Calendar date key',
     DIM_DATE.SKI_SEASON AS SKI_SEASON
       COMMENT = 'Ski season identifier (e.g. 2024-2025)',
     DIM_DATE.FULL_DATE AS FULL_DATE
