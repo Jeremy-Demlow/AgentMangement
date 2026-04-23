@@ -11,15 +11,16 @@
 #   - ground_truth: Static fallback (used only when no validation_query)
 #
 # Time Anchoring:
-#   Questions use relative references ("most recent complete season", "current season")
-#   so the same eval set works across seasons without manual updates.
+#   Questions use natural-language time references ("last season", "this season")
+#   that mirror how real users talk.  "Last season" = the season before the
+#   current one; "this season" / "current season" = the season in progress.
 #   See references/dynamic-ground-truth.md for patterns.
 
 questions:
   # ===========================================================================
   # REVENUE — Season Totals (RevenueAnalytics / DailySummaryKPIs)
   # ===========================================================================
-  - question: "What was our total ticket revenue for the most recent complete season?"
+  - question: "What was our total ticket revenue last season?"
     expected_tools: ["DailySummaryKPIs", "RevenueAnalytics"]
     category: revenue
     tags: [tickets, season_total, dynamic]
@@ -45,7 +46,7 @@ questions:
       ${total_revenue:,.0f} from {ticket_count:,} tickets sold,
       with an average ticket price of ${avg_price:,.2f}.
 
-  - question: "How did food and beverage revenue perform during the most recent complete season?"
+  - question: "How did food and beverage revenue perform last season?"
     expected_tools: ["RevenueAnalytics"]
     category: revenue
     tags: [fnb, season_total, dynamic]
@@ -66,7 +67,7 @@ questions:
       Food and beverage revenue for the {season} season was approximately
       ${total_revenue:,.0f} from {transaction_count:,} transactions.
 
-  - question: "What was the total rental revenue for the most recent complete season?"
+  - question: "What was the total rental revenue last season?"
     expected_tools: ["RevenueAnalytics"]
     category: revenue
     tags: [rentals, season_total, dynamic]
@@ -140,7 +141,7 @@ questions:
   # ===========================================================================
   # WEATHER (WeatherAnalytics)
   # ===========================================================================
-  - question: "How much total snowfall did we receive during the most recent complete season and how many powder days?"
+  - question: "How much total snowfall did we receive last season and how many powder days?"
     expected_tools: ["WeatherAnalytics"]
     category: weather
     tags: [snowfall, powder_days, season_total, dynamic]
@@ -167,7 +168,7 @@ questions:
   # ===========================================================================
   # LIFT OPERATIONS (LiftOperations)
   # ===========================================================================
-  - question: "What was the average lift wait time for the most recent complete season and how many total scans were recorded?"
+  - question: "What was the average lift wait time last season and how many total scans were recorded?"
     expected_tools: ["LiftOperations"]
     category: operations
     tags: [wait_time, lift_scans, season_total, dynamic]
@@ -188,7 +189,7 @@ questions:
       Average lift wait time for the {season} season was {avg_wait} minutes
       with {total_scans:,} total lift scans recorded.
 
-  - question: "Which days of the week had the most lift activity during the most recent complete season?"
+  - question: "Which days of the week had the most lift activity last season?"
     expected_tools: ["LiftOperations"]
     category: operations
     tags: [day_of_week, lift_scans, ranking, dynamic]
@@ -206,13 +207,13 @@ questions:
       ORDER BY count1 DESC
       LIMIT 1
     answer_template: >-
-      {day1} was the busiest day with {count1:,} lift scans during the most recent complete season.
+      {day1} was the busiest day with {count1:,} lift scans last season.
     ground_truth: ""
 
   # ===========================================================================
   # STAFFING (StaffingAnalytics)
   # ===========================================================================
-  - question: "What was the average staffing coverage ratio during the most recent complete season and how many understaffed shifts occurred?"
+  - question: "What was the average staffing coverage ratio last season and how many understaffed shifts occurred?"
     expected_tools: ["StaffingAnalytics"]
     category: staffing
     tags: [coverage, understaffed, season_total, dynamic]
@@ -236,7 +237,7 @@ questions:
   # ===========================================================================
   # MARKETING (MarketingAnalytics)
   # ===========================================================================
-  - question: "Which marketing campaign had the highest conversion rate during the most recent complete season?"
+  - question: "Which marketing campaign had the highest conversion rate last season?"
     expected_tools: ["MarketingAnalytics"]
     category: marketing
     tags: [conversion, campaign, ranking, dynamic]
@@ -256,12 +257,12 @@ questions:
       LIMIT 1
     answer_template: >-
       {top_campaign} via {channel} had the highest conversion rate
-      at approximately {conversion_pct}% during the most recent complete season.
+      at approximately {conversion_pct}% last season.
 
   # ===========================================================================
   # CUSTOMER SATISFACTION (CustomerSatisfaction)
   # ===========================================================================
-  - question: "What was our average NPS score and customer rating during the most recent complete season?"
+  - question: "What was our average NPS score and customer rating last season?"
     expected_tools: ["CustomerSatisfaction"]
     category: satisfaction
     tags: [nps, rating, season_total, dynamic]
@@ -286,7 +287,7 @@ questions:
   # ===========================================================================
   # SAFETY (SafetyIncidents)
   # ===========================================================================
-  - question: "How many safety incidents occurred during the most recent complete season and what was the average patrol response time?"
+  - question: "How many safety incidents occurred last season and what was the average patrol response time?"
     expected_tools: ["SafetyIncidents"]
     category: safety
     tags: [incidents, response_time, season_total, dynamic]
@@ -312,7 +313,7 @@ questions:
   # ===========================================================================
   # SKI SCHOOL (SkiSchoolAnalytics)
   # ===========================================================================
-  - question: "How did ski school perform during the most recent complete season in terms of lessons and revenue?"
+  - question: "How did ski school perform last season in terms of lessons and revenue?"
     expected_tools: ["SkiSchoolAnalytics"]
     category: ski_school
     tags: [lessons, revenue, season_total, dynamic]
@@ -338,7 +339,7 @@ questions:
   # ===========================================================================
   # PASSHOLDER (PassholderAnalytics)
   # ===========================================================================
-  - question: "How many season passes were sold for the most recent complete season and what was the total pass revenue?"
+  - question: "How many season passes were sold for last season and what was the total pass revenue?"
     expected_tools: ["PassholderAnalytics"]
     category: passholders
     tags: [passes, revenue, season_total, dynamic]

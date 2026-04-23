@@ -8,14 +8,15 @@
 #   - answer_template: Python format string that combines query results into NL ground truth
 #
 # Time Anchoring:
-#   Questions use relative references ("most recent complete season", "current season")
-#   so the same eval set works across seasons without manual updates.
+#   Questions use natural-language time references ("last season", "this season")
+#   that mirror how real users talk.  "Last season" = the season before the
+#   current one; "this season" / "current season" = the season in progress.
 
 questions:
   # ===========================================================================
   # LIFT OPERATIONS — Wait Times and Capacity
   # ===========================================================================
-  - question: "What was the average lift wait time for the most recent complete season?"
+  - question: "What was the average lift wait time last season?"
     expected_tools: ["LiftOperationsAnalytics"]
     category: operations
     tags: [wait_time, season_total, dynamic]
@@ -36,7 +37,7 @@ questions:
       Average lift wait time for the {season} season was {avg_wait} minutes
       across {total_scans:,} total lift scans.
 
-  - question: "Which lifts had the longest average wait times during the most recent complete season?"
+  - question: "Which lifts had the longest average wait times last season?"
     expected_tools: ["LiftOperationsAnalytics"]
     category: operations
     tags: [wait_time, ranking, dynamic]
@@ -58,7 +59,7 @@ questions:
       LIMIT 3
     answer_template: >-
       The lifts with the longest average wait times were {lift_name} at {avg_wait} minutes
-      ({scan_count:,} scans) during the most recent complete season.
+      ({scan_count:,} scans) last season.
 
   - question: "How do weekend wait times compare to weekday wait times across all lifts?"
     expected_tools: ["LiftOperationsAnalytics"]
@@ -84,7 +85,7 @@ questions:
   # ===========================================================================
   # STAFFING — Coverage and Understaffing
   # ===========================================================================
-  - question: "What was the average staffing coverage ratio during the most recent complete season?"
+  - question: "What was the average staffing coverage ratio last season?"
     expected_tools: ["StaffingAnalytics"]
     category: staffing
     tags: [coverage, season_total, dynamic]
@@ -106,7 +107,7 @@ questions:
       Average staffing coverage ratio was {avg_coverage} during the {season} season
       with {understaffed_shifts} understaffed shifts out of {total_shifts:,} total shifts.
 
-  - question: "Which departments had the most understaffed shifts during the most recent complete season?"
+  - question: "Which departments had the most understaffed shifts last season?"
     expected_tools: ["StaffingAnalytics"]
     category: staffing
     tags: [understaffed, department, ranking, dynamic]
@@ -127,12 +128,12 @@ questions:
       LIMIT 3
     answer_template: >-
       {dept} had the most understaffed shifts with {understaffed_count}
-      out of {total_shifts:,} total shifts during the most recent complete season.
+      out of {total_shifts:,} total shifts last season.
 
   # ===========================================================================
   # WEATHER — Snowfall and Conditions
   # ===========================================================================
-  - question: "How much total snowfall did we get during the most recent complete season and how many powder days?"
+  - question: "How much total snowfall did we get last season and how many powder days?"
     expected_tools: ["WeatherAnalytics"]
     category: weather
     tags: [snowfall, powder_days, dynamic]
@@ -153,7 +154,7 @@ questions:
       Total snowfall for the {season} season was {total_snowfall:,.1f} inches
       with {powder_days} powder days.
 
-  - question: "What were the wind conditions like during the most recent complete season? How many high wind days?"
+  - question: "What were the wind conditions like last season? How many high wind days?"
     expected_tools: ["WeatherAnalytics"]
     category: weather
     tags: [wind, high_wind, dynamic]
@@ -178,7 +179,7 @@ questions:
   # ===========================================================================
   # SAFETY — Incidents and Response
   # ===========================================================================
-  - question: "How many safety incidents occurred during the most recent complete season and what was the average patrol response time?"
+  - question: "How many safety incidents occurred last season and what was the average patrol response time?"
     expected_tools: ["SafetyIncidentsAnalytics"]
     category: safety
     tags: [incidents, response_time, dynamic]
@@ -201,7 +202,7 @@ questions:
       with average severity of {avg_severity} and average patrol response time
       of {avg_response} minutes.
 
-  - question: "What were the most common incident types during the most recent complete season?"
+  - question: "What were the most common incident types last season?"
     expected_tools: ["SafetyIncidentsAnalytics"]
     category: safety
     tags: [incident_type, ranking, dynamic]
@@ -221,7 +222,7 @@ questions:
       LIMIT 3
     answer_template: >-
       The most common incident type was {incident_type} with {count} occurrences
-      during the most recent complete season.
+      last season.
 
   # ===========================================================================
   # CROSS-DOMAIN — Operational Summary
