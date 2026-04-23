@@ -18,6 +18,7 @@ final as (
     select
         i.incident_id,
         i.incident_date,
+        TO_NUMBER(TO_CHAR(i.incident_date, 'YYYYMMDD')) AS date_key,
         i.incident_time,
         i.incident_type,
         i.severity,

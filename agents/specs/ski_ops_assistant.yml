@@ -1,6 +1,6 @@
 metadata:
   name: ski_ops_assistant
-  version: "1.0.0"
+  version: "1.1.0"
   owner: operations_team
   status: active
 
@@ -43,7 +43,10 @@ tools:
       GROOMING_TRAIL_NAME, GROOMING_TYPE, GROOMING_SHIFT.
       USE FOR: Wait times, bottlenecks, capacity, maintenance costs, downtime,
       inspection pass rates, grooming effectiveness, trail conditions.
-      NOT FOR: Staffing, revenue, customer demographics.
+      NOT FOR: Staffing levels or labor hours (use StaffingAnalytics).
+      NOT FOR: Revenue data (refer user to Resort Executive agent).
+      NOT FOR: Customer demographics (refer user to Resort Executive agent).
+      Data: Daily granularity, refreshed nightly.
 
   - name: StaffingAnalytics
     type: cortex_analyst_text_to_sql
@@ -54,20 +57,25 @@ tools:
       KEY METRICS: TOTAL_SCHEDULED, TOTAL_ACTUAL, AVG_COVERAGE, UNDERSTAFFED_COUNT,
       TOTAL_SCHEDULED_HOURS, TOTAL_ACTUAL_HOURS.
       KEY DIMENSIONS: FULL_DATE, SKI_SEASON, IS_WEEKEND, DEPARTMENT, JOB_ROLE, LOCATION_NAME.
-      USE FOR: Staffing levels, coverage ratios, understaffing, labor hours.
-      NOT FOR: Individual HR data, payroll, lift operations.
+      USE FOR: Staffing levels, coverage ratios, understaffing analysis, labor hours,
+      department comparisons, weekend vs weekday staffing.
+      NOT FOR: Individual HR data or payroll.
+      NOT FOR: Lift operations or maintenance (use LiftOperationsAnalytics).
 
   - name: WeatherAnalytics
     type: cortex_analyst_text_to_sql
     semantic_view: {{ env.semantic_schema }}.SEM_WEATHER_ANALYTICS
     warehouse: {{ env.warehouse }}
     description: >
-      Historical weather conditions by mountain zone.
+      Historical weather conditions by mountain zone. Data is per-zone per-day
+      (4 mountain zones), so totals represent cumulative across all zones.
       KEY METRICS: TOTAL_SNOWFALL, MAX_SNOWFALL, AVG_SNOWFALL, MAX_BASE_DEPTH,
       MIN_TEMP, MAX_TEMP, MAX_WIND, POWDER_DAY_COUNT, HIGH_WIND_COUNT, STORM_COUNT.
       KEY DIMENSIONS: FULL_DATE, SKI_SEASON, MONTH_NAME, MOUNTAIN_ZONE, SNOW_CONDITION.
       USE FOR: Snowfall, powder days, storms, temperature, wind, weather by zone.
-      NOT FOR: Weather forecasts (historical only).
+      NOT FOR: Weather forecasts (historical data only).
+      NOTE: Group by MOUNTAIN_ZONE for zone-specific analysis. Without zone grouping,
+      metrics aggregate across all 4 zones.
 
   - name: SafetyIncidentsAnalytics
     type: cortex_analyst_text_to_sql
@@ -77,8 +85,10 @@ tools:
       Safety incidents, accident reports, and ski patrol response times.
       KEY METRICS: TOTAL_INCIDENTS, AVERAGE_SEVERITY, CRITICAL_INCIDENTS, AVG_PATROL_RESPONSE.
       KEY DIMENSIONS: INCIDENT_DATE, INCIDENT_TYPE, SEVERITY, LOCATION_ID,
-      TRAIL_NAME, CUSTOMER_SKILL_LEVEL, TRANSPORT_REQUIRED.
-      USE FOR: Incident trends, patrol response times, safety hotspots, severity analysis.
+      TRAIL_NAME, CUSTOMER_SKILL_LEVEL, TRANSPORT_REQUIRED, SKI_SEASON, FULL_DATE.
+      USE FOR: Incident trends, patrol response times, safety hotspots, severity analysis,
+      seasonal incident comparisons.
+      NOT FOR: Lift operations or maintenance (use LiftOperationsAnalytics).
 
 instructions:
   response: >
@@ -109,11 +119,14 @@ instructions:
 
 
     BUSINESS RULES:
+    "Last season" = the most recent completed season (Nov 1 - Apr 30).
+    "This season" or "current season" = season in progress.
     Weekends: IS_WEEKEND = true. Holidays: IS_HOLIDAY = true.
     Peak season: Dec-Feb. Hourly patterns: SCAN_HOUR (rush = 9-11).
+    Weather data is per mountain zone — totals aggregate across 4 zones.
 
 
     BOUNDARIES:
     No real-time data. No weather forecasts. No visitor forecasting.
     No HR/payroll. No revenue (refer to Resort Executive).
-    No customer demographics (refer to Customer Insights).
+    No customer demographics (refer to Resort Executive).

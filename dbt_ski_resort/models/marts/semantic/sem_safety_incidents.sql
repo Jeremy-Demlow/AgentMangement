@@ -6,7 +6,17 @@ TABLES (
     FACT_INCIDENTS AS {{ ref('fact_incidents') }}
       PRIMARY KEY (INCIDENT_ID)
       WITH SYNONYMS ('incidents', 'accidents', 'safety')
-      COMMENT = 'Safety incident records'
+      COMMENT = 'Safety incident records',
+
+    DIM_DATE AS {{ ref('dim_date') }}
+      PRIMARY KEY (DATE_KEY)
+      WITH SYNONYMS ('calendar')
+      COMMENT = 'Calendar dimension with ski season awareness'
+)
+
+RELATIONSHIPS (
+    INCIDENTS_TO_DATE AS
+      FACT_INCIDENTS (DATE_KEY) REFERENCES DIM_DATE
 )
 
 FACTS (
@@ -17,8 +27,17 @@ FACTS (
 )
 
 DIMENSIONS (
+    FACT_INCIDENTS.DATE_KEY AS DATE_KEY
+      COMMENT = 'Date surrogate key',
     FACT_INCIDENTS.INCIDENT_DATE AS INCIDENT_DATE
       COMMENT = 'Date of incident',
+    DIM_DATE.DATE_KEY AS DIM_DATE_KEY
+      COMMENT = 'Calendar date key',
+    DIM_DATE.SKI_SEASON AS SKI_SEASON
+      COMMENT = 'Ski season identifier (e.g. 2024-2025)',
+    DIM_DATE.FULL_DATE AS FULL_DATE
+      WITH SYNONYMS ('date')
+      COMMENT = 'Calendar date',
     FACT_INCIDENTS.INCIDENT_TYPE AS INCIDENT_TYPE
       WITH SYNONYMS ('type')
       COMMENT = 'Type of incident',
@@ -54,7 +73,7 @@ COMMENT = 'Safety incident tracking'
 WITH EXTENSION (CA = $$
 {
   "module_custom_instructions": {
-    "sql_generation": "Use FACT_INCIDENTS for all safety and incident queries. Filter by SEVERITY for critical analysis. Use PATROL_RESPONSE_MINUTES for response time metrics. Guard division with DIV0()."
+    "sql_generation": "Use FACT_INCIDENTS for all safety and incident queries. Use DIM_DATE.SKI_SEASON for seasonal filtering (e.g. 'last season'). Filter by SEVERITY for critical analysis. Use PATROL_RESPONSE_MINUTES for response time metrics. Guard division with DIV0()."
   },
   "verified_queries": [
     {
@@ -72,14 +91,6 @@ WITH EXTENSION (CA = $$
       "verified_by": "Cortex Analyst",
       "verified_at": 1744900000,
       "use_as_onboarding_question": true
-    },
-    {
-      "name": "monthly_incidents_response",
-      "question": "What is the monthly total incidents and average patrol response time by month?",
-      "sql": "WITH __fact_incidents AS (\n  SELECT\n    incident_date,\n    incident_id,\n    patrol_response_minutes\n  FROM AM_SKI_RESORT.MARTS.FACT_INCIDENTS\n) SELECT\n  DATE_TRUNC('MONTH', incident_date) AS month,\n  COUNT(incident_id) AS total_incidents,\n  AVG(patrol_response_minutes) AS avg_patrol_response\nFROM __fact_incidents GROUP BY\n  DATE_TRUNC('MONTH', incident_date)\nORDER BY\n  month DESC NULLS LAST",
-      "verified_by": "Cortex Analyst",
-      "verified_at": 1744900000,
-      "use_as_onboarding_question": false
     },
     {
       "name": "severity_by_skill_level",

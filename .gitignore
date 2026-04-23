@@ -48,6 +48,10 @@ agents/snapshots/
 semantic-views/snapshots/
 .plans/
 
+# Local test/debug scripts
+test_*.py
+audit_*.py
+
 # Misc
 *.log
 .env

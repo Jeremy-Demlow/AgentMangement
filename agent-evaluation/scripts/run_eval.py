@@ -122,17 +122,20 @@ def resolve_dynamic_ground_truth(cursor, questions: list[dict]) -> list[dict]:
         try:
             cursor.execute(vq)
             cols = [desc[0].lower() for desc in cursor.description]
-            row = cursor.fetchone()
-            if row:
-                row_dict = {}
-                for col, val in zip(cols, row):
-                    if isinstance(val, Decimal):
-                        row_dict[col] = float(val)
-                    elif isinstance(val, (int, float)):
-                        row_dict[col] = val
-                    else:
-                        row_dict[col] = str(val) if val is not None else ""
-                q["ground_truth"] = tmpl.format_map(row_dict)
+            rows = cursor.fetchall()
+            if rows:
+                parts = []
+                for row in rows:
+                    row_dict = {}
+                    for col, val in zip(cols, row):
+                        if isinstance(val, Decimal):
+                            row_dict[col] = float(val)
+                        elif isinstance(val, (int, float)):
+                            row_dict[col] = val
+                        else:
+                            row_dict[col] = str(val) if val is not None else ""
+                    parts.append(tmpl.format_map(row_dict))
+                q["ground_truth"] = " ".join(parts)
                 resolved += 1
             else:
                 print(f"    WARN: validation_query returned no rows for: {q['question'][:60]}")

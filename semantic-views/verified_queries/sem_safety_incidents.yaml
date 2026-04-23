@@ -28,29 +28,6 @@ verified_queries:
     verified_at: 1744900000
     use_as_onboarding_question: true
 
-  - name: monthly_incidents_response
-    question: "What is the monthly total incidents and average patrol response time by month?"
-    sql: >-
-      WITH __fact_incidents AS (
-        SELECT
-          incident_date,
-          incident_id,
-          patrol_response_minutes
-        FROM MARTS.FACT_INCIDENTS
-      )
-      SELECT
-        DATE_TRUNC('MONTH', incident_date) AS month,
-        COUNT(incident_id) AS total_incidents,
-        AVG(patrol_response_minutes) AS avg_patrol_response
-      FROM __fact_incidents
-      GROUP BY
-        DATE_TRUNC('MONTH', incident_date)
-      ORDER BY
-        month DESC NULLS LAST
-    verified_by: "Cortex Analyst"
-    verified_at: 1744900000
-    use_as_onboarding_question: false
-
   - name: severity_by_skill_level
     question: "What is the average severity and total incidents by customer skill level and severity level?"
     sql: >-
