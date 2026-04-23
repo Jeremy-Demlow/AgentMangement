@@ -8,7 +8,7 @@ tables:
       - safety
     description: Safety incident records
     base_table:
-      database: "{{ env.database }}"
+      database: {{ env.database }}
       schema: MARTS
       table: FACT_INCIDENTS
     primary_key:
@@ -90,7 +90,7 @@ tables:
       - calendar
     description: Calendar dimension with ski season awareness
     base_table:
-      database: "{{ env.database }}"
+      database: {{ env.database }}
       schema: MARTS
       table: DIM_DATE
     primary_key:
