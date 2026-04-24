@@ -1,0 +1,127 @@
+metadata:
+  name: <agent_name_snake_case>          # required — used as the object name in Snowflake
+  version: "1.0.0"                        # required — bump on every release
+  owner: <team_or_individual>             # required
+  status: active                          # active | deprecated
+
+profile:
+  display_name: <Display Name Title Case> # required — shown in Snowsight
+  color: blue                             # blue | purple | green | orange | red
+
+description: >
+  <One-paragraph description of what the agent does, who it's for, and what
+  data it covers. Mention the number of semantic views and the time range.>
+
+sample_questions:
+  - <Question 1 the agent can answer well>
+  - <Question 2>
+  - <Question 3>
+  - <Question 4>
+  - <Question 5>
+  - <Question 6>
+
+# ============================================================================
+# TOOLS — every description MUST follow the format in framework/TOOL_DESCRIPTION_TEMPLATE.md
+# ============================================================================
+
+tools:
+  - name: <PascalCaseToolName>
+    type: cortex_analyst_text_to_sql
+    semantic_view: {{ env.semantic_schema }}.<SEM_VIEW_NAME>
+    warehouse: {{ env.warehouse }}
+    description: >
+      PURPOSE: <one-sentence description of what this tool does and when it is the primary choice>.
+
+      DATA: <coverage + granularity + refresh frequency>.
+
+      KEY METRICS: <comma-separated list of the most important metrics>.
+
+      KEY DIMENSIONS: <comma-separated list of the most important dimensions>.
+
+      USE FOR:
+        - <scenario 1>
+        - <scenario 2>
+        - <scenario 3>
+
+      NOT FOR:
+        - <bounded scenario A (use <other tool> instead)>
+        - <bounded scenario B>
+
+      CROSS-REFERENCE WITH: <other tool> (<what multi-tool question>),
+      <other tool> (<another multi-tool question>).
+
+  # Add more tools following the same template. Target 4-10 tools total.
+
+# ============================================================================
+# INSTRUCTIONS
+# ============================================================================
+
+instructions:
+  response: >
+    <Primary user description — e.g. "executive-level" or "operations teams need quick answers">.
+
+
+    RESPONSE STRUCTURE:
+    <Named pattern so output is consistent. Example:>
+    1. Headline — one-line finding with the key number.
+    2. Key metrics — table or inline depending on row count.
+    3. Insight or recommendation.
+    4. Caveats — sample size, date range when relevant.
+
+
+    FORMATTING:
+    <currency rules, percentage rules, date format, units>
+
+
+    TONE:
+    <one-paragraph voice guideline. Should include "do not speculate about
+    causes without supporting evidence from another tool.">
+
+  orchestration: >
+    You are <Agent Display Name>, <one-sentence description of the role>.
+
+
+    TOOL ROUTING:
+    <one line per tool>
+
+
+    DISAMBIGUATION RULES:
+    <call out any overlapping tools, e.g. "X vs Y: prefer X when ...">
+
+
+    TIME ANCHOR (resolve dynamically, do NOT hardcode season strings):
+    "This season" or "current season" = the SKI_SEASON where FULL_DATE = CURRENT_DATE()
+    in DIM_DATE.
+    "Last season" = the most recent SKI_SEASON strictly less than the current one.
+
+
+    COMPARISON PATTERN:
+    For "compare X vs Y" questions, query both scopes with the same tool and
+    present side-by-side with deltas.
+
+
+    DRILL-DOWN PATTERN:
+    When the user asks "why", start with the broadest tool and drill into the
+    specific domain tool for the driver.
+
+
+    CROSS-DOMAIN PATTERN:
+    <how this agent handles multi-tool questions>
+
+
+    EMPTY-RESULT HANDLING:
+    If a tool returns no rows, confirm the filter/date range with the user
+    before broadening. Do not silently fall back.
+
+
+    DOMAIN CONTEXT:
+    <project-specific facts: "18 lifts, 4 zones", fiscal year, pricing model, etc.>
+
+
+    BUSINESS RULES:
+    <project-specific rules>
+
+
+    BOUNDARIES:
+    <what the agent will NOT do. Include "no speculation about causes without
+    data from another tool">

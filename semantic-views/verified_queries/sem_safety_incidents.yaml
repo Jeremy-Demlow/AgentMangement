@@ -53,3 +53,54 @@ verified_queries:
     verified_by: "Cortex Analyst"
     verified_at: 1744900000
     use_as_onboarding_question: false
+
+  - name: incidents_summary_last_season
+    question: "How many safety incidents occurred last season and what was the average patrol response time?"
+    sql: >-
+      WITH last_season AS (
+        SELECT MAX(ski_season) AS season
+        FROM SEMANTIC_VIEW(
+          SEMANTIC.SEM_SAFETY_INCIDENTS
+          DIMENSIONS ski_season
+          METRICS total_incidents
+        )
+        WHERE ski_season < (
+          SELECT ski_season FROM MARTS.DIM_DATE WHERE full_date = CURRENT_DATE()
+        )
+      )
+      SELECT ski_season, total_incidents, avg_patrol_response
+      FROM SEMANTIC_VIEW(
+        SEMANTIC.SEM_SAFETY_INCIDENTS
+        DIMENSIONS ski_season
+        METRICS total_incidents, avg_patrol_response
+      )
+      WHERE ski_season = (SELECT season FROM last_season)
+    verified_by: "Cortex Analyst"
+    verified_at: 1745500000
+    use_as_onboarding_question: true
+
+  - name: top_incident_types_last_season
+    question: "What were the most common incident types last season?"
+    sql: >-
+      WITH last_season AS (
+        SELECT MAX(ski_season) AS season
+        FROM SEMANTIC_VIEW(
+          SEMANTIC.SEM_SAFETY_INCIDENTS
+          DIMENSIONS ski_season
+          METRICS total_incidents
+        )
+        WHERE ski_season < (
+          SELECT ski_season FROM MARTS.DIM_DATE WHERE full_date = CURRENT_DATE()
+        )
+      )
+      SELECT incident_type, total_incidents
+      FROM SEMANTIC_VIEW(
+        SEMANTIC.SEM_SAFETY_INCIDENTS
+        DIMENSIONS incident_type, ski_season
+        METRICS total_incidents
+      )
+      WHERE ski_season = (SELECT season FROM last_season)
+      ORDER BY total_incidents DESC NULLS LAST
+    verified_by: "Cortex Analyst"
+    verified_at: 1745500000
+    use_as_onboarding_question: true

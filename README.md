@@ -82,6 +82,23 @@ agent-mgmt-deploy-agents --env dev
 
 ## Building From This Repo
 
+### Agent development framework
+
+Every agent in this repo follows a documented best-practices framework.
+Before creating or modifying an agent, start at
+[framework/README.md](framework/README.md). Key artifacts:
+
+- [framework/AGENT_BEST_PRACTICES.md](framework/AGENT_BEST_PRACTICES.md) — principles, priority order, common pitfalls
+- [framework/TOOL_DESCRIPTION_TEMPLATE.md](framework/TOOL_DESCRIPTION_TEMPLATE.md) — the required tool description format (CI-enforced)
+- [framework/VQR_AUTHORING_GUIDE.md](framework/VQR_AUTHORING_GUIDE.md) — how to pick and write Verified Queries
+- [framework/AGENT_OPTIMIZATION_CHECKLIST.md](framework/AGENT_OPTIMIZATION_CHECKLIST.md) — step-by-step checklist before opening a PR
+- [framework/templates/new_agent_spec.yml](framework/templates/new_agent_spec.yml) — starter template
+
+See also [ENVIRONMENT_PARITY.md](ENVIRONMENT_PARITY.md) for the
+dbt-as-source-of-truth CI gate design.
+
+
+
 The diagram below shows the eight phases a new user follows — from forking the repo through production CI/CD. Each phase builds on the previous one.
 
 ```mermaid

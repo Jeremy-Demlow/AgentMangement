@@ -11,7 +11,7 @@ repos:
       - id: end-of-file-fixer
       - id: check-yaml
         args: [--allow-multiple-documents, --unsafe]
-        exclude: semantic-views/definitions/|agents/specs/
+        exclude: semantic-views/definitions/|agents/specs/|framework/templates/|agent_optimization/
       - id: check-merge-conflict
 
   - repo: https://github.com/Yelp/detect-secrets

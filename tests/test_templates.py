@@ -52,3 +52,68 @@ class TestSVDefinitionRendering:
         expected_db = EXPECTED_DBS[env_name]
         assert f"database: {expected_db}" in rendered
         assert "{{ env." not in rendered
+
+
+class TestToolDescriptionFormat:
+    """Enforce the framework's tool description format.
+
+    See framework/TOOL_DESCRIPTION_TEMPLATE.md for the full contract. Every
+    tool description in agents/specs/*.yml must contain these section
+    headers so the agent has a consistent mental model of every tool.
+    """
+
+    REQUIRED_SECTIONS = [
+        "PURPOSE:",
+        "DATA:",
+        "KEY METRICS",
+        "KEY DIMENSIONS",
+        "USE FOR:",
+        "NOT FOR:",
+        "CROSS-REFERENCE WITH:",
+    ]
+
+    @pytest.mark.parametrize("spec_path", AGENT_SPECS)
+    def test_every_tool_description_has_required_sections(self, spec_path):
+        import yaml as pyyaml
+        config = load_env_config("dev")
+        rendered = render_file(spec_path, config)
+        spec = pyyaml.safe_load(rendered)
+        tools = spec.get("tools", [])
+        assert tools, f"{spec_path} has no tools"
+
+        missing = []
+        for tool in tools:
+            name = tool.get("name", "<unnamed>")
+            desc = tool.get("description", "") or ""
+            for section in self.REQUIRED_SECTIONS:
+                if section not in desc:
+                    missing.append((name, section))
+
+        assert not missing, (
+            f"{spec_path} tool descriptions missing required sections "
+            f"(see framework/TOOL_DESCRIPTION_TEMPLATE.md):\n"
+            + "\n".join(f"  - {name}: missing '{section}'" for name, section in missing)
+        )
+
+    @pytest.mark.parametrize("spec_path", AGENT_SPECS)
+    def test_no_hardcoded_ski_seasons_in_spec(self, spec_path):
+        """Spec must resolve seasons dynamically, not hardcode '2024-2025' etc."""
+        import re
+        config = load_env_config("dev")
+        rendered = render_file(spec_path, config)
+        # hardcoded season strings look like 2024-2025 or 2024-25
+        hardcoded = re.findall(r"\b20\d{2}-20?\d{2}\b", rendered)
+        # Allow in sample_questions and tool examples, but not in instructions
+        # Pull the instructions block and check only that
+        import yaml as pyyaml
+        spec = pyyaml.safe_load(rendered)
+        instructions = spec.get("instructions", {}) or {}
+        orchestration = instructions.get("orchestration", "") or ""
+        response = instructions.get("response", "") or ""
+        combined = orchestration + "\n" + response
+        hardcoded_in_instructions = re.findall(r"\b20\d{2}-20?\d{2}\b", combined)
+        assert not hardcoded_in_instructions, (
+            f"{spec_path} instructions contain hardcoded season strings "
+            f"{hardcoded_in_instructions}. Resolve seasons dynamically via DIM_DATE "
+            f"(see framework/AGENT_BEST_PRACTICES.md)."
+        )

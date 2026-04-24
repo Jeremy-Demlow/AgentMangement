@@ -72,3 +72,90 @@ verified_queries:
     verified_by: "Cortex Analyst"
     verified_at: 1744900000
     use_as_onboarding_question: false
+
+  - name: total_ticket_revenue_last_season
+    question: "What was our total ticket revenue last season?"
+    sql: >-
+      WITH last_season AS (
+        SELECT MAX(ski_season) AS season
+        FROM SEMANTIC_VIEW(
+          SEMANTIC.SEM_REVENUE
+          DIMENSIONS ski_season
+          METRICS ticket_revenue
+        )
+        WHERE ski_season < (
+          SELECT ski_season FROM MARTS.DIM_DATE WHERE full_date = CURRENT_DATE()
+        )
+      )
+      SELECT ski_season, ticket_revenue, tickets_sold
+      FROM SEMANTIC_VIEW(
+        SEMANTIC.SEM_REVENUE
+        DIMENSIONS ski_season
+        METRICS ticket_revenue, tickets_sold
+      )
+      WHERE ski_season = (SELECT season FROM last_season)
+    verified_by: "Cortex Analyst"
+    verified_at: 1745500000
+    use_as_onboarding_question: true
+
+  - name: fnb_revenue_last_season
+    question: "How did food and beverage revenue perform last season?"
+    sql: >-
+      WITH last_season AS (
+        SELECT MAX(ski_season) AS season
+        FROM SEMANTIC_VIEW(
+          SEMANTIC.SEM_REVENUE
+          DIMENSIONS ski_season
+          METRICS fnb_revenue
+        )
+        WHERE ski_season < (
+          SELECT ski_season FROM MARTS.DIM_DATE WHERE full_date = CURRENT_DATE()
+        )
+      )
+      SELECT ski_season, fnb_revenue
+      FROM SEMANTIC_VIEW(
+        SEMANTIC.SEM_REVENUE
+        DIMENSIONS ski_season
+        METRICS fnb_revenue
+      )
+      WHERE ski_season = (SELECT season FROM last_season)
+    verified_by: "Cortex Analyst"
+    verified_at: 1745500000
+    use_as_onboarding_question: true
+
+  - name: ticket_revenue_current_vs_last_season_to_date
+    question: "How does the current season's ticket revenue compare to the same point last season?"
+    sql: >-
+      WITH current_season AS (
+        SELECT ski_season FROM MARTS.DIM_DATE WHERE full_date = CURRENT_DATE()
+      ),
+      prior_season AS (
+        SELECT MAX(ski_season) AS season
+        FROM SEMANTIC_VIEW(
+          SEMANTIC.SEM_REVENUE
+          DIMENSIONS ski_season
+          METRICS ticket_revenue
+        )
+        WHERE ski_season < (SELECT ski_season FROM current_season)
+      ),
+      current_max_week AS (
+        SELECT MAX(week_of_season) AS wk
+        FROM MARTS.DIM_DATE
+        WHERE full_date <= CURRENT_DATE()
+          AND ski_season = (SELECT ski_season FROM current_season)
+      )
+      SELECT d.ski_season,
+             ROUND(SUM(t.purchase_amount), 0) AS ticket_revenue,
+             COUNT(*) AS tickets_sold
+      FROM MARTS.FACT_TICKET_SALES t
+      JOIN MARTS.DIM_DATE d ON t.purchase_date_key = d.date_key
+      WHERE d.ski_season IN (
+        (SELECT ski_season FROM current_season),
+        (SELECT season FROM prior_season)
+      )
+      AND d.week_of_season <= (SELECT wk FROM current_max_week)
+      GROUP BY d.ski_season
+      ORDER BY d.ski_season DESC NULLS LAST
+    verified_by: "Cortex Analyst"
+    verified_at: 1745500000
+    use_as_onboarding_question: true
