@@ -48,6 +48,11 @@ agents/snapshots/
 semantic-views/snapshots/
 .plans/
 
+# Agent versioning — local snapshots and WIP framework docs
+/snapshots/
+/framework/
+/agent_optimization/
+
 # Local test/debug scripts
 test_*.py
 audit_*.py
