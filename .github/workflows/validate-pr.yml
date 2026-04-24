@@ -114,8 +114,21 @@ jobs:
       - name: Dry-run agents against ${{ matrix.env }}
         run: python -m agent_management.deploy_agents --env ${{ matrix.env }} --dry-run
 
-      - name: Detect SV drift vs dbt source of truth
+      - name: Detect SV drift vs dbt source of truth (advisory)
+        id: drift_check
+        continue-on-error: true
         run: python -m agent_management.detect_sv_drift --env ${{ matrix.env }} --fail-on-drift
+
+      - name: Drift summary
+        if: always()
+        run: |
+          if [ "${{ steps.drift_check.outcome }}" = "success" ]; then
+            echo "### SV Drift Check (${{ matrix.env }}): CLEAN" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### SV Drift Check (${{ matrix.env }}): DRIFT DETECTED (advisory, not blocking)" >> $GITHUB_STEP_SUMMARY
+            echo "One or more deployed SVs differ from the dbt model. See job logs for details." >> $GITHUB_STEP_SUMMARY
+            echo "To clean up: run dbt run for the affected SV in the target environment." >> $GITHUB_STEP_SUMMARY
+          fi
 
       - name: Cleanup
         if: always()

@@ -60,34 +60,56 @@ def parse_dbt_sv(sql_path: Path) -> dict:
 
     The file uses the Snowflake CREATE SEMANTIC VIEW syntax (pre-compile),
     which has blocks like:
-        TABLES ( T1 AS ..., T2 AS ... )
+        TABLES ( T1 AS {{ ref(...) }}, T2 AS ... )
         DIMENSIONS ( T1.COL1 AS ALIAS, ... )
         FACTS ( T1.COL2 AS ALIAS, ... )
         METRICS ( T1.NAME AS <expr>, ... )
+
+    For TABLES: name is the LHS identifier.
+    For DIMENSIONS/FACTS: name is the RHS identifier (alias after AS).
+    For METRICS: name is the part after the dot in the LHS (before AS).
     """
     raw = _strip_comments(sql_path.read_text())
 
     def extract_block(name: str) -> str:
-        m = re.search(rf"\b{name}\s*\((.*?)\n\)", raw, re.IGNORECASE | re.DOTALL)
+        # Match "KEYWORD (" up to the matching ")" — allow whitespace/newlines
+        m = re.search(rf"\b{name}\s*\(\s*\n(.*?)\n\s*\)", raw, re.IGNORECASE | re.DOTALL)
         return m.group(1) if m else ""
 
-    def extract_names(block: str) -> set[str]:
+    def extract_table_names(block: str) -> set[str]:
+        # Tables: "  TABLE_NAME AS {{ ref(...) }}  ..."
         names: set[str] = set()
-        # pattern matches "TABLE.COL AS ALIAS" or "TABLE AS ..." — capture last identifier before AS
         for line in block.splitlines():
-            line = line.strip().rstrip(",")
-            if not line:
-                continue
-            # "T.COL AS ALIAS" -> alias
-            m = re.match(r"([A-Za-z_][\w.]*)\s+AS\s+([A-Za-z_]\w*)", line, re.IGNORECASE)
+            stripped = line.strip()
+            m = re.match(r"^([A-Za-z_]\w*)\s+AS\b", stripped)
             if m:
-                names.add(m.group(2).upper())
+                names.add(m.group(1).upper())
         return names
 
-    tables = extract_names(extract_block("TABLES"))
-    dimensions = extract_names(extract_block("DIMENSIONS"))
-    facts = extract_names(extract_block("FACTS"))
-    metrics = extract_names(extract_block("METRICS"))
+    def extract_dim_fact_aliases(block: str) -> set[str]:
+        # Dims/Facts: "TABLE.COL AS ALIAS"
+        names: set[str] = set()
+        for line in block.splitlines():
+            stripped = line.strip()
+            m = re.match(r"^[A-Za-z_]\w*\.[A-Za-z_]\w*\s+AS\s+([A-Za-z_]\w*)", stripped)
+            if m:
+                names.add(m.group(1).upper())
+        return names
+
+    def extract_metric_names(block: str) -> set[str]:
+        # Metrics: "TABLE.NAME AS <expr>" — capture NAME (after the dot, before AS)
+        names: set[str] = set()
+        for line in block.splitlines():
+            stripped = line.strip()
+            m = re.match(r"^[A-Za-z_]\w*\.([A-Za-z_]\w*)\s+AS\b", stripped)
+            if m:
+                names.add(m.group(1).upper())
+        return names
+
+    tables = extract_table_names(extract_block("TABLES"))
+    dimensions = extract_dim_fact_aliases(extract_block("DIMENSIONS"))
+    facts = extract_dim_fact_aliases(extract_block("FACTS"))
+    metrics = extract_metric_names(extract_block("METRICS"))
 
     return {
         "tables": tables,
