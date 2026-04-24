@@ -4,9 +4,9 @@
 
 `deploy_agents.py` uses `CREATE OR ALTER AGENT <fqn> … WITH (…)` for every deploy. Each deploy mutates the live spec in place. There is no immutable history; rollback requires storing the previous spec in a snapshot, then re-applying it.
 
-## Goal (target)
+## Goal (target — single code path)
 
-When `agent_versioning.enabled=true`, deploys follow the four-step pattern from the Cortex Agent Versioning Private Preview:
+Deploys follow the four-step pattern from the Cortex Agent Versioning Private Preview. This is the **only** code path; there is no legacy fallback.
 
 ```sql
 -- 1. Create a new LIVE version seeded from the last committed version
@@ -22,13 +22,14 @@ ALTER AGENT <fqn> COMMIT LIVE VERSION;
 ALTER AGENT <fqn> MODIFY VERSION LAST SET ALIAS = <deploy_alias>;
 ```
 
-The `deploy_alias` for each env:
+The `deploy_alias` for each env (2-env model):
 
 | env | alias |
 |-----|-------|
-| dev | `latest`   (every dev deploy moves the alias forward) |
-| qa  | `validated` (QA moves the alias after eval passes) |
-| prod | `production` (prod moves the alias after manual approval) |
+| dev | `latest` — every dev deploy moves the alias forward |
+| prod | `validated` — main-merge deploys move this alias; approval flips `production` |
+
+The `production` alias is only ever moved by the `promote-validated-to-production` workflow.
 
 ## API
 
@@ -39,23 +40,19 @@ def deploy_agent(
     *,
     env: str,
     deploy_alias: str,
-    use_versioning: bool,   # from agent_versioning.enabled
-    fallback_to_spec_restore: bool = True,
 ) -> DeployResult
 
 @dataclass
 class DeployResult:
     agent_fqn: str
-    path: Literal["versioned", "legacy"]
+    env: str
     version_before: str | None   # VERSION$N before
-    version_after: str | None    # VERSION$N after
-    alias_moved: str | None      # alias that was reassigned
-    snapshot_pointer: dict       # for rollback
+    version_after: str           # VERSION$N after (always set on success)
+    alias_moved: str             # the alias that was reassigned
+    snapshot_pointer_path: Path  # for rollback
 ```
 
-## Fallback logic
-
-If the Cortex Agent Versioning API returns `feature not enabled` / `unknown syntax`, we log a warning, flip `path="legacy"`, and run the current `CREATE OR ALTER AGENT` path. Controlled by `fallback_to_spec_restore=True`.
+No `use_versioning`. No `fallback_to_spec_restore`. If the SQL fails, the exception propagates.
 
 ## Drop policy
 
@@ -65,7 +62,7 @@ Keep last N versions (N=10 default, configurable in `project.yml`):
 ALTER AGENT <fqn> DROP VERSION <n>;
 ```
 
-Runs after successful commit+alias, skipping any version currently bearing an alias.
+Runs after successful commit+alias. Skips any version currently bearing any alias.
 
 ## Diagram
 

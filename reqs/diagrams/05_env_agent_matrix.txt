@@ -1,49 +1,80 @@
-ENV x AGENT x ALIAS x VERSION MATRIX
-======================================
+ENV x AGENT x ALIAS x VERSION MATRIX (Option B)
+================================================
 
-                  DEV                      QA                       PROD
-                  ----------------------   ----------------------   ----------------------
-  DB.SCHEMA:      AM_SKI_RESORT_DEV        AM_SKI_RESORT_QA         AM_SKI_RESORT
-                  .AGENTS                  .AGENTS                  .AGENTS
+                  DEV                                   PROD
+                  -----------------------------------   ---------------------------------
+  DB.SCHEMA:      AM_SKI_RESORT_DEV                     AM_SKI_RESORT
+                  .AGENTS                               .AGENTS
 
-  Agent 1:        RESORT_EXECUTIVE_DEV     RESORT_EXECUTIVE_QA      RESORT_EXECUTIVE
-  Agent 2:        SKI_OPS_ASSISTANT_DEV    SKI_OPS_ASSISTANT_QA     SKI_OPS_ASSISTANT
+  Role:           AM_DEPLOY_ROLE_DEV                    AM_DEPLOY_ROLE
+  Warehouse:      AM_SKI_RESORT_WH_DEV                  AM_SKI_RESORT_WH
 
-  deploy_alias:   latest                   validated                production
+  Agent 1:        RESORT_EXECUTIVE_DEV                  RESORT_EXECUTIVE
+  Agent 2:        SKI_OPS_ASSISTANT_DEV                 SKI_OPS_ASSISTANT
 
-  Versions:       VERSION$1..K             VERSION$1..M             VERSION$1..N
-                  (independent per env)
+  Aliases:        latest                                validated, production
 
-  Aliases held:   latest -> V$K            latest -> V$?            latest -> V$?
-                                           validated -> V$M-1       validated -> V$N-1
-                                                                    production -> V$N
+  Deploy alias:   latest   (every deploy moves it)      validated (main-merge moves it)
+                                                        production (approval flip only)
+
+  Versions:       VERSION$1..K                          VERSION$1..N
 
 
 
 PROMOTION FLOW (happy path)
 ----------------------------
 
-  dev: deploy    => V$K+1 created, alias=latest moves to V$K+1
-  qa:  deploy    => V$M+1 created, alias=validated moves to V$M+1
-                    (same spec content as dev V$K+1)
-  qa:  eval      => evals <fqn>!validated (== V$M+1)
-                    PASS => eligible for prod
-  prod: promote  => V$N+1 created (same spec),
-                    alias=production moves to V$N+1
-                    (manual approval required via env: production)
+  dev: deploy           => V$K+1 created, alias=latest moves
+                            (tests developer's local changes)
 
-  rollback prod  => alias=production reassigned to V$N
-                    V$N+1 retained for forensics
+  main-merge auto-deploy:
+     prod: deploy       => V$M+1 created in PROD,
+                            alias=validated moves to V$M+1
+     prod: eval         => evals <fqn>!validated
+                            PASS => eligible for `production` promotion
+                            FAIL => PR author investigates;
+                                    `production` alias UNCHANGED
+
+  manual dispatch (approval required):
+     prod: promote      => ALTER AGENT <fqn>
+                             MODIFY VERSION V$M+1 SET ALIAS = production;
+                            (validated alias unchanged; same version now
+                             has two aliases for a brief moment, which is
+                             fine — aliases are independent pointers)
+
+  rollback prod:
+     => alias=production reassigned to V$(M or earlier)
+        "bad" version retained for forensics
+
+
+
+WHY NO QA ENV
+-------------
+
+  * The QA env existed to eval agents against prod-like data before
+    customers saw them. With Cortex Agent Versioning, the `validated`
+    alias on the PROD agent does exactly that — the spec is
+    committed, eval runs against <fqn>!validated, and only the
+    `production` alias flip exposes traffic to customers.
+
+  * Data isolation is still needed — that's what DEV is for
+    (schema / dbt / SV iteration against AM_SKI_RESORT_DEV data).
+
+  * QA-specific resources (AM_SKI_RESORT_QA, _QA agents, AM_DEPLOY_ROLE_QA,
+    AM_SKI_RESORT_WH_QA) are operator-dropped after the migration lands.
 
 
 
 EDGE CASES
 -----------
 
-  * Different envs can have different version numbers for the same spec
-    content (they're independent ALTER AGENT …COMMIT streams).
+  * DEV and PROD have independent version numbers for the same spec
+    content (independent ALTER AGENT ... COMMIT streams).
 
   * The library does NOT assume VERSION$N = VERSION$N across envs.
     Promotion is by spec content, not by version number.
 
-  * `keep_last_n_versions` applies per (env, agent), not globally.
+  * `keep_last_n_versions` applies per (env, agent).
+
+  * A `production` flip never creates a new version; it only
+    reassigns an alias to an existing VERSION$N.

@@ -28,13 +28,13 @@ agent_management/
   ci/                          — CI entrypoints
 
   # existing
-  deploy_agents.py
+  deploy_agents.py             — single path: versioned
   deploy_semantic_views.py
   deploy_svs_yaml.py
-  rollback.py
+  rollback.py                  — single path: alias reassignment
   detect_drift.py
   detect_sv_drift.py
-  snapshot_state.py
+  snapshot_state.py            — pointer-only (version + aliases)
   sync_vqrs_to_dbt.py
   validate_specs.py
   render_template.py
@@ -61,20 +61,27 @@ agent_management/
 - `test_agents_live.py` at repo root
 - `agent_optimization/` directory (content moves into `agent_management/snapshot_agent.py` + `snapshots/` dir that is gitignored)
 - `framework/` stays on disk but is gitignored (content moves into `CONTRIBUTING.md` / `docs/`)
+- Legacy `CREATE OR ALTER AGENT` spec-apply code paths in `deploy_agents.py` and `rollback.py`
 
 ## Public API (new `__init__.py` exports)
 
 ```python
 from agent_management.smoke_test import run_smoke_test
-from agent_management.snapshot_agent import snapshot_agent, load_snapshot
+from agent_management.snapshot_agent import snapshot_agent, load_snapshot, diff_snapshots
 from agent_management.validate_spec_format import validate_spec_format
 from agent_management.versioning import (
-    commit_version, list_versions, get_alias,
+    commit_version, list_versions, get_aliases,
     set_alias, drop_version, version_exists,
 )
 from agent_management.deploy_agents import deploy_agent
 from agent_management.rollback import rollback_agent
 ```
+
+All callables use keyword-only env parameters and take an explicit Snowflake connector rather than opening one themselves (makes them test-friendly).
+
+## No fallback / no flag
+
+There is **no** `use_versioning` argument, **no** `fallback_to_spec_restore` argument, **no** `agent_versioning.enabled` flag. Versioning is the only path. If the Cortex Agent Versioning Private Preview is not enabled on the account, deploy/rollback will fail loudly at the SQL layer — which is correct behavior for a repo whose contract is versioning.
 
 ## Non-goals
 

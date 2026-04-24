@@ -1,22 +1,18 @@
-# 06 — Alias-first rollback in rollback.py
+# 06 — Alias-only rollback in rollback.py
 
 ## Problem (today)
 
-`rollback.py` reads the last snapshot JSON (`snapshot_state.py`), reconstructs a spec YAML, and re-applies via `CREATE OR ALTER AGENT`. This is:
+`rollback.py` reads the last snapshot JSON (`snapshot_state.py`), reconstructs a spec YAML, and re-applies via `CREATE OR ALTER AGENT`. This is slow, error-prone, and not atomic.
 
-- Slow (full spec re-apply, re-validation)
-- Error-prone (spec JSON round-trip loses comments, risks subtle field reordering)
-- Not atomic (if the re-apply fails halfway the agent is in a broken state)
+## Goal (target — single code path)
 
-## Goal (target)
-
-Rollback becomes a single SQL statement:
+Rollback is one SQL statement:
 
 ```sql
 ALTER AGENT <fqn> MODIFY VERSION <target_version> SET ALIAS = <deploy_alias>;
 ```
 
-Where `<target_version>` is read from the snapshot pointer captured by `snapshot_state.py` *before the last deploy*.
+Where `<target_version>` is read from the snapshot pointer captured by `snapshot_state.py` *before the last deploy*. There is no spec-restore fallback.
 
 ## API
 
@@ -25,38 +21,28 @@ def rollback_agent(
     agent_fqn: str,
     *,
     env: str,
-    target_version: str | None = None,   # VERSION$N; default = last snapshot's version_before
     deploy_alias: str,                   # alias to move back
-    use_versioning: bool,
-    fallback_to_spec_restore: bool = True,
+    target_version: str | None = None,   # VERSION$N; default = last snapshot's version_before
 ) -> RollbackResult
 ```
-
-## Fallback
-
-When versioning is off or the API call fails:
-
-1. Read the snapshot JSON
-2. Restore the spec via `CREATE OR ALTER AGENT`
-3. Log which path was used
-
-`fallback_to_spec_restore=False` disables this (strict mode for tests).
 
 ## Safety checks
 
 Before flipping the alias:
 
 1. `version_exists(agent_fqn, target_version)` — fail if not
-2. `get_alias(agent_fqn, deploy_alias)` — log current alias holder
-3. Confirm target_version ≠ current alias target (no-op guard)
+2. `get_aliases(agent_fqn)` — log current alias holder
+3. Confirm `target_version` ≠ current alias target (no-op guard)
+
+Any check failure raises; no silent fallback.
 
 ## CLI
 
 ```
-python -m agent_management.rollback --env prod --agent RESORT_EXECUTIVE
-# rolls production alias back to version_before from latest snapshot
+python -m agent_management.rollback --env prod --agent RESORT_EXECUTIVE --alias production
+# rolls `production` back to version_before from the latest snapshot
 
-python -m agent_management.rollback --env prod --agent RESORT_EXECUTIVE --to VERSION$5
+python -m agent_management.rollback --env prod --agent RESORT_EXECUTIVE --alias production --to VERSION$5
 # explicit target
 ```
 

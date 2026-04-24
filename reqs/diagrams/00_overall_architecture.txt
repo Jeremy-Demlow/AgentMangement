@@ -1,5 +1,5 @@
-OVERALL ARCHITECTURE — library-first, versioning-aware
-========================================================
+OVERALL ARCHITECTURE — library-first, Option B (DEV + PROD), versioning-only
+=============================================================================
 
   +-------------------------------------------------------------+
   |                     AgentMangement REPO                     |
@@ -7,8 +7,8 @@ OVERALL ARCHITECTURE — library-first, versioning-aware
   |  agents/specs/*.yml           <-- source of truth (spec)    |
   |  semantic-views/              <-- SV YAML + VQRs            |
   |  dbt_ski_resort/              <-- dbt project (tables, SV)  |
-  |  environments/*.env.yml       <-- env config + deploy_alias |
-  |  project.yml                  <-- agent_versioning flag     |
+  |  environments/                <-- dev.env.yml + prod.env.yml|
+  |  project.yml                  <-- keep_last_n_versions      |
   |                                                             |
   |  agent_management/            <-- THE LIBRARY               |
   |    deploy_agents.py    rollback.py       versioning.py      |
@@ -17,31 +17,41 @@ OVERALL ARCHITECTURE — library-first, versioning-aware
   |    run_ci_eval.py               deploy_semantic_views.py    |
   |                                                             |
   |  tests/                       <-- unit + integration tests  |
-  |  reqs/                        <-- THIS folder (design)      |
+  |  reqs/                        <-- design docs + diagrams    |
   |  docs/operations/             <-- runbooks                  |
   +-------------------------------------------------------------+
           |                                      |
-          | (PR merges)                          | (python -m …)
+          | (PR merges / manual dispatch)         | (python -m …)
           v                                      v
   +-------------------+                +------------------------+
   |  GitHub Actions   |                |  Developer workstation |
   |  - validate-pr    |                |                        |
   |  - deploy-dev     |                |  Same library, same    |
-  |  - promote-qa     |                |  CLIs, same outcome.   |
-  |  - promote-prod   |                |                        |
-  |  - rollback       |                +------------------------+
+  |  - deploy-prod-   |                |  CLIs, same outcome.   |
+  |      validated    |                +------------------------+
+  |  - promote-       |
+  |      validated-   |
+  |      to-prod      |   (approval-gated)
+  |  - rollback       |
   +-------------------+
           |
           v
   +--------------------------------------------------------+
   |                    SNOWFLAKE ACCOUNT                    |
   |                                                         |
-  |  AM_SKI_RESORT_DEV    AM_SKI_RESORT_QA   AM_SKI_RESORT |
-  |    AGENTS.*_DEV         AGENTS.*_QA        AGENTS.*    |
-  |    alias: latest        alias: validated   alias: prod  |
-  |    VERSION$1..N         VERSION$1..N       VERSION$1..N |
+  |  AM_SKI_RESORT_DEV                AM_SKI_RESORT         |
+  |    AGENTS.*_DEV                     AGENTS.*            |
+  |    alias: latest                    aliases:            |
+  |    VERSION$1..K                       validated -> V$M  |
+  |                                       production -> V$N |
+  |                                     VERSION$1..M        |
   |                                                         |
   |  Semantic Views  -----+                                 |
   |  (deployed by dbt)    |   consumed by agents at query   |
   |                       +--> time via their SV refs       |
   +--------------------------------------------------------+
+
+
+  NOTE: no QA database, no QA agent, no QA role. "QA" is the
+  `validated` alias on the PROD agent. Internal eval targets
+  <fqn>!validated; a human-approved workflow flips `production`.

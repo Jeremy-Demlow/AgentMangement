@@ -1,33 +1,35 @@
-# 08 — Version-targeted eval in run_eval.py
+# 08 — Version / alias targeted eval in run_eval.py
 
 ## Problem (today)
 
-`agent-evaluation/scripts/run_eval.py` evals "the current agent" — whatever is live at the FQN. With versioning, we need to eval *a specific candidate version* before flipping the `production` alias, so we can reject bad versions before exposing them.
+`agent-evaluation/scripts/run_eval.py` evals "the current agent" — whatever is live at the FQN. With versioning, we need to eval *a specific candidate version* before flipping the `production` alias.
 
 ## Goal
 
-Support `--version VERSION$N` or `--alias validated` to target evals at a non-live version.
+Mandatory `--alias` (or `--version`) for CI eval runs so the eval target is explicit and reproducible.
 
 ## Snowflake API
 
-When targeting a version, the eval call needs to include a version or alias selector in the agent identifier. Per Private Preview docs, formats like:
+Per Private Preview docs, agent invocations take a selector:
 
 - `<fqn>!LIVE`, `<fqn>!FIRST`, `<fqn>!LAST`, `<fqn>!DEFAULT`
 - `<fqn>!<alias_name>` (e.g., `RESORT_EXECUTIVE!validated`)
-- `<fqn>!VERSION$3` (if supported)
+- `<fqn>!VERSION$3` (if supported by the API)
 
 Library probes which form the server accepts and caches.
 
-## Flow
+## Flow (Option B)
 
 ```
-CI (promote-qa.yml):
-  1. deploy_agents → creates VERSION$N, moves alias=validated
-  2. run_eval --alias validated         ← evals the candidate
-  3. if eval passes → promote-prod.yml (manual approval)
-  4. promote-prod.yml:
-     - ALTER AGENT … MODIFY VERSION <N> SET ALIAS = production
-     - run_eval --alias production      ← smoke eval on prod
+deploy-prod-validated.yml on main merge:
+  1. deploy_agents --env prod   → commits VERSION$N in prod, alias=validated moves
+  2. smoke_test    --env prod --alias validated
+  3. run_eval      --env prod --alias validated         ← evals the candidate
+
+promote-validated-to-production.yml (manual approval):
+  1. versioning.set_alias(production, <version currently validated>)
+  2. smoke_test    --env prod --alias production
+  3. run_eval      --env prod --alias production        ← post-flip smoke eval
 ```
 
 ## API
@@ -36,13 +38,12 @@ CI (promote-qa.yml):
 def run_eval(
     agent_fqn: str,
     *,
-    version: str | None = None,   # VERSION$N
-    alias: str | None = None,     # alias name
+    env: str,
+    version: str | None = None,
+    alias: str | None = None,
     eval_table: str,
     metrics: list[str],
 ) -> EvalResult
 ```
 
-## Backward compat
-
-When neither `version` nor `alias` is supplied, evals the live spec (legacy behavior).
+At least one of `version` or `alias` is required in CI mode. Local exploratory use can omit both.

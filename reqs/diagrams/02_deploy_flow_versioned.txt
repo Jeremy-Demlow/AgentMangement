@@ -1,5 +1,5 @@
-DEPLOY FLOW — VERSIONED (target, agent_versioning.enabled=true)
-================================================================
+DEPLOY FLOW — VERSIONED (single code path; no fallback)
+========================================================
 
   spec.yml (edited)
        |
@@ -12,7 +12,7 @@ DEPLOY FLOW — VERSIONED (target, agent_versioning.enabled=true)
        |
        v
   +-----------------------------------------------------+
-  |  deploy_agents.py  (versioned path)                 |
+  |  deploy_agents.py  (versioned path — only path)     |
   |                                                     |
   |  1. ALTER AGENT <fqn> ADD LIVE VERSION FROM LAST;   |
   |     -- seed LIVE from the last committed version    |
@@ -26,7 +26,8 @@ DEPLOY FLOW — VERSIONED (target, agent_versioning.enabled=true)
   |                                                     |
   |  4. ALTER AGENT <fqn> MODIFY VERSION LAST           |
   |       SET ALIAS = <deploy_alias>;                   |
-  |     -- deploy_alias is env-specific (see reqs/09)   |
+  |     -- dev  -> latest                               |
+  |     -- prod -> validated  (prod.env.yml deploy_alias)|
   |                                                     |
   |  5. drop versions beyond keep_last_n_versions       |
   |     (skip any bearing an alias)                     |
@@ -39,21 +40,22 @@ DEPLOY FLOW — VERSIONED (target, agent_versioning.enabled=true)
        |
        v
   +----------------------------+
-  |  run_ci_eval               |  evals the specific version just committed
+  |  run_ci_eval               |  prod-only; evals <fqn>!validated
   +----------------------------+
 
 
-alias state after deploy (example env=qa, deploy_alias=validated)
------------------------------------------------------------------
-  VERSION$7  <- alias: (none)       -- old dev version
-  VERSION$8  <- alias: validated    -- NEW, candidate for prod promotion
-  VERSION$6  <- alias: production   -- unchanged until promote-prod runs
+alias state after prod main-merge deploy (example)
+---------------------------------------------------
+  VERSION$7  <- alias: production   -- unchanged until promote workflow
+  VERSION$8  <- alias: validated    -- NEW, candidate for production flip
+  VERSION$6  <- alias: (none)       -- older prod version
 
 
-FAILURE MODES
--------------
+FAILURE SEMANTICS (no fallback path)
+-------------------------------------
+  * Any SQL failure raises; no spec-restore fallback.
   * Step 2 fails   -> LIVE has the new spec but no commit; next deploy
                      re-seeds from LAST (safe)
   * Step 3 fails   -> retry safe; no alias moved yet
   * Step 4 fails   -> version exists but alias still on old version;
-                     no user impact; rollback is a no-op
+                     no user impact; operator re-runs or rollbacks
