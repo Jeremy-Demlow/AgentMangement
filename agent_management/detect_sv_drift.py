@@ -1,14 +1,17 @@
-"""Detect drift between deployed semantic views and what dbt would produce.
+"""Detect drift between dbt semantic view sources and what's deployed.
 
-Compares the YAML from `SYSTEM$READ_YAML_FROM_SEMANTIC_VIEW` (what is actually
-deployed in Snowflake) against the YAML produced by compiling the dbt
-semantic_view model (source of truth).
+Minimal version: verifies each dbt sem_*.sql model has a corresponding
+deployed semantic view in the target environment, and compares high-level
+table/metric/dimension counts between compiled dbt output and live SV.
 
-This catches two failure modes:
-  1. Someone manually deployed a SV via SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML
-     and the dbt model was never updated -> deployed != compiled.
-  2. dbt model was updated but never deployed to this environment
-     -> compiled != deployed.
+A full byte-level structural diff would require deploying the dbt-compiled
+SV to a scratch schema (which needs CREATE SCHEMA privileges we don't have
+in the CI deploy role). Instead we compare structure counts and the set of
+table/metric/dimension names, which is enough to catch the common drift
+cases:
+  - dbt model deployed in one env but not another
+  - dbt model has a new table/metric/dimension that isn't live
+  - live SV has a table/metric/dimension not in the dbt model
 
 Usage:
     python -m agent_management.detect_sv_drift --env dev
@@ -24,9 +27,11 @@ from __future__ import annotations
 
 import argparse
 import logging
-import subprocess
+import re
 import sys
 from pathlib import Path
+
+import yaml as pyyaml
 
 from agent_management import setup_logging
 from agent_management.utils.config import get_database, load_env_config
@@ -39,28 +44,60 @@ DBT_DIR = REPO_ROOT / "dbt_ski_resort"
 SV_MODEL_DIR = DBT_DIR / "models" / "marts" / "semantic"
 
 
-# ---------- Normalization ----------
+# ---------- Parse dbt SV SQL ----------
 
-def normalize_yaml(text: str) -> str:
-    """Return a canonical form of a SV YAML string for diffing.
+def _strip_comments(sql: str) -> str:
+    """Remove SQL line comments and dbt jinja for easier parsing."""
+    out_lines = []
+    for line in sql.splitlines():
+        stripped = line.split("--", 1)[0]
+        out_lines.append(stripped)
+    return "\n".join(out_lines)
 
-    Strips trailing whitespace, blank lines, and auto-generated fields that
-    change on every deploy (created_at, verified_at on VQRs).
+
+def parse_dbt_sv(sql_path: Path) -> dict:
+    """Extract table, dimension, fact, and metric names from a dbt SV SQL file.
+
+    The file uses the Snowflake CREATE SEMANTIC VIEW syntax (pre-compile),
+    which has blocks like:
+        TABLES ( T1 AS ..., T2 AS ... )
+        DIMENSIONS ( T1.COL1 AS ALIAS, ... )
+        FACTS ( T1.COL2 AS ALIAS, ... )
+        METRICS ( T1.NAME AS <expr>, ... )
     """
-    lines = []
-    for raw in text.splitlines():
-        line = raw.rstrip()
-        # drop dynamic fields
-        stripped = line.strip()
-        if stripped.startswith(("verified_at:", "created_at:", "updated_at:")):
-            continue
-        if not stripped:
-            continue
-        lines.append(line)
-    return "\n".join(lines) + "\n"
+    raw = _strip_comments(sql_path.read_text())
+
+    def extract_block(name: str) -> str:
+        m = re.search(rf"\b{name}\s*\((.*?)\n\)", raw, re.IGNORECASE | re.DOTALL)
+        return m.group(1) if m else ""
+
+    def extract_names(block: str) -> set[str]:
+        names: set[str] = set()
+        # pattern matches "TABLE.COL AS ALIAS" or "TABLE AS ..." — capture last identifier before AS
+        for line in block.splitlines():
+            line = line.strip().rstrip(",")
+            if not line:
+                continue
+            # "T.COL AS ALIAS" -> alias
+            m = re.match(r"([A-Za-z_][\w.]*)\s+AS\s+([A-Za-z_]\w*)", line, re.IGNORECASE)
+            if m:
+                names.add(m.group(2).upper())
+        return names
+
+    tables = extract_names(extract_block("TABLES"))
+    dimensions = extract_names(extract_block("DIMENSIONS"))
+    facts = extract_names(extract_block("FACTS"))
+    metrics = extract_names(extract_block("METRICS"))
+
+    return {
+        "tables": tables,
+        "dimensions": dimensions,
+        "facts": facts,
+        "metrics": metrics,
+    }
 
 
-# ---------- Read live SV ----------
+# ---------- Parse live SV YAML ----------
 
 def read_deployed_sv_yaml(cur, database: str, schema: str, sv_name: str) -> str | None:
     fqn = f"{database}.{schema}.{sv_name}".upper()
@@ -73,122 +110,89 @@ def read_deployed_sv_yaml(cur, database: str, schema: str, sv_name: str) -> str 
         return None
 
 
-# ---------- Compile dbt to get expected YAML ----------
-
-def dbt_compile(env: str) -> bool:
-    """Run `dbt compile` for the given target; returns True on success."""
-    cmd = ["dbt", "compile", "--profiles-dir", ".", "--target", env]
-    logger.info("  Running: %s (in %s)", " ".join(cmd), DBT_DIR)
-    proc = subprocess.run(cmd, cwd=DBT_DIR, capture_output=True, text=True)
-    if proc.returncode != 0:
-        logger.error("  dbt compile failed:\n%s", proc.stdout + proc.stderr)
-        return False
-    return True
-
-
-def read_compiled_sv_sql(sv_name: str) -> str | None:
-    """Read the compiled CREATE SEMANTIC VIEW DDL produced by dbt compile."""
-    compiled = DBT_DIR / "target" / "compiled" / "dbt_ski_resort" / "models" / "marts" / "semantic" / f"{sv_name.lower()}.sql"
-    if not compiled.exists():
-        logger.warning("  Compiled dbt model not found: %s", compiled)
-        return None
-    return compiled.read_text()
-
-
-# ---------- Deploy to scratch schema & read back ----------
-
-def deploy_and_read_expected_yaml(cur, compiled_sql: str, scratch_db: str, scratch_schema: str, sv_name: str) -> str | None:
-    """Create the SV in a scratch schema so we can SYSTEM$READ_YAML it.
-
-    This is needed because the compiled DDL is procedural SQL, not a YAML
-    doc. To compare apples-to-apples we deploy it and read it back.
-    """
-    scratch_fqn = f"{scratch_db}.{scratch_schema}.{sv_name.upper()}_DRIFT_CHECK"
-    # The compiled SQL references the real DB in FROM clauses, so we can
-    # create the SV in scratch without rebuilding base tables.
+def parse_live_sv(yaml_text: str) -> dict:
     try:
-        cur.execute(f"CREATE SCHEMA IF NOT EXISTS {scratch_db}.{scratch_schema}")
-        # The compiled SQL has CREATE OR REPLACE SEMANTIC VIEW {{name}}.
-        # We need to rewrite the target to the scratch FQN.
-        rewritten = compiled_sql.replace(
-            f"CREATE OR REPLACE SEMANTIC VIEW",
-            f"CREATE OR REPLACE SEMANTIC VIEW",
-            1,
-        )
-        # dbt's compiled file already has the target FQN embedded — we replace
-        # it with the scratch FQN on the first CREATE line.
-        lines = rewritten.splitlines()
-        for i, line in enumerate(lines):
-            if line.strip().upper().startswith("CREATE OR REPLACE SEMANTIC VIEW"):
-                # replace third token (the FQN) with scratch
-                parts = line.split()
-                if len(parts) >= 5:
-                    parts[4] = scratch_fqn
-                    lines[i] = " ".join(parts)
-                break
-        rewritten = "\n".join(lines)
-        cur.execute(rewritten)
-        cur.execute(f"SELECT SYSTEM$READ_YAML_FROM_SEMANTIC_VIEW('{scratch_fqn}')")
-        row = cur.fetchone()
-        return row[0] if row else None
-    except Exception as e:
-        logger.error("  Scratch deploy failed for %s: %s", sv_name, e)
-        return None
-    finally:
-        try:
-            cur.execute(f"DROP SEMANTIC VIEW IF EXISTS {scratch_fqn}")
-        except Exception:
-            pass
+        doc = pyyaml.safe_load(yaml_text) or {}
+    except Exception:
+        return {"tables": set(), "dimensions": set(), "facts": set(), "metrics": set()}
+
+    tables: set[str] = set()
+    dimensions: set[str] = set()
+    facts: set[str] = set()
+    metrics: set[str] = set()
+    for table_def in doc.get("tables", []) or []:
+        if isinstance(table_def, dict):
+            name = table_def.get("name")
+            if name:
+                tables.add(str(name).upper())
+            for d in table_def.get("dimensions", []) or []:
+                if isinstance(d, dict) and d.get("name"):
+                    dimensions.add(str(d["name"]).upper())
+            for f in table_def.get("facts", []) or []:
+                if isinstance(f, dict) and f.get("name"):
+                    facts.add(str(f["name"]).upper())
+            for m in table_def.get("metrics", []) or []:
+                if isinstance(m, dict) and m.get("name"):
+                    metrics.add(str(m["name"]).upper())
+
+    return {
+        "tables": tables,
+        "dimensions": dimensions,
+        "facts": facts,
+        "metrics": metrics,
+    }
 
 
-# ---------- Main ----------
+# ---------- Drift check ----------
+
+def diff_sets(expected: set[str], actual: set[str], kind: str) -> list[str]:
+    msgs = []
+    missing = expected - actual
+    extra = actual - expected
+    for m in sorted(missing):
+        msgs.append(f"  MISSING from live {kind}: {m} (in dbt but not deployed)")
+    for e in sorted(extra):
+        msgs.append(f"  EXTRA in live {kind}: {e} (deployed but not in dbt)")
+    return msgs
+
+
+def check_sv(cur, env: str, sv_name: str, database: str, semantic_schema: str) -> bool:
+    """Return True if drift detected."""
+    sql_path = SV_MODEL_DIR / f"{sv_name}.sql"
+    if not sql_path.exists():
+        logger.warning("  No dbt model for %s (skipping)", sv_name)
+        return False
+
+    dbt_struct = parse_dbt_sv(sql_path)
+
+    live_yaml = read_deployed_sv_yaml(cur, database, semantic_schema, sv_name)
+    if live_yaml is None:
+        logger.error("  DRIFT: %s has dbt model but no live SV in %s", sv_name, env)
+        return True
+
+    live_struct = parse_live_sv(live_yaml)
+
+    drift_msgs: list[str] = []
+    for kind in ("tables", "dimensions", "facts", "metrics"):
+        drift_msgs.extend(diff_sets(dbt_struct[kind], live_struct[kind], kind))
+
+    if drift_msgs:
+        logger.error("[%s] %s DRIFT:", env, sv_name)
+        for m in drift_msgs:
+            logger.error(m)
+        return True
+
+    logger.info("[%s] %s OK (tables=%d dims=%d facts=%d metrics=%d)",
+                env, sv_name,
+                len(dbt_struct["tables"]),
+                len(dbt_struct["dimensions"]),
+                len(dbt_struct["facts"]),
+                len(dbt_struct["metrics"]))
+    return False
+
 
 def list_sv_models() -> list[str]:
     return sorted(p.stem for p in SV_MODEL_DIR.glob("sem_*.sql"))
-
-
-def check_drift(cur, env: str, sv_name: str, scratch_db: str, scratch_schema: str, semantic_schema: str, database: str) -> bool:
-    """Return True if drift detected."""
-    logger.info("\n[%s] %s", env, sv_name)
-
-    deployed = read_deployed_sv_yaml(cur, database, semantic_schema, sv_name)
-    if deployed is None:
-        logger.error("  DRIFT: SV not deployed in %s (dbt model exists but no live SV)", env)
-        return True
-
-    compiled_sql = read_compiled_sv_sql(sv_name)
-    if compiled_sql is None:
-        logger.error("  Could not find compiled dbt artifact for %s", sv_name)
-        return True
-
-    expected = deploy_and_read_expected_yaml(cur, compiled_sql, scratch_db, scratch_schema, sv_name)
-    if expected is None:
-        logger.error("  Could not deploy dbt-compiled SV to scratch for comparison")
-        return True
-
-    norm_deployed = normalize_yaml(deployed)
-    norm_expected = normalize_yaml(expected)
-
-    if norm_deployed == norm_expected:
-        logger.info("  OK — deployed matches dbt source of truth")
-        return False
-
-    logger.error("  DRIFT — deployed SV differs from dbt-compiled output")
-    # Show a short diff preview
-    import difflib
-    diff = list(difflib.unified_diff(
-        norm_expected.splitlines(),
-        norm_deployed.splitlines(),
-        fromfile=f"dbt-compiled ({sv_name})",
-        tofile=f"deployed ({env})",
-        lineterm="",
-        n=2,
-    ))
-    for line in diff[:40]:
-        logger.error("    %s", line)
-    if len(diff) > 40:
-        logger.error("    ... (%d more diff lines)", len(diff) - 40)
-    return True
 
 
 def main():
@@ -196,7 +200,6 @@ def main():
     parser.add_argument("--env", "-e", required=True, help="Environment (dev, qa, prod)")
     parser.add_argument("--view", "-v", help="Check single SV (e.g. sem_safety_incidents)")
     parser.add_argument("--fail-on-drift", action="store_true", help="Exit non-zero if any drift found")
-    parser.add_argument("--scratch-schema", default="DRIFT_CHECK", help="Schema for temporary SVs (default: DRIFT_CHECK)")
     args = parser.parse_args()
 
     setup_logging(1)
@@ -206,12 +209,7 @@ def main():
     semantic_schema = config["deployment"].get("semantic_schema", "SEMANTIC")
 
     logger.info("Environment: %s  Database: %s  Schema: %s", args.env, database, semantic_schema)
-    logger.info("Scratch: %s.%s", database, args.scratch_schema)
     logger.info("=" * 60)
-
-    logger.info("Compiling dbt project...")
-    if not dbt_compile(args.env):
-        sys.exit(2)
 
     if args.view:
         svs = [args.view.lower()]
@@ -224,7 +222,7 @@ def main():
     any_drift = False
     try:
         for sv_name in svs:
-            drifted = check_drift(cur, args.env, sv_name, database, args.scratch_schema, semantic_schema, database)
+            drifted = check_sv(cur, args.env, sv_name, database, semantic_schema)
             any_drift = any_drift or drifted
 
         logger.info("\n%s", "=" * 60)
