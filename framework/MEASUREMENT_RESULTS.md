@@ -57,10 +57,19 @@ Changes:
 
 | Agent | answer_correctness | logical_consistency | delta (answer_correctness) |
 |---|---|---|---|
-| resort_executive | TBD | TBD | TBD |
-| ski_ops_assistant | TBD | TBD | TBD |
+| resort_executive | TBD (agent eval skipped due to SV eval gate failure) | TBD | TBD |
+| ski_ops_assistant | TBD (agent eval skipped due to SV eval gate failure) | TBD | TBD |
 
-Results will be filled in after the post-change eval run completes.
+### Pipeline status: run 24908357211
 
-Target: +5 to +10 points on answer_correctness, no regression on
-logical_consistency.
+- All new PR gates green: Lint, Validate Specs, dbt Quality Gate (dev/qa/prod), Validate Against Snowflake
+- SV Evaluation: 10/11 pass. SEM_SAFETY_INCIDENTS continues to return "Invocation failed" on first poll — this is a pre-existing Cortex Analyst eval API issue that does not affect direct SV queries (the SV works when queried manually).
+- Agent Evaluation: skipped because SV eval gate failed.
+
+### Next steps to get v1 measurement
+
+Option A: retry eval on a subsequent run (Cortex Analyst eval API is occasionally flaky).
+Option B: post-merge eval run against QA deployment.
+Option C: local eval via test_agents_live.py for a smoke check.
+
+Results will be filled in after a successful agent eval run completes.
