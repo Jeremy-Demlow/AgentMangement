@@ -1,5 +1,12 @@
 name: Rollback
 
+# Alias-reassignment rollback. Single DDL:
+#   ALTER AGENT <fqn> MODIFY VERSION <target> SET ALIAS = <alias>
+#
+# Reads the most recent snapshot pointer under
+#   .snowflake/ci/snapshots/<env>/<agent>/
+# to determine the target version (or you can pass it explicitly via --to).
+
 on:
   workflow_dispatch:
     inputs:
@@ -7,27 +14,19 @@ on:
         description: 'Target environment'
         required: true
         type: choice
-        options:
-          - dev
-          - qa
-          - prod
-      timestamp:
-        description: 'Snapshot timestamp (YYYYMMDD_HHMMSS) — leave empty to see available'
-        required: false
-        default: ''
-      target:
-        description: 'What to rollback'
+        options: [dev, prod]
+      agent:
+        description: 'Agent short name or FQN (e.g. resort_executive)'
+        required: true
+      alias:
+        description: 'Alias to reassign'
         required: true
         type: choice
-        options:
-          - all
-          - agents
-          - semantic-views
-      dry_run:
-        description: 'Dry run (show what would be restored without executing)'
+        options: [latest, validated, production]
+      target_version:
+        description: 'Explicit VERSION$N to roll to (leave empty to use the last snapshot pointer)'
         required: false
-        default: 'true'
-        type: boolean
+        default: ''
 
 env:
   SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
@@ -37,14 +36,10 @@ env:
 
 jobs:
   rollback:
-    name: Rollback ${{ inputs.environment }}
+    name: Rollback ${{ inputs.environment }} (${{ inputs.alias }})
     runs-on: ubuntu-latest
     environment: >-
-      ${{
-        inputs.environment == 'prod' && 'production' ||
-        inputs.environment == 'qa' && 'QA' ||
-        'DEV'
-      }}
+      ${{ inputs.environment == 'prod' && 'production-promote' || 'DEV' }}
     env:
       SNOWFLAKE_WAREHOUSE: ${{ vars.SNOWFLAKE_WAREHOUSE }}
       SNOWFLAKE_ROLE: ${{ vars.SNOWFLAKE_ROLE }}
@@ -57,27 +52,17 @@ jobs:
         with:
           snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
-      - name: List available snapshots
-        if: inputs.timestamp == ''
+      - name: Rollback (alias reassignment)
         run: |
-          echo "Available snapshots for ${{ inputs.environment }}:"
-          python -m agent_management.rollback --env ${{ inputs.environment }} --list
-          echo ""
-          echo "Re-run this workflow with a timestamp from the list above."
-          exit 1
-
-      - name: Execute rollback
-        if: inputs.timestamp != ''
-        run: |
-          DRY_FLAG=""
-          if [ "${{ inputs.dry_run }}" = "true" ]; then
-            DRY_FLAG="--dry-run"
+          CMD="python -m agent_management.rollback --env ${{ inputs.environment }} --agent ${{ inputs.agent }} --alias ${{ inputs.alias }}"
+          if [ -n "${{ inputs.target_version }}" ]; then
+            CMD="$CMD --to ${{ inputs.target_version }}"
           fi
-          python -m agent_management.rollback \
-            --env ${{ inputs.environment }} \
-            --timestamp ${{ inputs.timestamp }} \
-            --target ${{ inputs.target }} \
-            $DRY_FLAG
+          echo "$CMD"
+          $CMD
+
+      - name: Smoke test
+        run: python -m agent_management.smoke_test --env ${{ inputs.environment }} --agent ${{ inputs.agent }} --alias ${{ inputs.alias }}
 
       - name: Cleanup
         if: always()

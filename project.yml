@@ -34,13 +34,6 @@ environments:
     semantic_schema: SEMANTIC
     agents_schema: AGENTS
     name_suffix: _DEV
-  qa:
-    database: AM_SKI_RESORT_QA
-    role: AM_DEPLOY_ROLE_QA
-    warehouse: AM_SKI_RESORT_WH_QA
-    semantic_schema: SEMANTIC
-    agents_schema: AGENTS
-    name_suffix: _QA
   prod:
     database: AM_SKI_RESORT
     role: AM_DEPLOY_ROLE
@@ -48,6 +41,15 @@ environments:
     semantic_schema: SEMANTIC
     agents_schema: AGENTS
     name_suffix: ""
+
+agent_versioning:
+  # Retain last N committed versions per (env, agent). Older versions are
+  # dropped after deploy, skipping any version that still bears an alias.
+  keep_last_n_versions: 10
+  # Canonical alias vocabulary. Env config picks which aliases that env manages.
+  aliases:
+    dev: [latest]
+    prod: [validated, production]
 
 agents:
   resort_executive:

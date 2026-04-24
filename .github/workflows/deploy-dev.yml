@@ -10,13 +10,7 @@ on:
       - 'agent_management/**'
       - 'environments/**'
 
-  workflow_dispatch:
-    inputs:
-      force_create:
-        description: 'Force CREATE OR REPLACE for agents (destroys eval history)'
-        required: false
-        default: 'false'
-        type: boolean
+  workflow_dispatch: {}
 
 env:
   SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
@@ -153,13 +147,11 @@ jobs:
         with:
           snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
-      - name: Deploy agents to dev
-        run: |
-          FORCE_FLAG=""
-          if [ "${{ inputs.force_create }}" = "true" ]; then
-            FORCE_FLAG="--force-create"
-          fi
-          python -m agent_management.deploy_agents --env dev $FORCE_FLAG
+      - name: Deploy agents to dev (versioned)
+        run: python -m agent_management.deploy_agents --env dev
+
+      - name: Smoke test
+        run: python -m agent_management.smoke_test --env dev --alias latest
 
       - name: Cleanup
         if: always()
@@ -185,7 +177,7 @@ jobs:
 
       - name: Run agent evaluations
         id: agent_eval
-        run: python -m agent_management.run_ci_eval --env dev
+        run: python -m agent_management.run_ci_eval --env dev --alias latest
 
       - name: Agent Eval Summary
         if: always()

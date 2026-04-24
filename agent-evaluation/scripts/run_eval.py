@@ -189,6 +189,11 @@ def load_questions_to_snowflake(cursor, questions: list[dict], target_table: str
 def generate_snowflake_yaml(config: dict, dataset_name: str) -> str:
     agent = config["agent"]
     fq_agent = f'{agent["database"]}.{agent["schema"]}.{agent["name"]}'
+    # Cortex Agent Versioning selector: <fqn>!<version-or-alias>.
+    # version takes precedence over alias; either is optional.
+    selector = agent.get("version") or agent.get("alias")
+    if selector:
+        fq_agent = f"{fq_agent}!{selector}"
     fq_table = config["dataset"]["snowflake_table"]
     eval_cfg = config.get("evaluation", {})
 
@@ -566,7 +571,9 @@ def main():
     parser.add_argument("--tag", action="append", dest="tags", help="Filter questions by tag (repeatable)")
     parser.add_argument("--no-wait", action="store_true", help="Start evaluation and exit without polling")
     parser.add_argument("--poll-interval", type=int, default=POLL_INTERVAL_SECONDS, help=f"Seconds between status polls (default: {POLL_INTERVAL_SECONDS})")
-    parser.add_argument("--env", choices=["dev", "qa", "prod"], help="Load environment config from environments/<env>.env.yml")
+    parser.add_argument("--env", choices=["dev", "prod"], help="Load environment config from environments/<env>.env.yml")
+    parser.add_argument("--alias", help="Agent alias selector (validated, production, latest).")
+    parser.add_argument("--version", help="Explicit VERSION$N selector (takes precedence over --alias).")
 
     args = parser.parse_args()
     config = load_config(args.config)
@@ -588,6 +595,17 @@ def main():
                 config["agent"]["name"] = base_name + suffix.upper()
         if deploy.get("warehouse"):
             config.setdefault("snowflake", {})["warehouse"] = deploy["warehouse"]
+
+    # Agent Versioning selector: prefer explicit --version, then --alias, then
+    # env's agent.deploy_alias (so main-merge runs auto-target 'validated').
+    if args.version:
+        config["agent"]["version"] = args.version
+    elif args.alias:
+        config["agent"]["alias"] = args.alias
+    elif env_config:
+        env_deploy_alias = env_config.get("agent", {}).get("deploy_alias")
+        if env_deploy_alias:
+            config["agent"]["alias"] = env_deploy_alias
 
     agent = config["agent"]
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

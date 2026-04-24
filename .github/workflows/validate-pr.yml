@@ -61,10 +61,10 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: python -m agent_management.validate_specs --env dev
 
-      - name: Validate all specs for qa
+      - name: Validate agent spec format (tool description template)
         env:
           PYTHONPATH: ${{ github.workspace }}
-        run: python -m agent_management.validate_specs --env qa
+        run: python -m agent_management.validate_spec_format agents/specs/resort_executive.yml agents/specs/ski_ops_assistant.yml
 
       - name: Validate all specs for prod
         env:
@@ -77,8 +77,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        env: [dev, qa, prod]
-    environment: ${{ matrix.env == 'dev' && 'DEV' || (matrix.env == 'qa' && 'QA' || 'PROD') }}
+        env: [dev, prod]
+    environment: ${{ matrix.env == 'dev' && 'DEV' || 'PROD' }}
     env:
       SNOWFLAKE_WAREHOUSE: ${{ vars.SNOWFLAKE_WAREHOUSE }}
       SNOWFLAKE_ROLE: ${{ vars.SNOWFLAKE_ROLE }}

@@ -1,149 +1,87 @@
 # Environment Parity and Drift Prevention
 
-This project deploys semantic views and agents to three Snowflake environments
-(DEV, QA, PROD). To keep the environments identical and prevent the class of
-bug where a change "works in DEV but breaks in QA", we enforce a single
-source of truth and validate every change against all three envs before
-merge.
+This project deploys semantic views and agents to two Snowflake environments
+(DEV, PROD). Internal pre-release validation happens inside PROD via the
+`validated` alias on each agent — there is no separate QA environment.
 
 ## Source of Truth
 
 | Artifact | Source of Truth | Deploy path |
 |---|---|---|
-| Semantic views | `dbt_ski_resort/models/marts/semantic/sem_*.sql` | `dbt run` via push/promote workflows |
-| Agents | `agents/specs/*.yml` | `agent_management.deploy_agents` |
-| Verified queries | `semantic-views/verified_queries/*.yaml` | `agent_management.deploy_svs_yaml` (merged onto live SV) |
+| Semantic views | `dbt_ski_resort/models/marts/semantic/sem_*.sql` | `dbt run` via deploy workflows |
+| Agents | `agents/specs/*.yml` | `agent_management.deploy_agents` (versioning path) |
+| Verified queries | `semantic-views/verified_queries/*.yaml` | `agent_management.sync_vqrs_to_dbt` (merged into dbt SV model) |
 | Evaluation datasets | `agent-evaluation/datasets/*.yaml` | Rendered into Snowflake by `agent-evaluation/scripts/run_eval.py` |
 
 ### Semantic views: dbt is the only source
 
-`environments/{dev,qa,prod}.env.yml` all set `semantic_views.source: dbt`.
-That means:
+`environments/{dev,prod}.env.yml` both set `semantic_views.source: dbt`.
 
 - SVs are created/updated exclusively by running the dbt `semantic_view`
   materialization for the target environment.
 - The YAML files in `semantic-views/definitions/` are a **shadow copy** used
-  by `validate_specs`, `detect_drift`, and the template rendering tests. They
-  do NOT deploy and can drift from the dbt model. The `detect_sv_drift`
-  job in the PR gate ensures drift is surfaced.
+  by `validate_specs`, `detect_sv_drift`, and the template rendering tests.
+  They do NOT deploy and can drift from the dbt model. The `detect_sv_drift`
+  job in the PR gate surfaces any drift.
 - **Never call `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML` by hand** against a
-  deployed environment. It creates a silent divergence between dbt and the
-  deployed SV, which the drift check will flag.
+  deployed environment. It creates silent divergence between dbt and the
+  deployed SV.
+
+### Agents: versioning is the only source
+
+Committed `VERSION$N` on the agent object in Snowflake is the ground truth for
+what spec is serving traffic. The spec YAML in `agents/specs/` is the *input*
+to deploys; after a deploy, the rendered spec lives in `VERSION$N` forever.
+
+See [docs/operations/AGENT_VERSIONING.md](docs/operations/AGENT_VERSIONING.md).
 
 ## PR Validation Gates
 
-Every PR runs the following gates against all three environments in parallel:
+Every PR runs the following gates against both environments in parallel
+(matrix `[dev, prod]`):
 
 ```mermaid
 flowchart TD
     PR[Open PR] --> Lint[Lint and Unit Tests]
-    PR --> Specs[Validate Specs Jinja render for dev/qa/prod]
-    PR --> DbtGate[dbt Quality Gate matrix dev/qa/prod]
-
-    DbtGate --> DbtParse[dbt parse]
-    DbtParse --> DbtCompile[dbt compile]
-    DbtCompile --> SvDryRun[deploy_semantic_views --dry-run]
-    SvDryRun --> AgentDryRun[deploy_agents --dry-run]
-    AgentDryRun --> Drift[detect_sv_drift --fail-on-drift]
-
-    Lint --> SnowflakeGate[Validate Against Snowflake DEV dry-run]
-    Specs --> SnowflakeGate
-    Drift --> SnowflakeGate
-
-    SnowflakeGate --> SvEval[SV Evaluation DEV]
-    SvEval --> AgentEval[Agent Evaluation DEV]
+    PR --> Specs[validate_spec_format on agents/specs]
+    PR --> Templates[Jinja render check for dev/prod]
+    PR --> Compile[dbt compile for dev/prod]
+    PR --> Dry[deploy_semantic_views and deploy_agents dry run]
+    PR --> Drift[detect_sv_drift dbt vs live]
+    Lint & Specs & Templates & Compile & Dry & Drift --> Merge[Merge to main]
 ```
 
-### What each gate catches
+A PR that passes the gate is guaranteed to deploy cleanly to PROD on merge.
 
-| Gate | Catches |
-|---|---|
-| Lint & Unit Tests | Python / template syntax errors |
-| Validate Specs | Jinja rendering failures, missing env vars, env-specific DB mismatches |
-| dbt parse | dbt YAML and Jinja errors in the dbt project |
-| dbt compile | SQL compilation against Snowflake (e.g. `invalid identifier`) for each env |
-| deploy_semantic_views --dry-run | SV deploy wiring errors for each env |
-| deploy_agents --dry-run | Agent spec errors for each env |
-| detect_sv_drift | Deployed SV in any env differs from dbt source of truth |
-| SV Evaluation | Cortex Analyst VQR accuracy regressions |
-| Agent Evaluation | Agent answer_correctness / logical_consistency regressions |
-
-### The "DIM_DATE_KEY" incident this protects against
-
-Before these gates existed, a SV DDL error `invalid identifier 'DIM_DATE_KEY'`
-passed DEV dbt run (because DEV had a manual deploy masking the bug), passed
-PR validation (because `dbt parse` does not compile SQL), and then broke the
-QA auto-deploy after the PR merged to main.
-
-The `dbt compile --target qa` and `dbt compile --target prod` steps now run
-in the PR gate and would have failed the PR before merge. The
-`detect_sv_drift` step would additionally have surfaced the manual DEV deploy
-as drift.
-
-## Running Checks Locally
-
-Before pushing, you can run the same gates locally:
-
-```bash
-# Compile dbt for all three envs
-cd dbt_ski_resort
-dbt deps
-for tgt in dev qa prod; do
-  dbt parse --profiles-dir . --target $tgt
-  dbt compile --profiles-dir . --target $tgt
-done
-cd ..
-
-# Dry-run deploys for each env
-for env in dev qa prod; do
-  python -m agent_management.deploy_semantic_views --env $env --dry-run
-  python -m agent_management.deploy_agents --env $env --dry-run
-done
-
-# Detect drift between deployed and dbt source of truth
-for env in dev qa prod; do
-  python -m agent_management.detect_sv_drift --env $env
-done
-```
-
-Use your own Snowflake credentials / `SNOWFLAKE_CONNECTION_NAME` — the local
-checks do not deploy anything except a temporary scratch SV inside
-`detect_sv_drift` that is dropped after the diff.
-
-## Recovering from Drift
-
-If `detect_sv_drift` flags a difference:
-
-1. Inspect the diff in the job log.
-2. Decide which side is correct:
-   - **dbt model is correct**, deployed is stale
-     → `dbt run --select <model> --target <env>` to redeploy.
-   - **Deployed is correct**, dbt model is wrong
-     → update the dbt model (`dbt_ski_resort/models/marts/semantic/*.sql`) to
-       match, then deploy via dbt.
-3. Re-run the PR validation. It should now be green.
-
-Never "fix" the drift by making another manual
-`SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML` call — it will drift again on the
-next deploy.
-
-## Deploy Flow After Merge
+## Promotion flow
 
 ```mermaid
 flowchart LR
-    DevPush[Push to dev] --> DevDeploy[deploy-dev.yml]
-    DevDeploy --> DevSV[dbt run DEV] --> DevAgents[Deploy DEV agents] --> DevEval[DEV SV+Agent eval]
-
-    PR[PR dev to main] --> Gates[All PR gates]
-    Gates --> Merge[Merge to main]
-    Merge --> QaDeploy[deploy-qa-on-main.yml]
-    QaDeploy --> QaSV[dbt run QA] --> QaAgents[Deploy QA agents] --> QaEval[QA SV+Agent eval]
-
-    Manual[Manual workflow_dispatch] --> ProdPromote[promote-prod.yml]
-    ProdPromote --> ProdSV[dbt run PROD] --> ProdAgents[Deploy PROD agents] --> ProdEval[PROD SV+Agent eval]
+    Dev[deploy-dev.yml on dev branch push] --> DevAgent[DEV agent alias latest]
+    Merge[merge to main] --> ProdValidated[deploy-prod-validated.yml]
+    ProdValidated --> ProdAgentV[PROD agent new VERSION N alias validated]
+    ProdAgentV --> Eval[run_ci_eval against alias validated]
+    Eval --> Approval[manual approval production-promote]
+    Approval --> Flip[promote-validated-to-production.yml]
+    Flip --> ProdAgentP[PROD agent same version now also alias production]
 ```
 
-QA deploys automatically on every merge to `main`. PROD requires a manual
-`workflow_dispatch` trigger on `promote-prod.yml`. The PR gates must be
-green before merge, so by the time QA auto-deploys the same dbt models have
-already compiled cleanly against QA in the PR.
+## Drift checks
+
+`detect_sv_drift` compares:
+
+- the dbt SV SQL (structurally: tables / dims / facts / metrics)
+- the live `SYSTEM$READ_YAML_FROM_SEMANTIC_VIEW` output
+
+for each configured semantic view. It runs per env in validate-pr, and is
+advisory today; the goal is blocking once existing drift is resolved.
+
+## When env parity breaks
+
+If DEV and PROD have different SV shapes you'll see:
+
+- `detect_sv_drift` flag on the PR
+- `deploy_agents --dry-run` fail because the agent spec references columns
+  that don't exist in the target env's SV
+
+Fix by reconciling dbt models (the source of truth) and re-running the gate.

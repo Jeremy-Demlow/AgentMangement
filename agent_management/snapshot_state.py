@@ -1,14 +1,27 @@
-"""Capture pre-deploy snapshots of agents and semantic views.
+"""Capture a pre-deploy pointer snapshot for Cortex Agents.
 
-Saves current state (DESCRIBE AGENT + SYSTEM$READ_YAML_FROM_SEMANTIC_VIEW)
-to local files and optionally to a Snowflake CI_CD_SNAPSHOTS table.
+Versioning-era snapshots are lightweight: the rollback target lives in
+Snowflake as VERSION$N, so the snapshot only needs to record which version
+each alias pointed at before deploy started. Full-spec captures for audit
+live in ``agent_management.snapshot_agent`` (separate module).
 
-Usage:
-    python -m agent_management.snapshot_state --env dev
-    python -m agent_management.snapshot_state --env dev --target agents
-    python -m agent_management.snapshot_state --env dev --target semantic-views
+Pointer shape::
 
-Implements REQ-005: Snapshot and Rollback.
+    {
+      "agent_fqn": "...",
+      "env": "prod",
+      "snapshot_time": "2026-04-24T…",
+      "version_before": "VERSION$7",
+      "alias_before": {"validated": "VERSION$7", "production": "VERSION$6"},
+      "all_versions": ["VERSION$1", …, "VERSION$7"]
+    }
+
+Usage::
+
+    python -m agent_management.snapshot_state --env prod
+    python -m agent_management.snapshot_state --env prod --agent RESORT_EXECUTIVE
+
+Implements REQ-005: Snapshot and Rollback (pointer-only).
 """
 from __future__ import annotations
 
@@ -16,156 +29,121 @@ import argparse
 import json
 import logging
 import sys
+from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from agent_management import setup_logging
-from agent_management.paths import agents_snapshots_dir, sv_snapshots_dir
-from agent_management.utils.config import get_agents_schema, get_semantic_schema, load_env_config
+from agent_management.paths import project_root
+from agent_management.utils.config import (
+    get_agent_fqn,
+    get_all_configured_agents,
+    get_agents_schema,
+    load_env_config,
+)
 from agent_management.utils.snowflake_client import connect
+from agent_management.versioning import get_aliases, list_versions
 
 logger = logging.getLogger(__name__)
 
 
-def snapshot_agents(cur, config: dict, timestamp: str) -> list[dict]:
-    schema_fqn = get_agents_schema(config)
-    cur.execute(f"SHOW AGENTS IN SCHEMA {schema_fqn}")
-    agents = cur.fetchall()
-    snapshots = []
+@dataclass
+class SnapshotPointer:
+    agent_fqn: str
+    env: str
+    snapshot_time: str
+    version_before: str | None
+    alias_before: dict[str, str]
+    all_versions: list[str]
 
-    for row in agents:
-        agent_name = row[1]
-        fqn = f"{schema_fqn}.{agent_name}"
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def _snapshot_dir(env: str, agent_fqn: str) -> Path:
+    safe = agent_fqn.replace(".", "_")
+    return project_root() / ".snowflake" / "ci" / "snapshots" / env / safe
+
+
+def _timestamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def snapshot_state(
+    agent_fqn: str,
+    *,
+    env: str,
+    out_path: Path | None = None,
+    connection=None,
+) -> SnapshotPointer:
+    """Capture the current version + alias state for ``agent_fqn``."""
+    config = load_env_config(env)
+    close_after = False
+    conn = connection
+    if conn is None:
+        conn = connect(config, schema=config["deployment"]["agents_schema"])
+        close_after = True
+
+    try:
         try:
-            cur.execute(f"DESCRIBE AGENT {fqn}")
-            columns = [col[0].lower() for col in cur.description]
-            desc_row = cur.fetchone()
-            desc_data = dict(zip(columns, desc_row)) if desc_row else {}
-
-            snapshot = {
-                "object_type": "AGENT",
-                "name": agent_name,
-                "fqn": fqn,
-                "environment": config["environment"],
-                "timestamp": timestamp,
-                "agent_spec": desc_data.get("agent_spec"),
-                "comment": desc_data.get("comment"),
-                "profile": desc_data.get("profile"),
-            }
-            snapshots.append(snapshot)
-
-            out_dir = agents_snapshots_dir() / config["environment"]
-            out_dir.mkdir(parents=True, exist_ok=True)
-            out_file = out_dir / f"{agent_name}_{timestamp}.json"
-            out_file.write_text(json.dumps(snapshot, indent=2) + "\n")
-            logger.info("  %s -> %s", agent_name, out_file.name)
-        except Exception as e:
-            logger.error("  %s — FAILED: %s", agent_name, e)
-
-    return snapshots
-
-
-def snapshot_semantic_views(cur, config: dict, timestamp: str) -> list[dict]:
-    schema_fqn = get_semantic_schema(config)
-    cur.execute(f"SHOW SEMANTIC VIEWS IN SCHEMA {schema_fqn}")
-    views = cur.fetchall()
-    snapshots = []
-
-    for row in views:
-        view_name = row[1]
-        fqn = f"{schema_fqn}.{view_name}"
+            versions = list_versions(conn, agent_fqn)
+        except Exception as exc:  # noqa: BLE001
+            # First-time deploys may have no SHOW VERSIONS history yet.
+            logger.info("snapshot_state: no versions yet on %s (%s)", agent_fqn, exc)
+            versions = []
         try:
-            cur.execute(f"SELECT SYSTEM$READ_YAML_FROM_SEMANTIC_VIEW('{fqn}')")
-            result = cur.fetchone()
-            yaml_content = result[0] if result else ""
+            aliases = get_aliases(conn, agent_fqn)
+        except Exception as exc:  # noqa: BLE001
+            logger.info("snapshot_state: no aliases yet on %s (%s)", agent_fqn, exc)
+            aliases = {}
+    finally:
+        if close_after:
+            conn.close()
 
-            snapshot = {
-                "object_type": "SEMANTIC_VIEW",
-                "name": view_name,
-                "fqn": fqn,
-                "environment": config["environment"],
-                "timestamp": timestamp,
-                "yaml": yaml_content,
-            }
-            snapshots.append(snapshot)
+    pointer = SnapshotPointer(
+        agent_fqn=agent_fqn,
+        env=env,
+        snapshot_time=datetime.now(timezone.utc).isoformat(),
+        version_before=versions[-1].name if versions else None,
+        alias_before=aliases,
+        all_versions=[v.name for v in versions],
+    )
 
-            out_dir = sv_snapshots_dir() / config["environment"]
-            out_dir.mkdir(parents=True, exist_ok=True)
-            out_file = out_dir / f"{view_name}_{timestamp}.yaml"
-            out_file.write_text(yaml_content)
-            logger.info("  %s -> %s", view_name, out_file.name)
-        except Exception as e:
-            logger.error("  %s — FAILED: %s", view_name, e)
-
-    return snapshots
-
-
-def save_to_snowflake(cur, config: dict, snapshots: list[dict]) -> None:
-    schema_fqn = get_agents_schema(config)
-    table = f"{schema_fqn}.CI_CD_SNAPSHOTS"
-
-    cur.execute(f"""
-        CREATE TABLE IF NOT EXISTS {table} (
-            SNAPSHOT_ID VARCHAR DEFAULT UUID_STRING(),
-            OBJECT_TYPE VARCHAR,
-            OBJECT_NAME VARCHAR,
-            OBJECT_FQN VARCHAR,
-            ENVIRONMENT VARCHAR,
-            SNAPSHOT_TIMESTAMP TIMESTAMP_NTZ,
-            CONTENT VARIANT,
-            PRIMARY KEY (SNAPSHOT_ID)
-        )
-    """)
-
-    for s in snapshots:
-        content = json.dumps(s)
-        cur.execute(
-            f"INSERT INTO {table} (OBJECT_TYPE, OBJECT_NAME, OBJECT_FQN, ENVIRONMENT, SNAPSHOT_TIMESTAMP, CONTENT)"
-            f" SELECT %s, %s, %s, %s, TO_TIMESTAMP(%s, 'YYYYMMDD_HH24MISS'), PARSE_JSON(%s)",
-            (s["object_type"], s["name"], s["fqn"], s["environment"], s["timestamp"], content),
-        )
+    target = out_path or (_snapshot_dir(env, agent_fqn) / f"{_timestamp()}.json")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(pointer.as_dict(), indent=2))
+    logger.info("Wrote snapshot pointer -> %s", target)
+    return pointer
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Snapshot current agent/SV state")
-    parser.add_argument("--env", "-e", help="Environment (dev, qa, prod)")
-    parser.add_argument("--target", "-t", choices=["agents", "semantic-views", "all"], default="all")
-    parser.add_argument("--no-remote", action="store_true", help="Skip saving to Snowflake table")
-    args = parser.parse_args()
+def _agents_for_env(config: dict, explicit: str | None) -> list[str]:
+    if explicit:
+        return [explicit if "." in explicit else get_agent_fqn(config, explicit)]
+    return [get_agent_fqn(config, name) for name in get_all_configured_agents()]
 
-    setup_logging(1)
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Capture pre-deploy snapshot pointers.")
+    parser.add_argument("--env", required=True, choices=["dev", "prod"])
+    parser.add_argument("--agent", help="Short name or FQN. If omitted, all configured agents.")
+    parser.add_argument("-v", "--verbose", action="count", default=1)
+    args = parser.parse_args(argv)
+    setup_logging(args.verbose)
 
     config = load_env_config(args.env)
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    agents = _agents_for_env(config, args.agent)
 
-    logger.info("Environment: %s", config['environment'])
-    logger.info("Timestamp: %s", timestamp)
-    logger.info("Target: %s", args.target)
-    logger.info("=" * 60)
-
-    conn = connect(config)
-    cur = conn.cursor()
-    all_snapshots = []
-
-    if args.target in ("agents", "all"):
-        logger.info("\nAgents:")
-        all_snapshots.extend(snapshot_agents(cur, config, timestamp))
-
-    if args.target in ("semantic-views", "all"):
-        logger.info("\nSemantic Views:")
-        all_snapshots.extend(snapshot_semantic_views(cur, config, timestamp))
-
-    if not args.no_remote and all_snapshots:
-        logger.info("\nSaving to Snowflake CI_CD_SNAPSHOTS table...")
-        save_to_snowflake(cur, config, all_snapshots)
-        logger.info("  %d snapshot(s) saved", len(all_snapshots))
-
-    logger.info("\n%s", "=" * 60)
-    logger.info("Snapshots: %d  Environment: %s", len(all_snapshots), config['environment'])
-
-    cur.close()
-    conn.close()
+    logger.info("Snapshotting %d agent(s) in env=%s", len(agents), args.env)
+    failed = 0
+    for fqn in agents:
+        try:
+            snapshot_state(fqn, env=args.env)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("snapshot FAILED for %s — %s", fqn, exc)
+            failed += 1
+    return 1 if failed > 0 else 0
 
 
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__":  # pragma: no cover
+    sys.exit(main())

@@ -2,13 +2,53 @@
 
 ## Development Workflow
 
+This repo uses **two** Snowflake environments and **Cortex Agent Versioning**
+for all agent lifecycle operations.
+
 ```
-feature-branch  →  PR to dev   →  validate-pr (dry-run)
-                    merge to dev →  deploy-dev.yml (real deploy to DEV, evals advisory)
-dev             →  PR to main  →  validate-pr (dry-run)
-                    merge to main → (code is "released")
-                    manual dispatch → promote-qa.yml / promote-prod.yml
+feature-branch  →  PR to dev    →  validate-pr.yml (dry-run matrix: dev, prod)
+                     merge to dev  →  deploy-dev.yml (real deploy to DEV, alias=latest)
+dev             →  PR to main   →  validate-pr.yml (dry-run matrix: dev, prod)
+                     merge to main →  deploy-prod-validated.yml (deploy to PROD, alias=validated, eval)
+main            →  manual dispatch →  promote-validated-to-production.yml
+                                        (approval gate: production-promote env)
+incident        →  manual dispatch →  rollback.yml (single alias-reassignment)
 ```
+
+There is no QA environment. The "pre-production eval" that QA used to serve now
+runs against the `validated` alias on the PROD agent. Customer traffic follows
+the `production` alias, which only moves after a human approval.
+
+See:
+
+- [docs/operations/AGENT_VERSIONING.md](docs/operations/AGENT_VERSIONING.md)
+- [docs/operations/ROLLBACK_RUNBOOK.md](docs/operations/ROLLBACK_RUNBOOK.md)
+- [docs/semantic-views/VQR_GUIDE.md](docs/semantic-views/VQR_GUIDE.md)
+- [reqs/README.md](reqs/README.md)
+
+## Agent spec style guide
+
+Every `tools[i].description` in `agents/specs/*.yml` must contain these seven
+sections in order:
+
+```
+PURPOSE:               what the tool does, in one sentence
+DATA:                  which tables / SVs the tool reads
+KEY METRICS:           the main numeric outputs
+KEY DIMENSIONS:        which slicing dimensions apply
+USE FOR:               representative question styles
+NOT FOR:               question styles this tool should refuse
+CROSS-REFERENCE WITH:  sibling tools the agent can chain with
+```
+
+Validate locally:
+
+```bash
+python -m agent_management.validate_spec_format agents/specs/resort_executive.yml
+```
+
+Seasons must be resolved from `DIM_DATE`; hard-coded strings like `2024-2025`
+in `instructions:` blocks will fail validation.
 
 ### 1. Create a feature branch
 

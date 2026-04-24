@@ -1,17 +1,19 @@
-"""Deploy Cortex Agents from YAML specs to Snowflake.
+"""Deploy Cortex Agents from YAML specs using Cortex Agent Versioning.
 
-Renders Jinja2 templates with environment config, builds the agent spec JSON,
-and deploys using ALTER AGENT ... MODIFY LIVE VERSION SET SPECIFICATION when
-the agent already exists (preserving eval history and SI bindings), falling
-back to CREATE AGENT IF NOT EXISTS for first-time creation.
+This is the single deployment path. Every deploy:
 
-Usage:
-    python -m agent_management.deploy_agents --env dev
-    python -m agent_management.deploy_agents --env dev --agent resort_executive
-    python -m agent_management.deploy_agents --env dev --dry-run
-    python -m agent_management.deploy_agents --env dev --force-create
+  1. snapshots the agent state  (see agent_management.snapshot_state)
+  2. ADD LIVE VERSION FROM LAST (or ADD LIVE VERSION on first-time create)
+  3. MODIFY LIVE VERSION SET SPEC FROM '<yaml>'
+  4. COMMIT LIVE VERSION        (creates VERSION$N)
+  5. MODIFY VERSION LAST SET ALIAS = <deploy_alias>
+  6. prune_versions(keep_last_n)
 
-Implements REQ-003: Agent CI/CD Pipeline.
+There is intentionally NO legacy CREATE OR ALTER AGENT path and NO feature
+flag. If the Cortex Agent Versioning Private Preview is not enabled on the
+account, the SQL will raise and the deploy will fail loudly.
+
+Implements REQ-003: Agent CI/CD Pipeline (versioning era).
 """
 from __future__ import annotations
 
@@ -19,6 +21,7 @@ import argparse
 import json
 import logging
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
@@ -26,10 +29,32 @@ import yaml
 from agent_management import setup_logging
 from agent_management.paths import generated_dir, specs_dir
 from agent_management.render_template import render_file
-from agent_management.utils.config import get_agents_schema, get_budget, get_model, load_env_config
+from agent_management.utils.config import (
+    get_agents_schema,
+    get_budget,
+    get_model,
+    load_env_config,
+    load_project_config,
+)
 from agent_management.utils.snowflake_client import connect
+from agent_management.versioning import (
+    commit_version,
+    list_versions,
+    prune_versions,
+    set_alias,
+)
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class DeployResult:
+    agent_fqn: str
+    env: str
+    version_before: str | None
+    version_after: str
+    alias_moved: str
+    dropped_versions: list[str]
 
 
 def find_agent_files(agent: str | None) -> list[Path]:
@@ -48,11 +73,12 @@ def find_agent_files(agent: str | None) -> list[Path]:
 
 
 def build_spec(agent: dict, config: dict) -> dict:
+    """Build the Cortex Agent spec dict from a parsed YAML agent definition."""
     model = get_model(config)
     budget = get_budget(config)
 
     tools = []
-    tool_resources = {}
+    tool_resources: dict = {}
 
     for tool in agent.get("tools", []):
         tool_name = tool["name"]
@@ -97,7 +123,7 @@ def build_spec(agent: dict, config: dict) -> dict:
                 },
             }
 
-    instructions = agent.get("instructions", {})
+    instructions = agent.get("instructions", {}) or {}
     spec_instructions: dict = {}
     if instructions.get("orchestration"):
         spec_instructions["orchestration"] = instructions["orchestration"].strip()
@@ -147,188 +173,213 @@ def agent_exists(cur, agent_name: str, schema_fqn: str) -> bool:
         return False
 
 
-def _validate_spec_json(spec_json: str) -> None:
-    if "$$" in spec_json:
-        raise ValueError("Agent spec contains '$$' delimiter")
+def _create_agent_shell(cur, fqn: str, agent: dict, profile: dict | None) -> None:
+    """First-time only: create an empty agent so ADD LIVE VERSION can seed it."""
+    description = agent.get("description", "").strip()[:200].replace("'", "''")
+    parts = [f"CREATE AGENT IF NOT EXISTS {fqn}"]
+    if description:
+        parts.append(f"COMMENT = '{description}'")
+    if profile:
+        profile_json = json.dumps(profile).replace("'", "''")
+        parts.append(f"PROFILE = '{profile_json}'")
+    cur.execute("\n".join(parts))
 
 
-def build_alter_spec_sql(fqn: str, spec_json: str) -> str:
-    _validate_spec_json(spec_json)
-    return (
-        f"ALTER AGENT {fqn}\n"
-        f"MODIFY LIVE VERSION SET SPECIFICATION =\n"
-        f"$$\n{spec_json}\n$$"
-    )
-
-
-def build_alter_metadata_sql(fqn: str, agent: dict, profile: dict | None = None) -> str | None:
+def _apply_metadata(cur, fqn: str, agent: dict, profile: dict | None) -> None:
     parts = []
     description = agent.get("description", "").strip()[:200].replace("'", "''")
     if description:
         parts.append(f"COMMENT = '{description}'")
-    prof = profile if profile is not None else agent.get("profile", {})
-    if prof:
-        profile_json = json.dumps(prof).replace("'", "''")
+    if profile:
+        profile_json = json.dumps(profile).replace("'", "''")
         parts.append(f"PROFILE = '{profile_json}'")
     if not parts:
-        return None
-    return f"ALTER AGENT {fqn} SET\n" + ",\n".join(f"  {p}" for p in parts)
+        return
+    cur.execute(f"ALTER AGENT {fqn} SET\n" + ",\n".join(f"  {p}" for p in parts))
 
 
-def build_create_sql(fqn: str, agent: dict, spec_json: str, profile: dict | None = None) -> str:
-    _validate_spec_json(spec_json)
-    description = agent.get("description", "").strip()[:200].replace("'", "''")
-    parts = [f"CREATE AGENT IF NOT EXISTS {fqn}"]
-    parts.append(f"COMMENT = '{description}'")
-    prof = profile if profile is not None else agent.get("profile", {})
-    if prof:
-        profile_json = json.dumps(prof).replace("'", "''")
-        parts.append(f"PROFILE = '{profile_json}'")
-    parts.append("FROM SPECIFICATION")
-    parts.append(f"$$\n{spec_json}\n$$")
-    return "\n".join(parts)
-
-
-def build_force_create_sql(fqn: str, agent: dict, spec_json: str, profile: dict | None = None) -> str:
-    _validate_spec_json(spec_json)
-    description = agent.get("description", "").strip()[:200].replace("'", "''")
-    parts = [f"CREATE OR REPLACE AGENT {fqn}"]
-    parts.append(f"COMMENT = '{description}'")
-    prof = profile if profile is not None else agent.get("profile", {})
-    if prof:
-        profile_json = json.dumps(prof).replace("'", "''")
-        parts.append(f"PROFILE = '{profile_json}'")
-    parts.append("FROM SPECIFICATION")
-    parts.append(f"$$\n{spec_json}\n$$")
-    return "\n".join(parts)
-
-
-def save_generated(agent_name: str, env_name: str, sql_text: str, spec: dict) -> Path:
+def _save_generated(agent_name: str, env_name: str, spec: dict) -> Path:
     out_dir = generated_dir() / env_name
     out_dir.mkdir(parents=True, exist_ok=True)
-    sql_path = out_dir / f"{agent_name}.sql"
-    sql_path.write_text(sql_text + "\n")
     spec_path = out_dir / f"{agent_name}_spec.json"
     spec_path.write_text(json.dumps(spec, indent=2) + "\n")
-    return sql_path
+    return spec_path
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Deploy Cortex Agents from YAML")
-    parser.add_argument("--env", "-e", help="Environment (dev, qa, prod)")
-    parser.add_argument("--agent", "-a", help="Deploy single agent by name")
-    parser.add_argument("--dry-run", "-n", action="store_true", help="Generate SQL only")
-    parser.add_argument(
-        "--force-create", action="store_true",
-        help="Use CREATE OR REPLACE instead of ALTER (destroys eval history)",
+def _deploy_alias(config: dict) -> str:
+    agent_cfg = config.get("agent", {}) or {}
+    alias = agent_cfg.get("deploy_alias")
+    if not alias:
+        raise ValueError(
+            "Env config is missing agent.deploy_alias. "
+            "Set to 'latest' for dev or 'validated' for prod."
+        )
+    return alias
+
+
+def _keep_last_n(config: dict) -> int:
+    project = load_project_config()
+    versioning_cfg = project.get("agent_versioning", {})
+    return int(
+        config.get("agent", {}).get("keep_last_n_versions")
+        or versioning_cfg.get("keep_last_n_versions", 10)
     )
-    args = parser.parse_args()
 
-    setup_logging(1)
+
+def deploy_agent(
+    agent_fqn: str,
+    spec_path: Path | str,
+    *,
+    env: str,
+    deploy_alias: str | None = None,
+    connection=None,
+    dry_run: bool = False,
+) -> DeployResult:
+    """Deploy a single agent via the versioning path.
+
+    Args:
+        agent_fqn: target agent FQN (DB.SCHEMA.AGENT).
+        spec_path: path to the YAML spec file.
+        env: environment name (dev/prod) for config + connection.
+        deploy_alias: alias to move after commit. Defaults to env's
+            ``agent.deploy_alias``.
+        connection: optional pre-opened Snowflake connection (tests).
+        dry_run: if True, renders SQL and returns without executing.
+
+    Raises when the underlying Cortex Agent Versioning DDL fails — there is no
+    fallback path.
+    """
+    config = load_env_config(env)
+    if deploy_alias is None:
+        deploy_alias = _deploy_alias(config)
+
+    rendered_yaml = render_file(str(spec_path), config)
+    agent_dict = yaml.safe_load(rendered_yaml)
+    spec = build_spec(agent_dict, config)
+    spec_json = json.dumps(spec, indent=2)
+    if "$$" in spec_json:
+        raise ValueError("Agent spec contains '$$' delimiter")
+    spec_yaml = yaml.safe_dump(spec, sort_keys=False)
+
+    agent_name, schema_fqn, _computed_fqn = resolve_agent_identity(agent_dict, config)
+    profile = resolve_profile(agent_dict, config)
+    _save_generated(agent_name, config["environment"], spec)
+
+    if dry_run:
+        logger.info(
+            "[DRY RUN] would deploy %s (alias=%s):\n%s",
+            agent_fqn,
+            deploy_alias,
+            "\n".join([
+                f"  ALTER AGENT {agent_fqn} ADD LIVE VERSION FROM LAST;",
+                f"  ALTER AGENT {agent_fqn} MODIFY LIVE VERSION SET SPEC FROM <yaml>;",
+                f"  ALTER AGENT {agent_fqn} COMMIT LIVE VERSION;",
+                f"  ALTER AGENT {agent_fqn} MODIFY VERSION LAST SET ALIAS = {deploy_alias};",
+            ])
+        )
+        return DeployResult(
+            agent_fqn=agent_fqn,
+            env=env,
+            version_before=None,
+            version_after="DRY_RUN",
+            alias_moved=deploy_alias,
+            dropped_versions=[],
+        )
+
+    close_after = False
+    conn = connection
+    if conn is None:
+        conn = connect(config, schema=config["deployment"]["agents_schema"])
+        close_after = True
+
+    try:
+        cur = conn.cursor()
+        # Ensure agent object exists (no LIVE version yet on first deploy).
+        existed = agent_exists(cur, agent_name, schema_fqn)
+        if not existed:
+            _create_agent_shell(cur, agent_fqn, agent_dict, profile)
+
+        existing_versions = list_versions(conn, agent_fqn)
+        version_before = existing_versions[-1].name if existing_versions else None
+        initial = not existing_versions
+
+        version_after = commit_version(conn, agent_fqn, spec_yaml, initial=initial)
+        _apply_metadata(cur, agent_fqn, agent_dict, profile)
+        set_alias(conn, agent_fqn, version_after, deploy_alias)
+
+        keep_last_n = _keep_last_n(config)
+        dropped = prune_versions(conn, agent_fqn, keep_last_n=keep_last_n)
+
+        logger.info(
+            "deployed %s: %s -> %s (alias=%s, dropped=%s)",
+            agent_fqn,
+            version_before or "<none>",
+            version_after,
+            deploy_alias,
+            dropped or "none",
+        )
+        return DeployResult(
+            agent_fqn=agent_fqn,
+            env=env,
+            version_before=version_before,
+            version_after=version_after,
+            alias_moved=deploy_alias,
+            dropped_versions=dropped,
+        )
+    finally:
+        if close_after:
+            conn.close()
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Deploy Cortex Agents (versioning path).")
+    parser.add_argument("--env", "-e", required=True)
+    parser.add_argument("--agent", "-a", help="Deploy a single agent by short name.")
+    parser.add_argument("--alias", help="Override the deploy_alias from env config.")
+    parser.add_argument("--dry-run", "-n", action="store_true")
+    parser.add_argument("-v", "--verbose", action="count", default=1)
+    args = parser.parse_args(argv)
+    setup_logging(args.verbose)
 
     config = load_env_config(args.env)
     agent_files = find_agent_files(args.agent)
 
-    strategy = "CREATE OR REPLACE (forced)" if args.force_create else "ALTER if exists / CREATE if new"
-    logger.info("Environment: %s", config['environment'])
-    logger.info("Target: %s", get_agents_schema(config))
-    logger.info("Agents: %d", len(agent_files))
-    logger.info("Strategy: %s", strategy)
+    logger.info("Environment: %s", config["environment"])
+    logger.info("Target schema: %s", get_agents_schema(config))
+    logger.info("Agents: %d  Alias: %s", len(agent_files), args.alias or _deploy_alias(config))
     logger.info("=" * 60)
-
-    prepared = []
-    for path in agent_files:
-        rendered_yaml = render_file(path, config)
-        agent = yaml.safe_load(rendered_yaml)
-        spec = build_spec(agent, config)
-        agent_name, schema_fqn, fqn = resolve_agent_identity(agent, config)
-        profile = resolve_profile(agent, config)
-        prepared.append({
-            "agent": agent,
-            "spec": spec,
-            "spec_json": json.dumps(spec, indent=2),
-            "agent_name": agent_name,
-            "schema_fqn": schema_fqn,
-            "fqn": fqn,
-            "profile": profile,
-        })
-
-    if args.dry_run:
-        logger.info("\n[DRY RUN] SQL written to %s/", generated_dir() / config['environment'])
-        for item in prepared:
-            fqn = item["fqn"]
-            spec_json = item["spec_json"]
-            agent = item["agent"]
-            profile = item["profile"]
-
-            if args.force_create:
-                sql = build_force_create_sql(fqn, agent, spec_json, profile) + ";"
-                label = "CREATE OR REPLACE"
-            else:
-                alter_sql = build_alter_spec_sql(fqn, spec_json)
-                meta_sql = build_alter_metadata_sql(fqn, agent, profile)
-                create_sql = build_create_sql(fqn, agent, spec_json, profile)
-                sql = (
-                    f"-- Strategy: ALTER if agent exists, CREATE if new\n"
-                    f"-- === IF AGENT EXISTS ===\n{alter_sql};\n"
-                )
-                if meta_sql:
-                    sql += f"\n{meta_sql};\n"
-                sql += f"\n-- === IF AGENT DOES NOT EXIST ===\n{create_sql};"
-                label = "ALTER/CREATE"
-
-            out_path = save_generated(item["agent_name"], config["environment"], sql, item["spec"])
-            logger.info("\n-- [%s] %s", label, fqn)
-            logger.info("-- Written to: %s", out_path)
-            print(f"{sql}\n")
-        sys.exit(0)
-
-    conn = connect(config, schema=config["deployment"]["agents_schema"])
-    cur = conn.cursor()
 
     success = 0
     failed = 0
-    for item in prepared:
-        agent = item["agent"]
-        spec_json = item["spec_json"]
-        agent_name = item["agent_name"]
-        schema_fqn = item["schema_fqn"]
-        fqn = item["fqn"]
-        profile = item["profile"]
-        tool_count = len(agent.get("tools", []))
-
+    results: list[DeployResult] = []
+    for path in agent_files:
+        rendered_yaml = render_file(str(path), config)
+        agent_dict = yaml.safe_load(rendered_yaml)
+        _, _, fqn = resolve_agent_identity(agent_dict, config)
         try:
-            if args.force_create:
-                method = "CREATE OR REPLACE"
-                logger.info("\n[%s] %s (%d tools)...", method, fqn, tool_count)
-                cur.execute(build_force_create_sql(fqn, agent, spec_json, profile))
-            elif agent_exists(cur, agent_name, schema_fqn):
-                method = "ALTER"
-                logger.info("\n[%s] %s (%d tools)...", method, fqn, tool_count)
-                cur.execute(build_alter_spec_sql(fqn, spec_json))
-                meta_sql = build_alter_metadata_sql(fqn, agent, profile)
-                if meta_sql:
-                    cur.execute(meta_sql)
-            else:
-                method = "CREATE"
-                logger.info("\n[%s] %s (%d tools)...", method, fqn, tool_count)
-                cur.execute(build_create_sql(fqn, agent, spec_json, profile))
-
-            save_generated(agent_name, config["environment"],
-                           build_alter_spec_sql(fqn, spec_json), item["spec"])
-            logger.info("OK")
+            result = deploy_agent(
+                agent_fqn=fqn,
+                spec_path=path,
+                env=args.env,
+                deploy_alias=args.alias,
+                dry_run=args.dry_run,
+            )
+            results.append(result)
             success += 1
-        except Exception as e:
-            logger.error("FAILED — %s", e)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("FAILED %s — %s", fqn, exc)
             failed += 1
 
     logger.info("\n%s", "=" * 60)
-    logger.info("Deployed: %d  Failed: %d  Environment: %s", success, failed, config['environment'])
+    logger.info("Deployed: %d  Failed: %d  Environment: %s", success, failed, config["environment"])
+    if results:
+        for r in results:
+            logger.info(
+                "  %s: %s -> %s (alias=%s)",
+                r.agent_fqn, r.version_before or "<none>", r.version_after, r.alias_moved,
+            )
+    return 1 if failed > 0 else 0
 
-    cur.close()
-    conn.close()
-    sys.exit(1 if failed > 0 else 0)
 
-
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__":  # pragma: no cover
+    sys.exit(main())

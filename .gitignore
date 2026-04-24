@@ -53,9 +53,9 @@ semantic-views/snapshots/
 /framework/
 /agent_optimization/
 
-# Local test/debug scripts
-test_*.py
-audit_*.py
+# Local test/debug scripts at repo root (but do NOT ignore tests/ directory)
+/test_*.py
+/audit_*.py
 
 # Misc
 *.log
