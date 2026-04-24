@@ -115,3 +115,54 @@ verified_queries:
     verified_by: "Cortex Analyst"
     verified_at: 1744900000
     use_as_onboarding_question: false
+
+  - name: coverage_summary_last_season
+    question: "What was the average staffing coverage ratio last season and how many understaffed shifts occurred?"
+    sql: >-
+      WITH last_season AS (
+        SELECT MAX(ski_season) AS season
+        FROM SEMANTIC_VIEW(
+          SEMANTIC.SEM_STAFFING_ANALYTICS
+          DIMENSIONS ski_season
+          METRICS total_scheduled
+        )
+        WHERE ski_season < (
+          SELECT ski_season FROM MARTS.DIM_DATE WHERE full_date = CURRENT_DATE()
+        )
+      )
+      SELECT *
+      FROM SEMANTIC_VIEW(
+        SEMANTIC.SEM_STAFFING_ANALYTICS
+        DIMENSIONS ski_season
+        METRICS avg_coverage, understaffed_count, total_scheduled
+      )
+      WHERE ski_season = (SELECT season FROM last_season)
+    verified_by: "Cortex Analyst"
+    verified_at: 1745500000
+    use_as_onboarding_question: true
+
+  - name: most_understaffed_departments_last_season
+    question: "Which departments had the most understaffed shifts last season?"
+    sql: >-
+      WITH last_season AS (
+        SELECT MAX(ski_season) AS season
+        FROM SEMANTIC_VIEW(
+          SEMANTIC.SEM_STAFFING_ANALYTICS
+          DIMENSIONS ski_season
+          METRICS total_scheduled
+        )
+        WHERE ski_season < (
+          SELECT ski_season FROM MARTS.DIM_DATE WHERE full_date = CURRENT_DATE()
+        )
+      )
+      SELECT department, ski_season, understaffed_count, avg_coverage
+      FROM SEMANTIC_VIEW(
+        SEMANTIC.SEM_STAFFING_ANALYTICS
+        DIMENSIONS department, ski_season
+        METRICS understaffed_count, avg_coverage
+      )
+      WHERE ski_season = (SELECT season FROM last_season)
+      ORDER BY understaffed_count DESC NULLS LAST
+    verified_by: "Cortex Analyst"
+    verified_at: 1745500000
+    use_as_onboarding_question: true

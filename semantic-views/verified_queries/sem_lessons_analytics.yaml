@@ -80,3 +80,47 @@ verified_queries:
     verified_by: "Cortex Analyst"
     verified_at: 1744900000
     use_as_onboarding_question: false
+
+  - name: ski_school_last_season_summary
+    question: "How did ski school perform last season in terms of lessons and revenue?"
+    sql: >-
+      WITH __fact_lessons AS (
+        SELECT lesson_id, lesson_date, total_lesson_revenue, student_rating
+        FROM MARTS.FACT_LESSONS
+        WHERE lesson_date BETWEEN
+          (SELECT DATEADD(year, -1, DATE_TRUNC('year', CURRENT_DATE()) - INTERVAL '2 months'))
+          AND (SELECT DATE_TRUNC('year', CURRENT_DATE()) - INTERVAL '2 months' - INTERVAL '1 day')
+      )
+      SELECT
+        COUNT(lesson_id) AS total_lessons,
+        SUM(total_lesson_revenue) AS total_revenue,
+        AVG(student_rating) AS avg_student_rating
+      FROM __fact_lessons
+    verified_by: "Cortex Analyst"
+    verified_at: 1745500000
+    use_as_onboarding_question: true
+
+  - name: ski_school_by_month
+    question: "What is the monthly ski school lesson count and revenue for the most recent complete season?"
+    sql: >-
+      WITH recent_season AS (
+        SELECT MIN(lesson_date) AS start_date, MAX(lesson_date) AS end_date
+        FROM MARTS.FACT_LESSONS
+        WHERE lesson_date < DATE_TRUNC('year', CURRENT_DATE()) - INTERVAL '2 months'
+          AND lesson_date >= DATEADD(year, -1, DATE_TRUNC('year', CURRENT_DATE()) - INTERVAL '2 months')
+      ),
+      __fact_lessons AS (
+        SELECT lesson_id, lesson_date, total_lesson_revenue
+        FROM MARTS.FACT_LESSONS
+        WHERE lesson_date BETWEEN (SELECT start_date FROM recent_season) AND (SELECT end_date FROM recent_season)
+      )
+      SELECT
+        DATE_TRUNC('month', lesson_date) AS month,
+        COUNT(lesson_id) AS total_lessons,
+        SUM(total_lesson_revenue) AS total_revenue
+      FROM __fact_lessons
+      GROUP BY DATE_TRUNC('month', lesson_date)
+      ORDER BY month DESC NULLS LAST
+    verified_by: "Cortex Analyst"
+    verified_at: 1745500000
+    use_as_onboarding_question: false
