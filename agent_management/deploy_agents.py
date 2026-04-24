@@ -42,6 +42,13 @@ from agent_management.versioning import (
     has_live_draft,
     list_versions,
     set_alias,
+    set_version_comment,
+)
+from agent_management.version_log import (
+    DeployIdentity,
+    discover_identity,
+    format_version_comment,
+    record_deploy,
 )
 
 logger = logging.getLogger(__name__)
@@ -55,6 +62,8 @@ class DeployResult:
     version_after: str
     alias_moved: str
     was_first_deploy: bool
+    identity: DeployIdentity | None = None
+    version_comment: str | None = None
 
 
 def find_agent_files(agent: str | None) -> list[Path]:
@@ -331,18 +340,48 @@ def deploy_agent(
         _apply_metadata(cur, agent_fqn, agent_dict, profile)
         set_alias(conn, agent_fqn, version_after, deploy_alias)
 
+        # Attach identity metadata to the new version so "what is VERSION$N?"
+        # is answerable from SHOW VERSIONS alone.
+        identity = discover_identity(env)
+        agent_short = agent_dict.get("metadata", {}).get("name", "agent")
+        spec_summary_hint = agent_dict.get("description", "").strip().splitlines()[0][:80] \
+            if agent_dict.get("description") else None
+        summary = f"{agent_short}: {spec_summary_hint}" if spec_summary_hint else agent_short
+        version_comment = format_version_comment(identity, summary=summary)
+        try:
+            set_version_comment(conn, agent_fqn, version_after, version_comment)
+        except Exception as exc:  # noqa: BLE001 — comment is metadata, not critical
+            logger.warning("could not set version comment on %s: %s", version_after, exc)
+
+        # Append to the audit table (best-effort; never blocks deploy).
+        record_deploy(
+            conn,
+            database=config["deployment"]["database"],
+            schema=config["deployment"]["agents_schema"],
+            agent_fqn=agent_fqn,
+            version_name=version_after,
+            alias_set=deploy_alias,
+            identity=identity,
+            first_deploy=was_first_deploy,
+            version_before=version_before,
+            spec_summary=spec_summary_hint,
+            extra={
+                "tool_count": len(agent_dict.get("tools", [])),
+                "sample_question_count": len(agent_dict.get("sample_questions", [])),
+            },
+        )
+
         # No prune_versions: the Private Preview forbids dropping versions that
         # are a base for another (i.e. all versions in the linear chain).
-        # Version history accumulates; keep_last_n is informational only.
         keep_last_n = _keep_last_n(config)
         logger.info(
-            "deployed %s: %s -> %s (alias=%s, first_deploy=%s, keep_last_n=%d informational)",
+            "deployed %s: %s -> %s (alias=%s, first_deploy=%s, comment=%r)",
             agent_fqn,
             version_before or "<none>",
             version_after,
             deploy_alias,
             was_first_deploy,
-            keep_last_n,
+            version_comment,
         )
         return DeployResult(
             agent_fqn=agent_fqn,
@@ -351,6 +390,8 @@ def deploy_agent(
             version_after=version_after,
             alias_moved=deploy_alias,
             was_first_deploy=was_first_deploy,
+            identity=identity,
+            version_comment=version_comment,
         )
     finally:
         if close_after:

@@ -156,6 +156,26 @@ def has_live_draft(conn, agent_fqn: str) -> bool:
     return False
 
 
+def set_version_comment(conn, agent_fqn: str, version: str, comment: str) -> None:
+    """Attach a human-readable comment to a committed version.
+
+    The comment is visible in the ``comment`` column of
+    ``SHOW VERSIONS IN AGENT``. Use it to pin identity metadata (git SHA,
+    PR number, actor, deploy timestamp, one-line summary) to a version so
+    operators can answer "what is VERSION$5?" without fetching the spec.
+
+    Snowflake accepts up to ~1KB in a version comment. Keep it short.
+    """
+    _assert_identifier(agent_fqn, kind="agent fqn")
+    _assert_version_name(version)
+    # Quote escape single quotes.
+    escaped = comment.replace("'", "''")
+    cur = conn.cursor()
+    cur.execute(
+        f"ALTER AGENT {agent_fqn} MODIFY VERSION {version} SET COMMENT = '{escaped}'"
+    )
+
+
 def set_alias(conn, agent_fqn: str, version: str, alias: str) -> None:
     """Point ``alias`` at ``version`` on the agent.
 
@@ -260,6 +280,60 @@ def promote_alias(
     return target_version
 
 
+def _cmd_log(args) -> int:
+    """CLI: show recent deploy events (joined with current aliases/comments)."""
+    from agent_management.version_log import list_log
+
+    config = load_env_config(args.env)
+    conn = connect(config)
+    try:
+        agent_filter = None
+        if args.agent:
+            agent_filter = args.agent if "." in args.agent else get_agent_fqn(config, args.agent)
+
+        rows = list_log(
+            conn,
+            database=config["deployment"]["database"],
+            schema=config["deployment"]["agents_schema"],
+            agent_fqn=agent_filter,
+            limit=args.limit,
+        )
+        if args.json:
+            print(json.dumps(rows, indent=2, default=str))
+            return 0
+
+        if not rows:
+            print("(no deploy events found — audit table may not exist yet)")
+        else:
+            header = f"{'event_ts':25} {'agent':45} {'version':11} {'alias':10} {'sha':8} {'pr':5} {'actor':18} {'summary'}"
+            print(header)
+            print("-" * len(header))
+            for r in rows:
+                ts = str(r.get("event_ts") or "")[:24]
+                fqn = str(r.get("agent_fqn") or "")[:45]
+                v = str(r.get("version_name") or "")[:11]
+                alias = str(r.get("alias_set") or "")[:10]
+                sha = (str(r.get("git_sha") or "") or "")[:7]
+                pr = str(r.get("pr_number") or "") or ""
+                actor = str(r.get("actor") or "")[:18]
+                summary = str(r.get("spec_summary") or "")[:60]
+                print(f"{ts:25} {fqn:45} {v:11} {alias:10} {sha:8} {pr:5} {actor:18} {summary}")
+
+        # Also surface the *current* state (SHOW VERSIONS)
+        if agent_filter:
+            print()
+            print("Current state (SHOW VERSIONS):")
+            versions = list_versions(conn, agent_filter)
+            aliases = get_aliases(conn, agent_filter)
+            for v in versions:
+                # map this version to any alias that currently points here
+                alias_here = next((a for a, tgt in aliases.items() if tgt.upper() == v.name.upper()), "")
+                print(f"  {v.name:12} alias={alias_here:10} {v.comment or '(no comment)'}")
+    finally:
+        conn.close()
+    return 0
+
+
 def _cmd_promote(args) -> int:
     from agent_management.utils.config import get_all_configured_agents
 
@@ -315,6 +389,13 @@ def main(argv: list[str] | None = None) -> int:
     list_p.add_argument("--agent", required=True)
     list_p.add_argument("--include-live", action="store_true")
     list_p.set_defaults(func=_cmd_list)
+
+    log_p = sub.add_parser("log", help="Show deploy audit log (from CORTEX_AGENT_VERSION_LOG).")
+    log_p.add_argument("--env", required=True)
+    log_p.add_argument("--agent", help="Filter to one agent (short name or FQN).")
+    log_p.add_argument("--limit", type=int, default=25)
+    log_p.add_argument("--json", action="store_true")
+    log_p.set_defaults(func=_cmd_log)
 
     parser.add_argument("-v", "--verbose", action="count", default=0)
     args = parser.parse_args(argv)

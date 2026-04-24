@@ -33,6 +33,7 @@ from agent_management.versioning import (
     set_alias,
     version_exists,
 )
+from agent_management.version_log import discover_identity, record_deploy
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +142,27 @@ def rollback_agent(
             "rollback OK: %s alias=%s %s -> %s",
             agent_fqn, alias, previous_version or "<unset>", target_version,
         )
+
+        # Best-effort audit log append so the rollback is visible in
+        # `agent_management.versioning log`.
+        try:
+            identity = discover_identity(env)
+            record_deploy(
+                conn,
+                database=config["deployment"]["database"],
+                schema=config["deployment"]["agents_schema"],
+                agent_fqn=agent_fqn,
+                version_name=target_version,
+                alias_set=alias,
+                identity=identity,
+                first_deploy=False,
+                version_before=previous_version,
+                spec_summary=f"ROLLBACK: {alias} -> {target_version}",
+                extra={"event_type": "rollback"},
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("rollback audit append failed (non-fatal): %s", exc)
+
         return RollbackResult(
             agent_fqn=agent_fqn,
             env=env,
