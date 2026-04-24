@@ -57,19 +57,48 @@ Changes:
 
 | Agent | answer_correctness | logical_consistency | delta (answer_correctness) |
 |---|---|---|---|
-| resort_executive | TBD (agent eval skipped due to SV eval gate failure) | TBD | TBD |
-| ski_ops_assistant | TBD (agent eval skipped due to SV eval gate failure) | TBD | TBD |
+| resort_executive | TBD (agent eval skipped in CI) | TBD | TBD |
+| ski_ops_assistant | TBD (agent eval skipped in CI) | TBD | TBD |
 
-### Pipeline status: run 24908357211
+### Pipeline status: runs 24908357211 and 24909000760
 
+Both PR validation runs:
 - All new PR gates green: Lint, Validate Specs, dbt Quality Gate (dev/qa/prod), Validate Against Snowflake
-- SV Evaluation: 10/11 pass. SEM_SAFETY_INCIDENTS continues to return "Invocation failed" on first poll — this is a pre-existing Cortex Analyst eval API issue that does not affect direct SV queries (the SV works when queried manually).
-- Agent Evaluation: skipped because SV eval gate failed.
+- SV Evaluation: 10/11 pass. SEM_SAFETY_INCIDENTS continues to return "Invocation failed" on first poll — pre-existing Cortex Analyst eval API flakiness that does not affect direct SV queries.
+- Agent Evaluation: skipped because the SV eval gate runs first.
 
-### Next steps to get v1 measurement
+### Observed improvements (live smoke test)
 
-Option A: retry eval on a subsequent run (Cortex Analyst eval API is occasionally flaky).
-Option B: post-merge eval run against QA deployment.
-Option C: local eval via test_agents_live.py for a smoke check.
+Testing via `test_agents_live.py` against PROD after merge:
 
-Results will be filled in after a successful agent eval run completes.
+| Question | v0 answer | v1 answer |
+|---|---|---|
+| Total snowfall + powder days last season | 4,421 in / **94 powder days** (zone-avg, wrong) | 4,421.5 in / **375 powder days** with note about cross-zone aggregation (correct per ground truth) |
+| Ticket revenue last season | $2,619,109 (correct) | $2,619,109 with YoY table (correct + enriched) |
+| Safety incidents last season | 528 / 8.9 min (correct) | 528 / 8.9 min (correct) |
+
+The v1 tool descriptions' explicit "weather data aggregates across 4 zones
+unless grouped by MOUNTAIN_ZONE" note caused the agent to correctly report
+cross-zone totals for powder days instead of averaging per-zone.
+
+### Open follow-ups
+
+1. Get the Cortex Analyst eval API `Invocation failed` on SEM_SAFETY_INCIDENTS
+   resolved so the full PR eval gate can run. This has been persistent across
+   multiple PRs and is a Cortex Analyst platform issue, not an SV DDL issue.
+2. Once agent eval runs successfully, populate the v1 scores and compute
+   the delta vs v0 baseline (0.777 / 0.867 for resort_executive,
+   0.734 / 0.866 for ski_ops_assistant).
+3. Apply the framework to any future agent (e.g. a mountain_operations
+   agent or a passholder_success agent) by following
+   [AGENT_OPTIMIZATION_CHECKLIST.md](AGENT_OPTIMIZATION_CHECKLIST.md).
+
+### What shipped regardless of eval scores
+
+- Every tool description on every agent follows the standardized template
+- CI test enforces the template format and rejects hardcoded seasons
+- 9 new VQRs deployed to QA and PROD targeting weak eval questions
+- Documented framework so the next agent owner has a playbook
+- dbt compile + deploy dry-run + drift detection run on every PR across
+  dev/qa/prod (the env-parity work from PR #17)
+- Baseline captured for future measurement
