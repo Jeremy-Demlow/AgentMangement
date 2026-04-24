@@ -1,0 +1,47 @@
+OVERALL ARCHITECTURE — library-first, versioning-aware
+========================================================
+
+  +-------------------------------------------------------------+
+  |                     AgentMangement REPO                     |
+  |                                                             |
+  |  agents/specs/*.yml           <-- source of truth (spec)    |
+  |  semantic-views/              <-- SV YAML + VQRs            |
+  |  dbt_ski_resort/              <-- dbt project (tables, SV)  |
+  |  environments/*.env.yml       <-- env config + deploy_alias |
+  |  project.yml                  <-- agent_versioning flag     |
+  |                                                             |
+  |  agent_management/            <-- THE LIBRARY               |
+  |    deploy_agents.py    rollback.py       versioning.py      |
+  |    snapshot_state.py   smoke_test.py     snapshot_agent.py  |
+  |    validate_spec_format.py      detect_sv_drift.py          |
+  |    run_ci_eval.py               deploy_semantic_views.py    |
+  |                                                             |
+  |  tests/                       <-- unit + integration tests  |
+  |  reqs/                        <-- THIS folder (design)      |
+  |  docs/operations/             <-- runbooks                  |
+  +-------------------------------------------------------------+
+          |                                      |
+          | (PR merges)                          | (python -m …)
+          v                                      v
+  +-------------------+                +------------------------+
+  |  GitHub Actions   |                |  Developer workstation |
+  |  - validate-pr    |                |                        |
+  |  - deploy-dev     |                |  Same library, same    |
+  |  - promote-qa     |                |  CLIs, same outcome.   |
+  |  - promote-prod   |                |                        |
+  |  - rollback       |                +------------------------+
+  +-------------------+
+          |
+          v
+  +--------------------------------------------------------+
+  |                    SNOWFLAKE ACCOUNT                    |
+  |                                                         |
+  |  AM_SKI_RESORT_DEV    AM_SKI_RESORT_QA   AM_SKI_RESORT |
+  |    AGENTS.*_DEV         AGENTS.*_QA        AGENTS.*    |
+  |    alias: latest        alias: validated   alias: prod  |
+  |    VERSION$1..N         VERSION$1..N       VERSION$1..N |
+  |                                                         |
+  |  Semantic Views  -----+                                 |
+  |  (deployed by dbt)    |   consumed by agents at query   |
+  |                       +--> time via their SV refs       |
+  +--------------------------------------------------------+

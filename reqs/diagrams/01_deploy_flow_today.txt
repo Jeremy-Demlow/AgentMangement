@@ -1,0 +1,34 @@
+DEPLOY FLOW — TODAY (legacy, no versioning)
+============================================
+
+  spec.yml (edited)
+       |
+       v
+  +----------------------------+
+  |  snapshot_state.py         |   reads DESC AGENT, dumps full spec JSON
+  |  (before deploy)           |   -> .snowflake/ci/snapshots/<env>/<agent>/<ts>.json
+  +----------------------------+
+       |
+       v
+  +----------------------------+
+  |  deploy_agents.py          |   renders spec -> SQL:
+  |                            |     CREATE OR ALTER AGENT <fqn>
+  |                            |       WITH (spec = <yaml>, …);
+  +----------------------------+
+       |
+       v
+  +----------------------------+
+  |  smoke_test / eval         |
+  +----------------------------+
+       |
+       v
+  LIVE AGENT now holds new spec
+  (no history; previous spec only in the JSON snapshot)
+
+
+DRAWBACKS
+---------
+  * No immutable audit trail in Snowflake
+  * Rollback = re-render + re-apply (slow, risky)
+  * Can't A/B two versions
+  * No alias-based traffic routing

@@ -1,0 +1,73 @@
+LIBRARY MODULE MAP — agent_management/
+=======================================
+
+  +-------------------------------------------------------+
+  |                    agent_management                    |
+  |                                                        |
+  |  paths.py         utils/           ci/                 |
+  |  (repo paths)     (conn, yaml)     (CI entrypoints)    |
+  |                                                        |
+  +---+-------------------+-------------------+------------+
+      |                   |                   |
+      |  DEPLOY / LIFECYCLE                   |
+      |                                       |
+      v                                       v
+  +------------------+              +------------------+
+  |  deploy_agents   |<-----------> |    versioning    |
+  |                  |   uses       |                  |
+  |  - legacy path   |              |  commit_version  |
+  |  - versioned pth |              |  list_versions   |
+  |                  |              |  set_alias       |
+  +------------------+              |  drop_version    |
+          ^                         |  version_exists  |
+          |                         +------------------+
+          |                                   ^
+          |                                   |
+  +------------------+              +------------------+
+  |   rollback       |------------->|  snapshot_state  |
+  |                  |  reads       |                  |
+  |  - alias flip    |  snapshot    |  - legacy (spec) |
+  |  - spec fallback |              |  - pointer (ver) |
+  +------------------+              +------------------+
+
+
+      VALIDATION / OBSERVABILITY
+      |
+      v
+  +------------------+       +--------------------+
+  |  validate_spec_  |       |  detect_sv_drift   |
+  |  format          |       |                    |
+  |                  |       |  (dbt vs live)     |
+  |  template rules  |       +--------------------+
+  +------------------+
+          |
+          |
+      CONSUMED BY
+          |
+          v
+  +------------------+       +--------------------+
+  |  smoke_test      |       |  snapshot_agent    |
+  |  (HTTP probe)    |       |  (rich JSON snap)  |
+  +------------------+       +--------------------+
+
+
+      SV & EVAL
+      |
+      v
+  +-------------------------+     +---------------------+
+  |  deploy_semantic_views  |<--->|  sync_vqrs_to_dbt   |
+  +-------------------------+     +---------------------+
+      |                                   |
+      v                                   v
+  +-------------------+             +------------------+
+  |  run_ci_eval      |<----------->|  run_sv_eval     |
+  |  run_eval         |  shared     |                  |
+  |  (version-aware)  |  scoring    |  check_sv_eval*  |
+  +-------------------+             +------------------+
+          |
+          v
+  +-------------------+
+  |  get_sv_eval_     |
+  |  scores /         |
+  |  compute_metrics  |
+  +-------------------+

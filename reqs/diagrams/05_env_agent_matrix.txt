@@ -1,0 +1,49 @@
+ENV x AGENT x ALIAS x VERSION MATRIX
+======================================
+
+                  DEV                      QA                       PROD
+                  ----------------------   ----------------------   ----------------------
+  DB.SCHEMA:      AM_SKI_RESORT_DEV        AM_SKI_RESORT_QA         AM_SKI_RESORT
+                  .AGENTS                  .AGENTS                  .AGENTS
+
+  Agent 1:        RESORT_EXECUTIVE_DEV     RESORT_EXECUTIVE_QA      RESORT_EXECUTIVE
+  Agent 2:        SKI_OPS_ASSISTANT_DEV    SKI_OPS_ASSISTANT_QA     SKI_OPS_ASSISTANT
+
+  deploy_alias:   latest                   validated                production
+
+  Versions:       VERSION$1..K             VERSION$1..M             VERSION$1..N
+                  (independent per env)
+
+  Aliases held:   latest -> V$K            latest -> V$?            latest -> V$?
+                                           validated -> V$M-1       validated -> V$N-1
+                                                                    production -> V$N
+
+
+
+PROMOTION FLOW (happy path)
+----------------------------
+
+  dev: deploy    => V$K+1 created, alias=latest moves to V$K+1
+  qa:  deploy    => V$M+1 created, alias=validated moves to V$M+1
+                    (same spec content as dev V$K+1)
+  qa:  eval      => evals <fqn>!validated (== V$M+1)
+                    PASS => eligible for prod
+  prod: promote  => V$N+1 created (same spec),
+                    alias=production moves to V$N+1
+                    (manual approval required via env: production)
+
+  rollback prod  => alias=production reassigned to V$N
+                    V$N+1 retained for forensics
+
+
+
+EDGE CASES
+-----------
+
+  * Different envs can have different version numbers for the same spec
+    content (they're independent ALTER AGENT …COMMIT streams).
+
+  * The library does NOT assume VERSION$N = VERSION$N across envs.
+    Promotion is by spec content, not by version number.
+
+  * `keep_last_n_versions` applies per (env, agent), not globally.

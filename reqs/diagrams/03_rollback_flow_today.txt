@@ -1,0 +1,28 @@
+ROLLBACK FLOW — TODAY (spec re-apply)
+======================================
+
+  Operator triggers rollback.yml
+       |
+       v
+  +----------------------------+
+  |  rollback.py               |
+  |                            |
+  |  1. read last snapshot     |   .snowflake/ci/snapshots/<env>/<agent>/*.json
+  |                            |
+  |  2. extract spec YAML      |   full previous spec
+  |                            |
+  |  3. CREATE OR ALTER AGENT  |   <fqn> WITH (spec = <old yaml>)
+  |                            |
+  |  4. smoke test             |
+  +----------------------------+
+       |
+       v
+  AGENT now reverted (spec re-applied)
+
+
+ISSUES
+------
+  * Time: seconds to minutes for spec render + apply
+  * Risk: spec round-trip through JSON can lose nuance
+  * Non-atomic: partial apply leaves agent broken
+  * No way to "re-forward" later (no immutable history)

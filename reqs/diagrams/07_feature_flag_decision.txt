@@ -1,0 +1,62 @@
+FEATURE FLAG DECISION TREE — agent_versioning
+==============================================
+
+  caller (deploy / rollback / snapshot_state / run_eval)
+         |
+         v
+  +----------------------------------+
+  |  load project.yml                |
+  +----------------------------------+
+         |
+         v
+  agent_versioning.enabled ?
+         |
+    +----+----+
+    | yes     | no
+    |         |
+    |         v
+    |    +----------------------+
+    |    |  LEGACY PATH         |
+    |    |  - spec re-apply     |
+    |    |  - snapshot full yml |
+    |    |  - eval live         |
+    |    +----------------------+
+    |
+    v
+  per_env[<env>] ?
+    |
+    +----+----+
+    | yes     | no
+    |         |
+    |         v
+    |    +----------------------+
+    |    |  LEGACY PATH         |
+    |    |  (this env opted out) |
+    |    +----------------------+
+    |
+    v
+  try versioned SQL
+    |
+    +----+-----------+
+    | ok             | Snowflake error:
+    v                | "feature not enabled"
+  +---------+        | "unknown syntax"
+  | DONE    |        v
+  | via     |   fallback_to_spec_restore ?
+  | alias/  |        |
+  | commit  |   +----+----+
+  +---------+   | true    | false
+                |         |
+                v         v
+           LEGACY PATH   RAISE
+           (warn user)   (fail fast,
+                         for tests)
+
+
+  EFFECT MATRIX
+  -------------
+  enabled=false                 -> always legacy
+  enabled=true, env=false       -> legacy for this env
+  enabled=true, env=true, err, fallback=true  -> legacy + warn
+  enabled=true, env=true, err, fallback=false -> raise
+  enabled=true, env=true, ok    -> versioned

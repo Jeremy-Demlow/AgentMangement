@@ -1,0 +1,59 @@
+DEPLOY FLOW — VERSIONED (target, agent_versioning.enabled=true)
+================================================================
+
+  spec.yml (edited)
+       |
+       v
+  +----------------------------+
+  |  snapshot_state.py         |   reads SHOW VERSIONS + SHOW ALIASES
+  |  (before deploy)           |   captures version_before + alias_before
+  |                            |   -> lightweight pointer JSON
+  +----------------------------+
+       |
+       v
+  +-----------------------------------------------------+
+  |  deploy_agents.py  (versioned path)                 |
+  |                                                     |
+  |  1. ALTER AGENT <fqn> ADD LIVE VERSION FROM LAST;   |
+  |     -- seed LIVE from the last committed version    |
+  |                                                     |
+  |  2. ALTER AGENT <fqn> MODIFY LIVE VERSION           |
+  |       SET SPEC FROM '<new spec yaml>';              |
+  |     -- overwrite LIVE with the new spec             |
+  |                                                     |
+  |  3. ALTER AGENT <fqn> COMMIT LIVE VERSION;          |
+  |     -- creates VERSION$N+1 (immutable)              |
+  |                                                     |
+  |  4. ALTER AGENT <fqn> MODIFY VERSION LAST           |
+  |       SET ALIAS = <deploy_alias>;                   |
+  |     -- deploy_alias is env-specific (see reqs/09)   |
+  |                                                     |
+  |  5. drop versions beyond keep_last_n_versions       |
+  |     (skip any bearing an alias)                     |
+  +-----------------------------------------------------+
+       |
+       v
+  +----------------------------+
+  |  smoke_test                |  <fqn>!<deploy_alias>
+  +----------------------------+
+       |
+       v
+  +----------------------------+
+  |  run_ci_eval               |  evals the specific version just committed
+  +----------------------------+
+
+
+alias state after deploy (example env=qa, deploy_alias=validated)
+-----------------------------------------------------------------
+  VERSION$7  <- alias: (none)       -- old dev version
+  VERSION$8  <- alias: validated    -- NEW, candidate for prod promotion
+  VERSION$6  <- alias: production   -- unchanged until promote-prod runs
+
+
+FAILURE MODES
+-------------
+  * Step 2 fails   -> LIVE has the new spec but no commit; next deploy
+                     re-seeds from LAST (safe)
+  * Step 3 fails   -> retry safe; no alias moved yet
+  * Step 4 fails   -> version exists but alias still on old version;
+                     no user impact; rollback is a no-op

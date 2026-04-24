@@ -1,0 +1,62 @@
+CI PIPELINE — versioning-aware
+===============================
+
+  Developer pushes branch, opens PR
+         |
+         v
+  +--------------------------------------------------------+
+  |  validate-pr.yml                                       |
+  |                                                        |
+  |  [dev] [qa] [prod]  (matrix)                          |
+  |    dbt compile --target <env>                          |
+  |    deploy_semantic_views.py --dry-run                  |
+  |    deploy_agents.py         --dry-run                  |
+  |    detect_sv_drift.py       (advisory)                 |
+  |    validate_spec_format     agents/specs/*.yml         |
+  |    pytest tests/ (unit only)                           |
+  +--------------------------------------------------------+
+         |
+         | PR reviewed, merged to main
+         v
+  +--------------------------------------------------------+
+  |  deploy-qa-on-main.yml   (runs on main push)           |
+  |                                                        |
+  |  1. snapshot_state  --env qa                           |
+  |  2. deploy_semantic_views (dbt run, SV DDL)            |
+  |  3. deploy_agents   --env qa                           |
+  |        -> ADD LIVE FROM LAST                           |
+  |        -> MODIFY LIVE SET SPEC                         |
+  |        -> COMMIT LIVE                                  |
+  |        -> MODIFY VERSION LAST SET ALIAS = validated    |
+  |  4. smoke_test      --env qa --alias validated         |
+  |  5. run_ci_eval     --env qa --alias validated         |
+  |                                                        |
+  |  PASS -> emit artifact: {env:qa, version:VERSION$N}    |
+  +--------------------------------------------------------+
+         |
+         | manual dispatch: promote-prod.yml
+         v
+  +--------------------------------------------------------+
+  |  promote-prod.yml   (env: production, approval gate)   |
+  |                                                        |
+  |  1. snapshot_state  --env prod                         |
+  |  2. deploy_agents   --env prod --promote-from qa       |
+  |        library reads qa's validated version spec,      |
+  |        runs the 4-step on prod agent,                  |
+  |        sets alias=production on the new prod VERSION$N |
+  |  3. smoke_test      --env prod --alias production      |
+  |  4. run_ci_eval     --env prod --alias production      |
+  +--------------------------------------------------------+
+         |
+         | incident: someone triggers rollback.yml
+         v
+  +--------------------------------------------------------+
+  |  rollback.yml                                          |
+  |                                                        |
+  |  1. rollback.py --env prod --agent <name>              |
+  |       reads last snapshot -> version_before            |
+  |       ALTER AGENT <fqn>                                |
+  |         MODIFY VERSION <version_before>                |
+  |         SET ALIAS = production;                        |
+  |  2. smoke_test --env prod --alias production           |
+  +--------------------------------------------------------+

@@ -1,0 +1,55 @@
+ROLLBACK FLOW — VERSIONED (target)
+===================================
+
+  Operator triggers rollback.yml
+       |
+       v
+  +---------------------------------------+
+  |  rollback.py                          |
+  |                                       |
+  |  1. read last snapshot pointer        |   tiny JSON, a few fields
+  |                                       |
+  |  2. target = pointer.version_before   |   e.g. VERSION$6
+  |                                       |
+  |  3. guard:                            |
+  |     - version_exists(target)          |
+  |     - target != current alias target  |
+  |                                       |
+  |  4. SINGLE STATEMENT:                 |
+  |                                       |
+  |     ALTER AGENT <fqn>                 |
+  |       MODIFY VERSION VERSION$6        |
+  |       SET ALIAS = production;         |
+  |                                       |
+  |  5. smoke test                        |
+  +---------------------------------------+
+       |
+       v
+  AGENT reverted (alias reassigned)
+  VERSION$7 (the bad version) still exists, available for forensic diff
+
+
+ALIAS TRANSITION (example)
+---------------------------
+  before rollback:
+    VERSION$6  alias:
+    VERSION$7  alias: production     <- bad version
+
+  after rollback:
+    VERSION$6  alias: production     <- traffic restored
+    VERSION$7  alias:                <- dropped alias, version retained
+
+
+ADVANTAGES
+----------
+  * ~100ms (one DDL)
+  * Atomic (single statement)
+  * Reversible (re-point alias back to VERSION$7 if rollback was wrong)
+  * Fallback to spec-restore if versioning disabled for this env
+
+
+FALLBACK (feature flag off)
+----------------------------
+  if not versioning_enabled(env):
+    read snapshot.spec_yaml
+    CREATE OR ALTER AGENT <fqn> WITH (spec = <old yaml>)
