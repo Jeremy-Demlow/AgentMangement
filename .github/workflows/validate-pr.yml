@@ -74,6 +74,15 @@ jobs:
   dbt-quality-gate:
     name: dbt Quality Gate
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [dev, qa, prod]
+    environment: ${{ matrix.env == 'dev' && 'DEV' || (matrix.env == 'qa' && 'QA' || 'PROD') }}
+    env:
+      SNOWFLAKE_WAREHOUSE: ${{ vars.SNOWFLAKE_WAREHOUSE }}
+      SNOWFLAKE_ROLE: ${{ vars.SNOWFLAKE_ROLE }}
+      SNOWFLAKE_DATABASE: ${{ vars.SNOWFLAKE_DATABASE }}
     steps:
       - uses: actions/checkout@v6
 
@@ -87,11 +96,43 @@ jobs:
           pip install --upgrade pip
           pip install dbt-snowflake
 
-      - name: Parse dbt project
+      - name: Setup Snowflake
+        uses: ./.github/actions/snowflake-setup
+        with:
+          snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+
+      - name: Parse & compile dbt project for ${{ matrix.env }}
         working-directory: dbt_ski_resort
         run: |
           dbt deps --profiles-dir .
-          dbt parse --profiles-dir .
+          dbt parse --profiles-dir . --target ${{ matrix.env }}
+          dbt compile --profiles-dir . --target ${{ matrix.env }}
+
+      - name: Dry-run semantic views against ${{ matrix.env }}
+        run: python -m agent_management.deploy_semantic_views --env ${{ matrix.env }} --dry-run
+
+      - name: Dry-run agents against ${{ matrix.env }}
+        run: python -m agent_management.deploy_agents --env ${{ matrix.env }} --dry-run
+
+      - name: Detect SV drift vs dbt source of truth (advisory)
+        id: drift_check
+        continue-on-error: true
+        run: python -m agent_management.detect_sv_drift --env ${{ matrix.env }} --fail-on-drift
+
+      - name: Drift summary
+        if: always()
+        run: |
+          if [ "${{ steps.drift_check.outcome }}" = "success" ]; then
+            echo "### SV Drift Check (${{ matrix.env }}): CLEAN" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### SV Drift Check (${{ matrix.env }}): DRIFT DETECTED (advisory, not blocking)" >> $GITHUB_STEP_SUMMARY
+            echo "One or more deployed SVs differ from the dbt model. See job logs for details." >> $GITHUB_STEP_SUMMARY
+            echo "To clean up: run dbt run for the affected SV in the target environment." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Cleanup
+        if: always()
+        run: rm -f /tmp/snowflake_key.p8
 
   validate-snowflake:
     name: Validate Against Snowflake
