@@ -34,7 +34,7 @@ def test_rollback_reads_snapshot_and_reassigns_alias(tmp_path):
     with patch.object(rb, "load_env_config", return_value={
             "deployment": {"agents_schema": "AGENTS"}}), \
          patch.object(rb, "version_exists", return_value=True), \
-         patch.object(rb, "get_aliases", return_value={"production": "VERSION$3"}), \
+         patch.object(rb, "get_aliases", return_value={"PRODUCTION": "VERSION$3"}), \
          patch.object(rb, "set_alias") as mock_set:
         result = rb.rollback_agent(
             "DB.SCH.AGENT",
@@ -60,7 +60,7 @@ def test_rollback_noop_guard_raises(tmp_path):
     with patch.object(rb, "load_env_config", return_value={
             "deployment": {"agents_schema": "AGENTS"}}), \
          patch.object(rb, "version_exists", return_value=True), \
-         patch.object(rb, "get_aliases", return_value={"production": "VERSION$3"}):
+         patch.object(rb, "get_aliases", return_value={"PRODUCTION": "VERSION$3"}):
         with pytest.raises(RuntimeError, match="already at"):
             rb.rollback_agent(
                 "DB.SCH.AGENT",
@@ -93,7 +93,7 @@ def test_rollback_explicit_to_overrides_snapshot(tmp_path):
     with patch.object(rb, "load_env_config", return_value={
             "deployment": {"agents_schema": "AGENTS"}}), \
          patch.object(rb, "version_exists", return_value=True), \
-         patch.object(rb, "get_aliases", return_value={"production": "VERSION$5"}), \
+         patch.object(rb, "get_aliases", return_value={"PRODUCTION": "VERSION$5"}), \
          patch.object(rb, "set_alias") as mock_set:
         result = rb.rollback_agent(
             "DB.SCH.AGENT",

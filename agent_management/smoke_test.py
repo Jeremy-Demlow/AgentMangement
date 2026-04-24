@@ -1,30 +1,18 @@
-"""Smoke-test a deployed Cortex Agent.
+"""Smoke-test a deployed Cortex Agent via the real REST API.
 
-Replaces the old test_agents_live.py script at the repo root with a library
-module that CI and operators can invoke the same way.
+The Cortex Agent chat endpoint is:
 
-This module does NOT exercise the evaluation framework (see run_ci_eval for
-that). It issues a handful of cheap prompts against the agent REST endpoint
-and asserts that:
+    POST https://<org>-<account>.snowflakecomputing.com
+        /api/v2/databases/<db>/schemas/<schema>/agents/<agent_name>:run
 
-  * HTTP status is 2xx
-  * response body is non-empty
-  * tool calls resolved (no unresolved tool references)
-  * latency is within a configurable ceiling
+It returns a Server-Sent Events (SSE) stream. See
+``agent-evaluation/scripts/invoke_agent.py`` for the reference implementation
+this module is patterned on.
 
-Typical use::
-
-    from agent_management.smoke_test import run_smoke_test
-    result = run_smoke_test(
-        agent_fqn="AM_SKI_RESORT.AGENTS.RESORT_EXECUTIVE",
-        env="prod",
-        alias="validated",
-    )
-    assert result.overall_ok
-
-CLI::
-
-    python -m agent_management.smoke_test --env prod --alias validated
+Version / alias selectors: the REST payload supports targeting a specific
+version by appending ``!<alias>`` or ``!<VERSION$N>`` to the agent name in the
+URL (the Private Preview accepts ``AGENT_NAME!alias``). The library handles
+the URL construction.
 """
 from __future__ import annotations
 
@@ -35,6 +23,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import quote
 
 from agent_management import setup_logging
 from agent_management.utils.config import get_agent_fqn, load_env_config
@@ -57,7 +46,7 @@ class PromptResult:
     ok: bool
     latency_ms: float
     response_chars: int
-    tool_calls: list[str] = field(default_factory=list)
+    tool_uses: list[str] = field(default_factory=list)
     version_served: str | None = None
     error: str | None = None
 
@@ -84,88 +73,143 @@ class SmokeResult:
         }
 
 
-def _agent_selector(agent_fqn: str, *, alias: str | None, version: str | None) -> str:
-    """Build the Cortex Agent selector used by REST calls.
+def _split_fqn(agent_fqn: str) -> tuple[str, str, str]:
+    parts = agent_fqn.split(".")
+    if len(parts) != 3:
+        raise ValueError(f"Expected DB.SCHEMA.AGENT, got {agent_fqn!r}")
+    return parts[0], parts[1], parts[2]
 
-    Private-Preview Agent Versioning exposes agents via shortcuts
-    ``<fqn>!<selector>`` where selector is an alias name, VERSION$N, or one of
-    LIVE, FIRST, LAST, DEFAULT.
+
+def _base_url(conn) -> str:
+    cur = conn.cursor()
+    cur.execute("SELECT CURRENT_ORGANIZATION_NAME(), CURRENT_ACCOUNT_NAME()")
+    org, account = cur.fetchone()
+    account_fixed = account.replace("_", "-").lower()
+    org_fixed = org.lower()
+    return f"https://{org_fixed}-{account_fixed}.snowflakecomputing.com"
+
+
+def _build_url(base_url: str, agent_fqn: str, *, alias: str | None, version: str | None) -> str:
+    """Build the REST URL for an agent invocation.
+
+    The Cortex Agent REST API exposes version / alias routing via a path
+    segment: ``/agents/<name>/versions/<selector>:run``. The ``selector`` can
+    be a user alias (``latest``, ``validated``, ``production``), a reserved
+    alias (``LATEST``, ``LAST``, ``FIRST``, ``DEFAULT``), or an explicit
+    ``VERSION$N`` (the ``$`` must be URL-encoded).
+
+    Without a selector we hit ``/agents/<name>:run``, which routes to the
+    DEFAULT alias (the most recent committed version).
     """
-    if version:
-        return f"{agent_fqn}!{version}"
-    if alias:
-        return f"{agent_fqn}!{alias}"
-    return agent_fqn
+    db, schema, name = _split_fqn(agent_fqn)
+    name_q = quote(name, safe="")
+    selector = version or alias
+    if selector:
+        # VERSION$N contains $ which must be percent-encoded.
+        # Aliases are stored uppercase by Snowflake; the URL is case-sensitive.
+        normalized = selector.upper() if alias and not version else selector
+        selector_q = quote(normalized, safe="")
+        return (
+            f"{base_url}/api/v2/databases/{db}/schemas/{schema}"
+            f"/agents/{name_q}/versions/{selector_q}:run"
+        )
+    return (
+        f"{base_url}/api/v2/databases/{db}/schemas/{schema}"
+        f"/agents/{name_q}:run"
+    )
 
 
-def _chat_once(
+def _invoke_once(
     conn,
-    selector: str,
+    base_url: str,
+    agent_fqn: str,
     prompt: str,
     *,
+    alias: str | None,
+    version: str | None,
     latency_ceiling_s: float,
+    session: Any | None = None,
 ) -> PromptResult:
-    """Invoke a single prompt against the agent and return a PromptResult.
+    import requests  # local import; keeps module import-lightweight
 
-    Uses the Snowflake connector's ``cortex.agent.chat`` path where available,
-    falling back to an ``AGENT_RUN`` SQL call.  The exact wire protocol is
-    abstracted behind this helper so callers only deal with structured
-    results.
-    """
+    url = _build_url(base_url, agent_fqn, alias=alias, version=version)
+    token = conn.rest.token
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Authorization": f'Snowflake Token="{token}"',
+    }
+    payload = {
+        "messages": [
+            {"role": "user", "content": [{"type": "text", "text": prompt}]}
+        ]
+    }
+
     start = time.perf_counter()
+    http = session or requests
     try:
-        cursor = conn.cursor()
-        # Private Preview: agents invocable via SQL helper. We use a simple SQL
-        # wrapper that the library owns so tests can monkeypatch it.
-        cursor.execute(
-            "CALL SNOWFLAKE.CORTEX.AGENT_RUN(%s, %s)",
-            (selector, prompt),
-        )
-        row = cursor.fetchone()
-        latency_ms = (time.perf_counter() - start) * 1000
-        if row is None:
-            return PromptResult(
-                prompt=prompt,
-                ok=False,
-                latency_ms=latency_ms,
-                response_chars=0,
-                error="empty response",
-            )
-        payload_raw = row[0]
-        try:
-            payload = json.loads(payload_raw) if isinstance(payload_raw, str) else (payload_raw or {})
-        except json.JSONDecodeError:
-            payload = {"text": str(payload_raw)}
-
-        text = payload.get("text") or payload.get("response") or ""
-        tool_calls = [tc.get("name") for tc in payload.get("tool_calls", []) if tc.get("name")]
-        version_served = payload.get("version") or payload.get("version_served")
-
-        ok = bool(text) and latency_ms <= latency_ceiling_s * 1000
-        err = None
-        if not text:
-            err = "empty response text"
-        elif latency_ms > latency_ceiling_s * 1000:
-            err = f"latency {latency_ms:.0f}ms exceeded ceiling {latency_ceiling_s}s"
-
+        response = http.post(url, headers=headers, json=payload, stream=True, timeout=latency_ceiling_s + 5)
+    except Exception as exc:  # noqa: BLE001
         return PromptResult(
-            prompt=prompt,
-            ok=ok,
-            latency_ms=latency_ms,
-            response_chars=len(text),
-            tool_calls=tool_calls,
-            version_served=version_served,
-            error=err,
-        )
-    except Exception as exc:  # noqa: BLE001 - surface whatever Snowflake raised
-        latency_ms = (time.perf_counter() - start) * 1000
-        return PromptResult(
-            prompt=prompt,
-            ok=False,
-            latency_ms=latency_ms,
+            prompt=prompt, ok=False,
+            latency_ms=(time.perf_counter() - start) * 1000,
             response_chars=0,
-            error=f"{type(exc).__name__}: {exc}",
+            error=f"request_exception: {type(exc).__name__}: {exc}",
         )
+
+    if response.status_code != 200:
+        latency_ms = (time.perf_counter() - start) * 1000
+        return PromptResult(
+            prompt=prompt, ok=False, latency_ms=latency_ms, response_chars=0,
+            error=f"HTTP {response.status_code}: {response.text[:300]}",
+        )
+
+    answer_parts: list[str] = []
+    tool_uses: list[str] = []
+    version_served: str | None = None
+    current_event: str | None = None
+
+    for raw in response.iter_lines():
+        if not raw:
+            continue
+        line = raw.decode("utf-8")
+        if line.startswith("event: "):
+            current_event = line[7:].strip()
+            continue
+        if not line.startswith("data: "):
+            continue
+        data = line[6:].strip()
+        if data == "[DONE]":
+            break
+        try:
+            parsed = json.loads(data)
+        except json.JSONDecodeError:
+            continue
+
+        if current_event == "response.tool_use" and parsed.get("name"):
+            tool_uses.append(parsed["name"])
+        elif current_event == "response.text.delta" and "text" in parsed:
+            answer_parts.append(parsed["text"])
+        elif current_event == "response.text" and "text" in parsed and not answer_parts:
+            answer_parts.append(parsed["text"])
+        # Some payloads expose the served version on the final event.
+        if "version" in parsed and not version_served:
+            version_served = str(parsed["version"])
+
+    latency_ms = (time.perf_counter() - start) * 1000
+    text = "".join(answer_parts)
+    ok = bool(text) and latency_ms <= latency_ceiling_s * 1000
+    err = None
+    if not text:
+        err = "empty response text"
+    elif latency_ms > latency_ceiling_s * 1000:
+        err = f"latency {latency_ms:.0f}ms exceeded ceiling {latency_ceiling_s}s"
+
+    return PromptResult(
+        prompt=prompt, ok=ok, latency_ms=latency_ms,
+        response_chars=len(text),
+        tool_uses=tool_uses, version_served=version_served, error=err,
+    )
 
 
 def run_smoke_test(
@@ -177,21 +221,9 @@ def run_smoke_test(
     version: str | None = None,
     latency_ceiling_s: float = DEFAULT_LATENCY_CEILING_S,
     connection=None,
+    session=None,
 ) -> SmokeResult:
-    """Run a smoke test against a deployed agent.
-
-    Args:
-        agent_fqn: Fully qualified name of the agent.
-        env: Environment name (dev / prod) used to open a Snowflake connection
-            when ``connection`` is not supplied.
-        prompts: Prompts to issue. Defaults to ``DEFAULT_PROMPTS``.
-        alias: Alias selector (e.g. ``validated``, ``production``). Preferred
-            over ``version`` for CI use.
-        version: Explicit ``VERSION$N`` selector. Takes precedence over ``alias``.
-        latency_ceiling_s: Per-prompt latency ceiling; prompts that exceed this
-            are reported as failures.
-        connection: Optional pre-opened Snowflake connection (used by tests).
-    """
+    """Invoke a deployed agent a few times and report pass/fail per prompt."""
     prompts = list(prompts or DEFAULT_PROMPTS)
     close_after = False
     conn = connection
@@ -200,12 +232,17 @@ def run_smoke_test(
         conn = connect(config)
         close_after = True
 
-    selector = _agent_selector(agent_fqn, alias=alias, version=version)
-    logger.info("smoke-test target=%s prompts=%d", selector, len(prompts))
-
     try:
+        base_url = _base_url(conn)
+        selector = f"{agent_fqn}!{version or alias}" if (version or alias) else agent_fqn
+        logger.info("smoke-test target=%s prompts=%d", selector, len(prompts))
         per_prompt = [
-            _chat_once(conn, selector, prompt, latency_ceiling_s=latency_ceiling_s)
+            _invoke_once(
+                conn, base_url, agent_fqn, prompt,
+                alias=alias, version=version,
+                latency_ceiling_s=latency_ceiling_s,
+                session=session,
+            )
             for prompt in prompts
         ]
     finally:
@@ -232,30 +269,14 @@ def _agents_in_env(env: str) -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Smoke-test a deployed Cortex Agent.")
-    parser.add_argument("--env", required=True, help="Environment (dev/prod).")
-    parser.add_argument(
-        "--agent",
-        help="Agent FQN. If omitted, smoke-tests every configured agent in the env.",
-    )
-    parser.add_argument("--alias", help="Alias selector (e.g. validated, production).")
+    parser.add_argument("--env", required=True, choices=["dev", "prod"])
+    parser.add_argument("--agent", help="Agent FQN; all configured if omitted.")
+    parser.add_argument("--alias", help="Alias selector (validated, production, latest).")
     parser.add_argument("--version", help="Explicit VERSION$N selector.")
-    parser.add_argument(
-        "--latency-ceiling",
-        type=float,
-        default=DEFAULT_LATENCY_CEILING_S,
-        help="Per-prompt latency ceiling in seconds (default: 30).",
-    )
-    parser.add_argument(
-        "--prompt",
-        action="append",
-        dest="prompts",
-        help="Prompt to issue. May be repeated. Defaults to a built-in set.",
-    )
-    parser.add_argument(
-        "--json",
-        action="store_true",
-        help="Print results as JSON (useful in CI).",
-    )
+    parser.add_argument("--latency-ceiling", type=float, default=DEFAULT_LATENCY_CEILING_S)
+    parser.add_argument("--prompt", action="append", dest="prompts",
+                        help="Repeatable. Defaults to a built-in set.")
+    parser.add_argument("--json", action="store_true")
     parser.add_argument("-v", "--verbose", action="count", default=0)
     args = parser.parse_args(argv)
     setup_logging(args.verbose)
@@ -265,11 +286,8 @@ def main(argv: list[str] | None = None) -> int:
     results: list[SmokeResult] = []
     for fqn in agents:
         result = run_smoke_test(
-            fqn,
-            env=args.env,
-            prompts=args.prompts,
-            alias=args.alias,
-            version=args.version,
+            fqn, env=args.env, prompts=args.prompts,
+            alias=args.alias, version=args.version,
             latency_ceiling_s=args.latency_ceiling,
         )
         results.append(result)

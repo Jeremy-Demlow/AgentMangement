@@ -39,8 +39,8 @@ from agent_management.utils.config import (
 from agent_management.utils.snowflake_client import connect
 from agent_management.versioning import (
     commit_version,
+    has_live_draft,
     list_versions,
-    prune_versions,
     set_alias,
 )
 
@@ -54,7 +54,7 @@ class DeployResult:
     version_before: str | None
     version_after: str
     alias_moved: str
-    dropped_versions: list[str]
+    was_first_deploy: bool
 
 
 def find_agent_files(agent: str | None) -> list[Path]:
@@ -218,6 +218,9 @@ def _deploy_alias(config: dict) -> str:
 
 
 def _keep_last_n(config: dict) -> int:
+    # Retained config hook, but version pruning is not possible under Cortex
+    # Agent Versioning Private Preview (see agent_management/versioning.py).
+    # Value is reported in deploy logs only.
     project = load_project_config()
     versioning_cfg = project.get("agent_versioning", {})
     return int(
@@ -259,7 +262,11 @@ def deploy_agent(
     spec_json = json.dumps(spec, indent=2)
     if "$$" in spec_json:
         raise ValueError("Agent spec contains '$$' delimiter")
+    # The spec is emitted as YAML inside a $$...$$ block in MODIFY LIVE
+    # VERSION SET SPECIFICATION. Strip the outermost quotes Snowflake expects.
     spec_yaml = yaml.safe_dump(spec, sort_keys=False)
+    if "$$" in spec_yaml:
+        raise ValueError("Rendered spec YAML contains '$$' delimiter")
 
     agent_name, schema_fqn, _computed_fqn = resolve_agent_identity(agent_dict, config)
     profile = resolve_profile(agent_dict, config)
@@ -271,10 +278,16 @@ def deploy_agent(
             agent_fqn,
             deploy_alias,
             "\n".join([
+                f"  -- IF AGENT ALREADY HAS A COMMITTED VERSION:",
                 f"  ALTER AGENT {agent_fqn} ADD LIVE VERSION FROM LAST;",
-                f"  ALTER AGENT {agent_fqn} MODIFY LIVE VERSION SET SPEC FROM <yaml>;",
-                f"  ALTER AGENT {agent_fqn} COMMIT LIVE VERSION;",
-                f"  ALTER AGENT {agent_fqn} MODIFY VERSION LAST SET ALIAS = {deploy_alias};",
+                f"  ALTER AGENT {agent_fqn} MODIFY LIVE VERSION SET SPECIFICATION = $$<yaml>$$;",
+                f"  ALTER AGENT {agent_fqn} COMMIT;",
+                f"  -- ELSE (first-time deploy, CREATE AGENT auto-creates empty VERSION$1 + LIVE):",
+                f"  CREATE AGENT IF NOT EXISTS {agent_fqn};",
+                f"  ALTER AGENT {agent_fqn} MODIFY LIVE VERSION SET SPECIFICATION = $$<yaml>$$;",
+                f"  ALTER AGENT {agent_fqn} COMMIT;",
+                f"  -- THEN (both paths):",
+                f"  ALTER AGENT {agent_fqn} MODIFY VERSION <new> SET ALIAS = {deploy_alias};",
             ])
         )
         return DeployResult(
@@ -283,7 +296,7 @@ def deploy_agent(
             version_before=None,
             version_after="DRY_RUN",
             alias_moved=deploy_alias,
-            dropped_versions=[],
+            was_first_deploy=False,
         )
 
     close_after = False
@@ -294,29 +307,42 @@ def deploy_agent(
 
     try:
         cur = conn.cursor()
-        # Ensure agent object exists (no LIVE version yet on first deploy).
         existed = agent_exists(cur, agent_name, schema_fqn)
         if not existed:
             _create_agent_shell(cur, agent_fqn, agent_dict, profile)
 
-        existing_versions = list_versions(conn, agent_fqn)
-        version_before = existing_versions[-1].name if existing_versions else None
-        initial = not existing_versions
+        # Decide whether we need to seed a fresh LIVE.
+        # - Fresh CREATE AGENT: already has empty VERSION$1 + LIVE draft. Don't ADD.
+        # - Existing agent with no pending LIVE: ADD LIVE FROM LAST.
+        # - Existing agent with a pending LIVE (operator left it mid-edit): reuse it.
+        was_first_deploy = not existed
+        committed_versions = list_versions(conn, agent_fqn)
+        version_before = committed_versions[-1].name if committed_versions else None
+        live_draft_exists = has_live_draft(conn, agent_fqn)
 
-        version_after = commit_version(conn, agent_fqn, spec_yaml, initial=initial)
+        if was_first_deploy or live_draft_exists:
+            seed_from_last = False
+        else:
+            seed_from_last = True
+
+        version_after = commit_version(
+            conn, agent_fqn, spec_yaml, seed_from_last=seed_from_last,
+        )
         _apply_metadata(cur, agent_fqn, agent_dict, profile)
         set_alias(conn, agent_fqn, version_after, deploy_alias)
 
+        # No prune_versions: the Private Preview forbids dropping versions that
+        # are a base for another (i.e. all versions in the linear chain).
+        # Version history accumulates; keep_last_n is informational only.
         keep_last_n = _keep_last_n(config)
-        dropped = prune_versions(conn, agent_fqn, keep_last_n=keep_last_n)
-
         logger.info(
-            "deployed %s: %s -> %s (alias=%s, dropped=%s)",
+            "deployed %s: %s -> %s (alias=%s, first_deploy=%s, keep_last_n=%d informational)",
             agent_fqn,
             version_before or "<none>",
             version_after,
             deploy_alias,
-            dropped or "none",
+            was_first_deploy,
+            keep_last_n,
         )
         return DeployResult(
             agent_fqn=agent_fqn,
@@ -324,7 +350,7 @@ def deploy_agent(
             version_before=version_before,
             version_after=version_after,
             alias_moved=deploy_alias,
-            dropped_versions=dropped,
+            was_first_deploy=was_first_deploy,
         )
     finally:
         if close_after:

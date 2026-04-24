@@ -129,7 +129,8 @@ def rollback_agent(
             )
 
         current = get_aliases(conn, agent_fqn)
-        previous_version = current.get(alias)
+        # Snowflake stores aliases uppercase; normalize lookup.
+        previous_version = current.get(alias.upper())
         if previous_version and previous_version.upper() == target_version.upper():
             raise RuntimeError(
                 f"Alias {alias!r} is already at {target_version}; nothing to do."

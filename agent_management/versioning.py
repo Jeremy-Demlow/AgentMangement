@@ -1,23 +1,41 @@
 """Cortex Agent Versioning (Private Preview) DDL helpers.
 
-This module is the single place that talks to the Snowflake Cortex Agent
-versioning surface:
+Verified against Snowflake 10.14.103, April 2026. The DDL surface is:
+
+    SHOW VERSIONS IN AGENT <fqn>
+        columns: created_on, name, alias, spec_file_path, is_default, comment, profile
+        Empty-name row = editable LIVE draft (not yet committed).
+
+    DESCRIBE AGENT <fqn>
+        returns aliases as a JSON dict:
+          {"DEFAULT": "VERSION$N", "FIRST": "VERSION$1", "LAST": "VERSION$N",
+           "<user_alias>": "VERSION$X", ...}
 
     ALTER AGENT <fqn> ADD LIVE VERSION FROM LAST
-    ALTER AGENT <fqn> MODIFY LIVE VERSION SET SPEC FROM '<yaml>'
-    ALTER AGENT <fqn> COMMIT LIVE VERSION
-    ALTER AGENT <fqn> MODIFY VERSION <v> SET ALIAS = <alias>
-    ALTER AGENT <fqn> DROP VERSION <v>
-    SHOW VERSIONS ON AGENT <fqn>
-    SHOW ALIASES ON AGENT <fqn>
+        -- creates editable LIVE seeded from the latest committed version
+        -- fails if a LIVE already exists
 
-Every other module (deploy_agents, rollback, snapshot_state, smoke_test)
-should route through this module so the exact DDL is tested once and used
-everywhere.
+    ALTER AGENT <fqn> MODIFY LIVE VERSION SET SPECIFICATION = $$<yaml>$$
+        -- overwrites the LIVE draft with a new spec
 
-There is intentionally no feature flag and no fallback to the legacy
-CREATE OR ALTER AGENT path. Accounts without the Private Preview enabled
-will raise at the SQL layer.
+    ALTER AGENT <fqn> COMMIT
+        -- commits LIVE to a new VERSION$N+1 and clears the draft
+
+    ALTER AGENT <fqn> MODIFY VERSION <name> SET ALIAS = <alias>
+        -- atomically (re)assigns the alias to the named version
+
+    ALTER AGENT <fqn> DROP VERSION <name>
+        -- NEARLY USELESS: Snowflake forbids dropping any version that is a
+        -- base for another version. Since ADD LIVE FROM LAST creates a linear
+        -- chain, every version is a base for the next. There is effectively no
+        -- version pruning in Private Preview. This module does NOT expose a
+        -- prune_versions helper for that reason.
+
+Reserved alias names: FIRST, LAST, LIVE, DEFAULT, and anything starting with
+"version$". The system uppercases user aliases when it stores them.
+
+Agent invocation is REST-only: this module does not issue chat requests; see
+agent_management.smoke_test for that path.
 """
 from __future__ import annotations
 
@@ -37,12 +55,15 @@ logger = logging.getLogger(__name__)
 
 
 _VERSION_RE = re.compile(r"^VERSION\$\d+$", re.IGNORECASE)
+_RESERVED_ALIASES = frozenset({"FIRST", "LAST", "LIVE", "DEFAULT"})
 
 
 @dataclass(frozen=True)
 class VersionInfo:
-    name: str            # "VERSION$3"
-    created: str | None  # ISO string from SHOW VERSIONS
+    name: str            # "VERSION$3"  (empty string == editable LIVE draft)
+    alias: str | None    # single alias currently pointing at this version, if any
+    created: str | None
+    is_default: bool
     comment: str | None
 
 
@@ -59,30 +80,51 @@ def _assert_version_name(name: str) -> None:
 
 
 def _assert_identifier(name: str, *, kind: str = "identifier") -> None:
-    # Defense in depth: the FQN comes from env config + spec file, but we
-    # still refuse anything that doesn't look like a Snowflake identifier path.
     if not re.match(r"^[A-Za-z_][A-Za-z0-9_$]*(\.[A-Za-z_][A-Za-z0-9_$]*)*$", name):
         raise ValueError(f"Invalid {kind}: {name!r}")
 
 
-def list_versions(conn, agent_fqn: str) -> list[VersionInfo]:
-    """Return the agent's committed versions (oldest first)."""
+def _assert_user_alias(alias: str) -> None:
+    _assert_identifier(alias, kind="alias")
+    if alias.upper() in _RESERVED_ALIASES:
+        raise ValueError(
+            f"Alias {alias!r} is reserved by Snowflake "
+            f"(reserved: {sorted(_RESERVED_ALIASES)}, plus any 'version$*')."
+        )
+
+
+def list_versions(conn, agent_fqn: str, *, include_live: bool = False) -> list[VersionInfo]:
+    """Return the agent's committed versions (oldest first).
+
+    The LIVE draft row (empty ``name``) is excluded by default. Pass
+    ``include_live=True`` to include it.
+    """
     _assert_identifier(agent_fqn, kind="agent fqn")
     cur = conn.cursor()
-    cur.execute(f"SHOW VERSIONS ON AGENT {agent_fqn}")
+    cur.execute(f"SHOW VERSIONS IN AGENT {agent_fqn}")
     rows = _rows_as_dicts(cur)
     versions: list[VersionInfo] = []
     for row in rows:
-        name = row.get("name") or row.get("version") or ""
-        if not name:
+        name = str(row.get("name") or "")
+        if not name and not include_live:
             continue
+        alias = row.get("alias")
+        is_default_raw = row.get("is_default")
+        if isinstance(is_default_raw, str):
+            is_default = is_default_raw.strip().lower() == "true"
+        else:
+            is_default = bool(is_default_raw)
         versions.append(
             VersionInfo(
-                name=str(name),
-                created=str(row.get("created_on") or row.get("created") or "") or None,
+                name=name,
+                alias=str(alias) if alias else None,
+                created=str(row.get("created_on") or "") or None,
+                is_default=is_default,
                 comment=str(row.get("comment") or "") or None,
             )
         )
+    # SHOW returns newest-first; reverse for oldest-first consistency.
+    versions.reverse()
     return versions
 
 
@@ -92,30 +134,37 @@ def version_exists(conn, agent_fqn: str, version: str) -> bool:
 
 
 def get_aliases(conn, agent_fqn: str) -> dict[str, str]:
-    """Return a mapping of alias -> version name for the agent."""
+    """Return alias -> version mapping (from SHOW VERSIONS ``alias`` column).
+
+    Alias names are uppercased by Snowflake.
+    """
+    out: dict[str, str] = {}
+    for v in list_versions(conn, agent_fqn):
+        if v.alias and v.name:
+            out[v.alias.upper()] = v.name.upper()
+    return out
+
+
+def has_live_draft(conn, agent_fqn: str) -> bool:
+    """True if the agent has an uncommitted LIVE draft."""
     _assert_identifier(agent_fqn, kind="agent fqn")
     cur = conn.cursor()
-    cur.execute(f"SHOW ALIASES ON AGENT {agent_fqn}")
-    rows = _rows_as_dicts(cur)
-    out: dict[str, str] = {}
-    for row in rows:
-        alias = row.get("alias") or row.get("name")
-        target = row.get("version") or row.get("target")
-        if alias and target:
-            out[str(alias)] = str(target)
-    return out
+    cur.execute(f"SHOW VERSIONS IN AGENT {agent_fqn}")
+    for row in _rows_as_dicts(cur):
+        if not str(row.get("name") or ""):
+            return True
+    return False
 
 
 def set_alias(conn, agent_fqn: str, version: str, alias: str) -> None:
     """Point ``alias`` at ``version`` on the agent.
 
-    ``alias`` should be one of the names defined in the env config's
-    ``agent.aliases`` list (validated, production, latest, …). No implicit
-    alias creation — the Private Preview has a fixed alias vocabulary.
+    The operation is atomic: if ``alias`` currently points at a different
+    version, the server reassigns it in one DDL.
     """
     _assert_identifier(agent_fqn, kind="agent fqn")
     _assert_version_name(version)
-    _assert_identifier(alias, kind="alias")
+    _assert_user_alias(alias)
     cur = conn.cursor()
     cur.execute(
         f"ALTER AGENT {agent_fqn} MODIFY VERSION {version} SET ALIAS = {alias}"
@@ -123,20 +172,43 @@ def set_alias(conn, agent_fqn: str, version: str, alias: str) -> None:
     logger.info("alias set: %s -> %s on %s", alias, version, agent_fqn)
 
 
-def drop_version(conn, agent_fqn: str, version: str, *, force: bool = False) -> None:
-    """Drop ``version`` on the agent, refusing if it bears any alias unless ``force``."""
+def modify_live_spec(conn, agent_fqn: str, spec_yaml: str) -> None:
+    """Overwrite the LIVE draft spec with ``spec_yaml``.
+
+    Uses a $$...$$ string literal to match the Snowflake convention for
+    multi-line YAML/JSON payloads. Raises if the YAML contains '$$'.
+    """
     _assert_identifier(agent_fqn, kind="agent fqn")
-    _assert_version_name(version)
-    if not force:
-        aliases = get_aliases(conn, agent_fqn)
-        bearing = [a for a, v in aliases.items() if v.upper() == version.upper()]
-        if bearing:
-            raise RuntimeError(
-                f"Refusing to drop {version} on {agent_fqn}; still holds alias(es): {bearing}"
-            )
+    if "$$" in spec_yaml:
+        raise ValueError("spec_yaml contains '$$' delimiter; cannot embed in DDL")
     cur = conn.cursor()
-    cur.execute(f"ALTER AGENT {agent_fqn} DROP VERSION {version}")
-    logger.info("dropped version: %s on %s", version, agent_fqn)
+    cur.execute(
+        f"ALTER AGENT {agent_fqn} MODIFY LIVE VERSION SET SPECIFICATION = $$\n{spec_yaml}\n$$"
+    )
+
+
+def add_live_from_last(conn, agent_fqn: str) -> None:
+    """Seed an editable LIVE draft from the last committed version."""
+    _assert_identifier(agent_fqn, kind="agent fqn")
+    cur = conn.cursor()
+    cur.execute(f"ALTER AGENT {agent_fqn} ADD LIVE VERSION FROM LAST")
+
+
+def commit_live(conn, agent_fqn: str) -> str:
+    """Commit the LIVE draft to a new VERSION$N and return its name."""
+    _assert_identifier(agent_fqn, kind="agent fqn")
+    cur = conn.cursor()
+    cur.execute(f"ALTER AGENT {agent_fqn} COMMIT")
+    versions = list_versions(conn, agent_fqn)
+    if not versions:
+        raise RuntimeError(
+            f"commit_live: no versions visible after COMMIT on {agent_fqn}"
+        )
+    # Newest committed version = the one just created. After reverse() oldest-first,
+    # so take the last element.
+    newest = versions[-1].name
+    logger.info("committed new version: %s on %s", newest, agent_fqn)
+    return newest
 
 
 def commit_version(
@@ -144,38 +216,24 @@ def commit_version(
     agent_fqn: str,
     spec_yaml: str,
     *,
-    initial: bool = False,
+    seed_from_last: bool = True,
 ) -> str:
-    """Commit ``spec_yaml`` as a new immutable version. Returns the new VERSION$N.
+    """High-level helper: (optionally seed LIVE) -> MODIFY -> COMMIT.
 
-    When ``initial`` is True we skip the ``FROM LAST`` seed because no prior
-    version exists. Callers must supply the flag from their knowledge of
-    ``list_versions``; the library does not auto-detect (keeps the function
-    straightforward to reason about).
+    ``seed_from_last=False`` skips ``ADD LIVE VERSION FROM LAST`` — use this on
+    first-time deploys where ``CREATE AGENT`` auto-created an empty LIVE draft
+    that we can overwrite directly.
     """
-    _assert_identifier(agent_fqn, kind="agent fqn")
-    cur = conn.cursor()
-
-    if not initial:
-        cur.execute(f"ALTER AGENT {agent_fqn} ADD LIVE VERSION FROM LAST")
-    else:
-        cur.execute(f"ALTER AGENT {agent_fqn} ADD LIVE VERSION")
-
-    # Use a parameterized SQL string for the spec YAML body.
-    cur.execute(
-        f"ALTER AGENT {agent_fqn} MODIFY LIVE VERSION SET SPEC FROM %s",
-        (spec_yaml,),
-    )
-    cur.execute(f"ALTER AGENT {agent_fqn} COMMIT LIVE VERSION")
-
-    versions = list_versions(conn, agent_fqn)
-    if not versions:
+    if seed_from_last and not has_live_draft(conn, agent_fqn):
+        add_live_from_last(conn, agent_fqn)
+    elif not seed_from_last and not has_live_draft(conn, agent_fqn):
+        # Nothing to modify; the caller is wrong about the state.
         raise RuntimeError(
-            f"commit_version: no versions visible after COMMIT LIVE on {agent_fqn}"
+            f"commit_version(seed_from_last=False): no LIVE draft on {agent_fqn}. "
+            "For fresh agents, call CREATE AGENT first."
         )
-    newest = versions[-1].name
-    logger.info("committed new version: %s on %s", newest, agent_fqn)
-    return newest
+    modify_live_spec(conn, agent_fqn, spec_yaml)
+    return commit_live(conn, agent_fqn)
 
 
 def promote_alias(
@@ -185,18 +243,16 @@ def promote_alias(
     from_alias: str,
     to_alias: str,
 ) -> str:
-    """Reassign ``to_alias`` to the version currently under ``from_alias``.
-
-    Returns the version that was promoted.
-    """
+    """Reassign ``to_alias`` to the version currently under ``from_alias``."""
     aliases = get_aliases(conn, agent_fqn)
-    if from_alias not in aliases:
+    key = from_alias.upper()
+    if key not in aliases:
         raise RuntimeError(
             f"promote_alias: {from_alias!r} is not set on {agent_fqn}; "
             f"current aliases: {aliases!r}"
         )
-    target_version = aliases[from_alias]
-    current_to = aliases.get(to_alias)
+    target_version = aliases[key]
+    current_to = aliases.get(to_alias.upper())
     if current_to and current_to.upper() == target_version.upper():
         logger.info("promote_alias: no-op (%s already == %s)", to_alias, target_version)
         return target_version
@@ -204,36 +260,7 @@ def promote_alias(
     return target_version
 
 
-def prune_versions(
-    conn,
-    agent_fqn: str,
-    *,
-    keep_last_n: int,
-) -> list[str]:
-    """Drop committed versions beyond ``keep_last_n`` (oldest first).
-
-    Any version still bearing an alias is skipped. Returns the list of version
-    names actually dropped.
-    """
-    if keep_last_n <= 0:
-        raise ValueError("keep_last_n must be positive.")
-    versions = list_versions(conn, agent_fqn)
-    aliases = get_aliases(conn, agent_fqn)
-    aliased = {v.upper() for v in aliases.values()}
-    # Oldest first => drop from the front; protect aliased.
-    to_consider = versions[:-keep_last_n] if len(versions) > keep_last_n else []
-    dropped: list[str] = []
-    for v in to_consider:
-        if v.name.upper() in aliased:
-            logger.info("prune_versions: keeping %s (aliased)", v.name)
-            continue
-        drop_version(conn, agent_fqn, v.name)
-        dropped.append(v.name)
-    return dropped
-
-
 def _cmd_promote(args) -> int:
-    """CLI: promote <from-alias> -> <to-alias> on one or all configured agents."""
     from agent_management.utils.config import get_all_configured_agents
 
     config = load_env_config(args.env)
@@ -254,6 +281,24 @@ def _cmd_promote(args) -> int:
     return 0
 
 
+def _cmd_list(args) -> int:
+    config = load_env_config(args.env)
+    conn = connect(config)
+    try:
+        fqn = args.agent if "." in args.agent else get_agent_fqn(config, args.agent)
+        versions = list_versions(conn, fqn, include_live=args.include_live)
+        aliases = get_aliases(conn, fqn)
+        out = {
+            "agent": fqn,
+            "versions": [v.__dict__ for v in versions],
+            "aliases": aliases,
+        }
+        print(json.dumps(out, indent=2, default=str))
+    finally:
+        conn.close()
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Cortex Agent Versioning helpers.")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -265,27 +310,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--agent", help="Agent FQN or short name; all if omitted.")
     p.set_defaults(func=_cmd_promote)
 
-    list_p = sub.add_parser("list", help="List versions of an agent.")
+    list_p = sub.add_parser("list", help="List versions and aliases of an agent.")
     list_p.add_argument("--env", required=True)
     list_p.add_argument("--agent", required=True)
-
-    def _cmd_list(args):
-        config = load_env_config(args.env)
-        conn = connect(config)
-        try:
-            fqn = args.agent if "." in args.agent else get_agent_fqn(config, args.agent)
-            versions = list_versions(conn, fqn)
-            aliases = get_aliases(conn, fqn)
-            out = {
-                "agent": fqn,
-                "versions": [v.__dict__ for v in versions],
-                "aliases": aliases,
-            }
-            print(json.dumps(out, indent=2, default=str))
-        finally:
-            conn.close()
-        return 0
-
+    list_p.add_argument("--include-live", action="store_true")
     list_p.set_defaults(func=_cmd_list)
 
     parser.add_argument("-v", "--verbose", action="count", default=0)

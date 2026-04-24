@@ -20,8 +20,8 @@ class FakeConn:
 
 def test_snapshot_captures_version_and_aliases(tmp_path: Path):
     conn = FakeConn(
-        versions=[versioning.VersionInfo("VERSION$1", None, None),
-                  versioning.VersionInfo("VERSION$2", None, None)],
+        versions=[versioning.VersionInfo("VERSION$1", None, None, False, None),
+                  versioning.VersionInfo("VERSION$2", None, None, True, None)],
         aliases={"production": "VERSION$1", "validated": "VERSION$2"},
     )
     with patch.object(ss, "load_env_config", return_value={

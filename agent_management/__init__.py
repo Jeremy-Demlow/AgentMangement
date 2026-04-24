@@ -29,13 +29,15 @@ def __getattr__(name: str):
         "diff_snapshots": ("agent_management.snapshot_agent", "diff_snapshots"),
         "validate_spec_format": ("agent_management.validate_spec_format", "validate_spec_format"),
         "commit_version": ("agent_management.versioning", "commit_version"),
+        "commit_live": ("agent_management.versioning", "commit_live"),
+        "add_live_from_last": ("agent_management.versioning", "add_live_from_last"),
+        "modify_live_spec": ("agent_management.versioning", "modify_live_spec"),
+        "has_live_draft": ("agent_management.versioning", "has_live_draft"),
         "list_versions": ("agent_management.versioning", "list_versions"),
         "get_aliases": ("agent_management.versioning", "get_aliases"),
         "set_alias": ("agent_management.versioning", "set_alias"),
-        "drop_version": ("agent_management.versioning", "drop_version"),
         "version_exists": ("agent_management.versioning", "version_exists"),
         "promote_alias": ("agent_management.versioning", "promote_alias"),
-        "prune_versions": ("agent_management.versioning", "prune_versions"),
     }
     if name in _lazy:
         import importlib

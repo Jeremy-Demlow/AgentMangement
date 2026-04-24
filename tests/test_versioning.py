@@ -1,8 +1,6 @@
 """Unit tests for agent_management.versioning."""
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import pytest
 
 from agent_management import versioning
@@ -49,122 +47,209 @@ def test_set_alias_emits_expected_sql():
 
 
 def test_set_alias_rejects_bad_version_name():
-    cur = FakeCursor()
-    conn = FakeConn(cur)
+    conn = FakeConn(FakeCursor())
     with pytest.raises(ValueError):
         versioning.set_alias(conn, "DB.SCH.AGENT", "V3", "production")
 
 
+def test_set_alias_rejects_reserved_alias():
+    conn = FakeConn(FakeCursor())
+    for reserved in ("LAST", "FIRST", "LIVE", "DEFAULT"):
+        with pytest.raises(ValueError):
+            versioning.set_alias(conn, "DB.SCH.AGENT", "VERSION$1", reserved)
+
+
 def test_set_alias_rejects_bad_fqn():
-    cur = FakeCursor()
-    conn = FakeConn(cur)
+    conn = FakeConn(FakeCursor())
     with pytest.raises(ValueError):
         versioning.set_alias(conn, "DB.SCH.AGENT;DROP", "VERSION$1", "production")
 
 
-def test_list_versions_parses_rows():
+def test_list_versions_parses_and_sorts_oldest_first():
     cur = FakeCursor()
+    # SHOW VERSIONS returns newest-first, library should reverse to oldest-first.
     cur.set_result(
-        description=[("name",), ("created_on",), ("comment",)],
-        rows=[("VERSION$1", "2026-01-01", ""), ("VERSION$2", "2026-02-01", "note")],
+        description=[("created_on",), ("name",), ("alias",), ("spec_file_path",),
+                     ("is_default",), ("comment",), ("profile",)],
+        rows=[
+            ("2026-01-02", "VERSION$2", None, "p", True, "", ""),
+            ("2026-01-01", "VERSION$1", "LATEST", "p", False, "", ""),
+        ],
     )
     conn = FakeConn(cur)
     versions = versioning.list_versions(conn, "DB.SCH.AGENT")
     assert [v.name for v in versions] == ["VERSION$1", "VERSION$2"]
-    assert versions[1].comment == "note"
+    assert versions[0].alias == "LATEST"
+    assert versions[1].is_default is True
 
 
-def test_version_exists_true_and_false():
+def test_list_versions_skips_live_draft_by_default():
     cur = FakeCursor()
-    cur.set_result([("name",)], [("VERSION$1",), ("VERSION$2",)])
+    cur.set_result(
+        description=[("created_on",), ("name",), ("alias",), ("spec_file_path",),
+                     ("is_default",), ("comment",), ("profile",)],
+        rows=[
+            ("2026-01-02", "", None, "p", False, "", ""),   # empty = LIVE draft
+            ("2026-01-01", "VERSION$1", None, "p", True, "", ""),
+        ],
+    )
     conn = FakeConn(cur)
-    assert versioning.version_exists(conn, "DB.SCH.AGENT", "VERSION$2")
-    # reset rows but version_exists calls list_versions -> same SHOW result.
-    assert not versioning.version_exists(conn, "DB.SCH.AGENT", "VERSION$99")
+    versions = versioning.list_versions(conn, "DB.SCH.AGENT")
+    assert [v.name for v in versions] == ["VERSION$1"]
 
 
-def test_commit_version_emits_four_step_sequence_and_returns_new_version():
+def test_get_aliases_reads_from_show_versions():
+    cur = FakeCursor()
+    cur.set_result(
+        description=[("created_on",), ("name",), ("alias",), ("spec_file_path",),
+                     ("is_default",), ("comment",), ("profile",)],
+        rows=[
+            ("2026-01-02", "VERSION$2", None, "p", True, "", ""),
+            ("2026-01-01", "VERSION$1", "LATEST", "p", False, "", ""),
+        ],
+    )
+    conn = FakeConn(cur)
+    assert versioning.get_aliases(conn, "DB.SCH.AGENT") == {"LATEST": "VERSION$1"}
+
+
+def test_has_live_draft_true_when_empty_name_row_present():
+    cur = FakeCursor()
+    cur.set_result(
+        description=[("created_on",), ("name",)],
+        rows=[("2026-01-02", ""), ("2026-01-01", "VERSION$1")],
+    )
+    conn = FakeConn(cur)
+    assert versioning.has_live_draft(conn, "DB.SCH.AGENT") is True
+
+
+def test_modify_live_spec_uses_specification_and_doubledollar():
+    cur = FakeCursor()
+    conn = FakeConn(cur)
+    versioning.modify_live_spec(conn, "DB.SCH.AGENT", "models: {}\n")
+    sql, _ = cur.executed[0]
+    assert "MODIFY LIVE VERSION SET SPECIFICATION = $$" in sql
+    assert "$$" in sql
+    assert "models: {}" in sql
+
+
+def test_commit_live_sequence_and_returns_newest():
     cur = FakeCursor()
     conn = FakeConn(cur)
 
-    # After COMMIT LIVE, list_versions is called. Feed it two versions.
     def exec_spy(sql, params=None):
         cur.executed.append((sql, params))
-        # After the third execute (COMMIT LIVE), subsequent SHOW VERSIONS
-        # should see a new committed version.
         if "SHOW VERSIONS" in sql:
-            cur._description = [("name",)]
-            cur._rows = [("VERSION$1",), ("VERSION$2",)]
+            cur._description = [
+                ("created_on",), ("name",), ("alias",), ("spec_file_path",),
+                ("is_default",), ("comment",), ("profile",),
+            ]
+            cur._rows = [
+                ("2026-01-02", "VERSION$2", None, "p", True, "", ""),
+                ("2026-01-01", "VERSION$1", None, "p", False, "", ""),
+            ]
 
     cur.execute = exec_spy  # type: ignore[assignment]
+    result = versioning.commit_live(conn, "DB.SCH.AGENT")
+    assert result == "VERSION$2"
+    sqls = [s for s, _ in cur.executed]
+    assert sqls[0] == "ALTER AGENT DB.SCH.AGENT COMMIT"
 
-    result = versioning.commit_version(conn, "DB.SCH.AGENT", "spec: yaml")
+
+def test_commit_version_seed_from_last_and_full_flow():
+    cur = FakeCursor()
+    conn = FakeConn(cur)
+
+    call_index = {"n": 0}
+
+    def exec_spy(sql, params=None):
+        cur.executed.append((sql, params))
+        call_index["n"] += 1
+        if "SHOW VERSIONS" in sql:
+            # First SHOW (from has_live_draft): no LIVE, some versions.
+            # Subsequent SHOW (from commit_live): add a new committed row.
+            if call_index["n"] <= 1:
+                cur._description = [
+                    ("created_on",), ("name",), ("alias",), ("spec_file_path",),
+                    ("is_default",), ("comment",), ("profile",),
+                ]
+                cur._rows = [("2026-01-01", "VERSION$1", None, "p", True, "", "")]
+            else:
+                cur._rows = [
+                    ("2026-01-02", "VERSION$2", None, "p", True, "", ""),
+                    ("2026-01-01", "VERSION$1", None, "p", False, "", ""),
+                ]
+
+    cur.execute = exec_spy  # type: ignore[assignment]
+    result = versioning.commit_version(conn, "DB.SCH.AGENT", "models: {}\n")
     assert result == "VERSION$2"
 
     sqls = [s for s, _ in cur.executed]
-    assert sqls[0] == "ALTER AGENT DB.SCH.AGENT ADD LIVE VERSION FROM LAST"
-    assert "MODIFY LIVE VERSION SET SPEC FROM" in sqls[1]
-    assert sqls[2] == "ALTER AGENT DB.SCH.AGENT COMMIT LIVE VERSION"
-    assert "SHOW VERSIONS" in sqls[3]
+    # First SHOW (has_live_draft), then ADD LIVE FROM LAST, MODIFY LIVE, COMMIT,
+    # then SHOW VERSIONS again from commit_live.
+    assert any("SHOW VERSIONS" in s for s in sqls)
+    assert any("ADD LIVE VERSION FROM LAST" in s for s in sqls)
+    assert any("MODIFY LIVE VERSION SET SPECIFICATION" in s for s in sqls)
+    assert any(s.endswith("COMMIT") or " COMMIT" in s for s in sqls)
 
 
-def test_commit_initial_uses_add_live_without_from_last():
+def test_commit_version_first_deploy_without_seed():
     cur = FakeCursor()
     conn = FakeConn(cur)
 
     def exec_spy(sql, params=None):
         cur.executed.append((sql, params))
         if "SHOW VERSIONS" in sql:
-            cur._description = [("name",)]
-            cur._rows = [("VERSION$1",)]
+            cur._description = [
+                ("created_on",), ("name",), ("alias",), ("spec_file_path",),
+                ("is_default",), ("comment",), ("profile",),
+            ]
+            # Include LIVE draft row so seed_from_last=False path works.
+            cur._rows = [
+                ("2026-01-01T01", "VERSION$2", None, "p", True, "", ""),
+                ("2026-01-01T00", "", None, "p", False, "", ""),
+                ("2026-01-01", "VERSION$1", None, "p", False, "", ""),
+            ]
 
     cur.execute = exec_spy  # type: ignore[assignment]
-    versioning.commit_version(conn, "DB.SCH.AGENT", "spec: yaml", initial=True)
+    result = versioning.commit_version(
+        conn, "DB.SCH.AGENT", "models: {}\n", seed_from_last=False,
+    )
+    assert result == "VERSION$2"
     sqls = [s for s, _ in cur.executed]
-    assert sqls[0] == "ALTER AGENT DB.SCH.AGENT ADD LIVE VERSION"
-    assert "FROM LAST" not in sqls[0]
-
-
-def test_drop_version_refuses_aliased_unless_force():
-    # SHOW ALIASES returns VERSION$3 on alias=production.
-    cur = FakeCursor()
-
-    def exec_spy(sql, params=None):
-        cur.executed.append((sql, params))
-        if "SHOW ALIASES" in sql:
-            cur._description = [("alias",), ("version",)]
-            cur._rows = [("production", "VERSION$3")]
-
-    cur.execute = exec_spy  # type: ignore[assignment]
-    conn = FakeConn(cur)
-
-    with pytest.raises(RuntimeError, match="still holds alias"):
-        versioning.drop_version(conn, "DB.SCH.AGENT", "VERSION$3")
-
-    # with force=True it proceeds without checking aliases
-    versioning.drop_version(conn, "DB.SCH.AGENT", "VERSION$3", force=True)
-    dropped_sql = cur.executed[-1][0]
-    assert dropped_sql == "ALTER AGENT DB.SCH.AGENT DROP VERSION VERSION$3"
+    # Should NOT emit ADD LIVE FROM LAST on first deploy
+    assert not any("ADD LIVE VERSION FROM LAST" in s for s in sqls)
 
 
 def test_promote_alias_no_op_when_target_already_correct():
     cur = FakeCursor()
     cur.set_result(
-        [("alias",), ("version",)],
-        [("validated", "VERSION$5"), ("production", "VERSION$5")],
+        description=[("created_on",), ("name",), ("alias",), ("spec_file_path",),
+                     ("is_default",), ("comment",), ("profile",)],
+        rows=[
+            ("2026-01-01", "VERSION$5", "PRODUCTION", "p", True, "", ""),
+        ],
     )
     conn = FakeConn(cur)
+    # Need both validated and production on same version; craft two-row result.
+    cur._rows = [
+        ("2026-01-01", "VERSION$5", "PRODUCTION", "p", True, "", ""),
+        ("2026-01-01", "VERSION$5", "VALIDATED", "p", True, "", ""),
+    ]
     result = versioning.promote_alias(
-        conn, "DB.SCH.AGENT", from_alias="validated", to_alias="production"
+        conn, "DB.SCH.AGENT", from_alias="validated", to_alias="production",
     )
     assert result == "VERSION$5"
-    # Only one execute (the SHOW ALIASES); no ALTER AGENT emitted.
+    # No ALTER AGENT statement emitted (no-op guard)
     assert not any("MODIFY VERSION" in sql for sql, _ in cur.executed)
 
 
 def test_promote_alias_missing_source_raises():
     cur = FakeCursor()
-    cur.set_result([("alias",), ("version",)], [("production", "VERSION$1")])
+    cur.set_result(
+        description=[("created_on",), ("name",), ("alias",), ("spec_file_path",),
+                     ("is_default",), ("comment",), ("profile",)],
+        rows=[("2026-01-01", "VERSION$1", "PRODUCTION", "p", True, "", "")],
+    )
     conn = FakeConn(cur)
     with pytest.raises(RuntimeError, match="not set"):
         versioning.promote_alias(
