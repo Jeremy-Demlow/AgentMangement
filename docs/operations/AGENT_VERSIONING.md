@@ -193,14 +193,26 @@ that rollback reads.
 
 
 
+## Alias routing in evals
+
+**Important limitation (verified live):** `EXECUTE_AI_EVALUATION` does NOT
+accept `!alias` or `!VERSION$N` in `agent_name`. Attempting it returns
+*"Cortex Agent 'DB.SCHEMA.\"NAME!LATEST\"' does not exist or not authorized"*.
+
+Eval always targets the **default version** (= most recent committed). This
+is usually fine: right after `deploy_agents` commits a new version, that
+version IS the default. So evaluating "validated" is equivalent to
+evaluating the default until another deploy shifts default forward.
+
 ```bash
+# CI invocations. The selector is informational for logging; the SP ignores it.
 python -m agent_management.run_ci_eval --env prod --alias validated
 python -m agent_management.run_ci_eval --env prod --alias production
 ```
 
-The eval config's `agent_name` string is built as
-`<db>.<schema>.<name>!<selector>` where the REST eval harness will map
-`name!selector` to the versioned URL form.
+`run_eval.py` prints a warning when `--alias` or `--version` is supplied so
+it's clear the eval SP won't honor it. Smoke tests (`smoke_test.py`) DO
+support version/alias selectors — only the eval SP is limited.
 
 ## Env → alias matrix (Option B)
 

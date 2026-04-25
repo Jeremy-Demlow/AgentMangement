@@ -1,11 +1,16 @@
-"""Rich JSON snapshots of a deployed Cortex Agent for audit and diff.
+"""Rich JSON snapshot of a Cortex Agent for audit and diff.
 
-Distinct from ``agent_management.snapshot_state`` — that module captures a
-lightweight pointer (version + aliases) that is the input to rollback. This
-module writes a full spec snapshot intended for human review and historical
-comparison.
+Captures the agent's full spec (via DESCRIBE AGENT) plus SHOW VERSIONS
+metadata. Complements ``agent_management.snapshot_state``:
 
-Replaces the ad-hoc snapshots that used to live under ``agent_optimization/``.
+  snapshot_state  -> lightweight pointer (version + aliases) for rollback
+  snapshot_agent  -> rich JSON (full spec + versions + aliases) for audit/diff
+
+IMPORTANT: Cortex Agent Versioning's SQL surface only lets us fetch the spec
+of the default version. Per-version and per-alias spec fetches return syntax
+errors. If you need the spec of a non-default version, it is immutably stored
+in ``VERSION$N`` inside Snowflake — you can compare two agent snapshots
+taken at different points in time to see diffs.
 
 Usage::
 
@@ -13,13 +18,12 @@ Usage::
     path = snapshot_agent(
         agent_fqn="AM_SKI_RESORT.AGENTS.RESORT_EXECUTIVE",
         env="prod",
-        alias="production",
     )
 
 CLI::
 
-    python -m agent_management.snapshot_agent --env prod --agent RESORT_EXECUTIVE --alias production
-    python -m agent_management.snapshot_agent --diff snapshots/a.json snapshots/b.json
+    python -m agent_management.snapshot_agent capture --env dev --agent AM_SKI_RESORT_DEV.AGENTS.RESORT_EXECUTIVE_DEV
+    python -m agent_management.snapshot_agent diff snapshots/a.json snapshots/b.json
 """
 from __future__ import annotations
 
@@ -38,82 +42,57 @@ from agent_management import setup_logging
 from agent_management.paths import project_root
 from agent_management.utils.config import load_env_config
 from agent_management.utils.snowflake_client import connect
+from agent_management.versioning import get_aliases, list_versions
 
 logger = logging.getLogger(__name__)
 
 
 def _default_out_dir() -> Path:
-    # snapshots/ at repo root; gitignored.
     return project_root() / "snapshots"
 
 
 def _safe_fqn_dir(agent_fqn: str) -> str:
-    return agent_fqn.replace(".", "_").replace("!", "_")
+    return agent_fqn.replace(".", "_")
 
 
 def _timestamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
-def _describe_agent(conn, agent_fqn: str, *, version: str | None, alias: str | None) -> dict[str, Any]:
-    """Return the agent's rendered spec plus metadata for the given version/alias."""
+def _describe_agent(conn, agent_fqn: str) -> dict[str, Any]:
+    """Return full spec + metadata for the current default version."""
     cursor = conn.cursor()
-    selector = agent_fqn
-    if version:
-        selector = f"{agent_fqn}!{version}"
-    elif alias:
-        selector = f"{agent_fqn}!{alias}"
-
-    cursor.execute(f"DESCRIBE AGENT {selector}")
-    desc_rows = cursor.fetchall()
+    cursor.execute(f"DESCRIBE AGENT {agent_fqn}")
     columns = [c[0] for c in cursor.description]
-    desc = [dict(zip(columns, row)) for row in desc_rows]
+    row = cursor.fetchone()
+    desc = dict(zip(columns, row)) if row else {}
 
-    spec_yaml = None
-    for row in desc:
-        # The DESCRIBE output lists a 'specification' row whose value is YAML.
-        if str(row.get("property", "")).lower() in {"specification", "spec"}:
-            spec_yaml = row.get("value")
-            break
-
-    spec_parsed: dict[str, Any] | None = None
-    if spec_yaml:
+    spec_raw = desc.get("agent_spec")
+    spec_parsed: Any = None
+    if spec_raw:
         try:
-            spec_parsed = yaml.safe_load(spec_yaml)
-        except yaml.YAMLError:
-            spec_parsed = None
+            spec_parsed = json.loads(spec_raw) if isinstance(spec_raw, str) else spec_raw
+        except json.JSONDecodeError:
+            try:
+                spec_parsed = yaml.safe_load(spec_raw)
+            except Exception:  # noqa: BLE001
+                spec_parsed = None
 
-    # Alias + version list (best-effort — the exact DDL for the Private Preview
-    # can vary; callers handle the exception gracefully).
-    aliases: dict[str, str] = {}
-    versions: list[str] = []
-    try:
-        cursor.execute(f"SHOW VERSIONS ON AGENT {agent_fqn}")
-        for row in cursor.fetchall():
-            cols = [c[0].lower() for c in cursor.description]
-            record = dict(zip(cols, row))
-            versions.append(str(record.get("name") or record.get("version")))
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("SHOW VERSIONS unavailable: %s", exc)
-    try:
-        cursor.execute(f"SHOW ALIASES ON AGENT {agent_fqn}")
-        for row in cursor.fetchall():
-            cols = [c[0].lower() for c in cursor.description]
-            record = dict(zip(cols, row))
-            alias_name = record.get("alias") or record.get("name")
-            version_ref = record.get("version") or record.get("target")
-            if alias_name and version_ref:
-                aliases[str(alias_name)] = str(version_ref)
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("SHOW ALIASES unavailable: %s", exc)
+    versions_list = list_versions(conn, agent_fqn)
+    aliases = get_aliases(conn, agent_fqn)
+
+    # Merge the default_version_name hint from DESC AGENT if present.
+    default_version = desc.get("default_version_name")
 
     return {
-        "selector": selector,
-        "spec_yaml": spec_yaml,
+        "agent_fqn": agent_fqn,
+        "default_version": default_version,
         "spec": spec_parsed,
-        "describe": desc,
+        "spec_raw": spec_raw,
+        "comment": desc.get("comment"),
+        "profile": desc.get("profile"),
+        "versions": [v.__dict__ for v in versions_list],
         "aliases": aliases,
-        "versions": versions,
     }
 
 
@@ -121,12 +100,10 @@ def snapshot_agent(
     agent_fqn: str,
     *,
     env: str,
-    version: str | None = None,
-    alias: str | None = None,
     out_dir: Path | None = None,
     connection=None,
 ) -> Path:
-    """Capture a rich JSON snapshot of an agent and return the file path."""
+    """Capture a rich JSON snapshot of the agent's current default version."""
     out_dir = out_dir or _default_out_dir()
     close_after = False
     conn = connection
@@ -136,22 +113,20 @@ def snapshot_agent(
         close_after = True
 
     try:
-        described = _describe_agent(conn, agent_fqn, version=version, alias=alias)
+        described = _describe_agent(conn, agent_fqn)
     finally:
         if close_after:
             conn.close()
 
     payload = {
-        "agent_fqn": agent_fqn,
         "env": env,
         "snapshot_time": datetime.now(timezone.utc).isoformat(),
-        "requested": {"version": version, "alias": alias},
         **described,
     }
 
     subdir = out_dir / _safe_fqn_dir(agent_fqn)
     subdir.mkdir(parents=True, exist_ok=True)
-    label = version or alias or "LIVE"
+    label = described.get("default_version") or "LIVE"
     out_path = subdir / f"{_timestamp()}_{label}.json"
     out_path.write_text(json.dumps(payload, indent=2, default=str))
     logger.info("Wrote snapshot -> %s", out_path)
@@ -163,15 +138,14 @@ def load_snapshot(path: Path | str) -> dict[str, Any]:
 
 
 def diff_snapshots(a: Path | str, b: Path | str) -> str:
-    """Return a unified diff of two snapshot specs (spec_yaml field)."""
+    """Return a unified diff of the two snapshots' spec (JSON pretty)."""
     snap_a = load_snapshot(a)
     snap_b = load_snapshot(b)
-    a_yaml = (snap_a.get("spec_yaml") or "").splitlines()
-    b_yaml = (snap_b.get("spec_yaml") or "").splitlines()
+    a_pretty = json.dumps(snap_a.get("spec") or {}, indent=2, sort_keys=True).splitlines()
+    b_pretty = json.dumps(snap_b.get("spec") or {}, indent=2, sort_keys=True).splitlines()
     return "\n".join(
         difflib.unified_diff(
-            a_yaml,
-            b_yaml,
+            a_pretty, b_pretty,
             fromfile=str(a),
             tofile=str(b),
             lineterm="",
@@ -181,13 +155,11 @@ def diff_snapshots(a: Path | str, b: Path | str) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Snapshot or diff a Cortex Agent.")
-    sub = parser.add_subparsers(dest="cmd")
+    sub = parser.add_subparsers(dest="cmd", required=True)
 
-    cap = sub.add_parser("capture", help="Capture a snapshot (default).")
+    cap = sub.add_parser("capture", help="Capture a snapshot of the current default version.")
     cap.add_argument("--env", required=True)
     cap.add_argument("--agent", required=True, help="Agent FQN.")
-    cap.add_argument("--version", help="Explicit VERSION$N.")
-    cap.add_argument("--alias", help="Alias (validated, production, latest).")
     cap.add_argument("--out-dir", type=Path, default=None)
 
     diff = sub.add_parser("diff", help="Diff two snapshot JSON files.")
@@ -195,13 +167,6 @@ def main(argv: list[str] | None = None) -> int:
     diff.add_argument("b", type=Path)
 
     parser.add_argument("-v", "--verbose", action="count", default=0)
-    # legacy invocation: allow `--env ... --agent ...` at top level
-    parser.add_argument("--env", help=argparse.SUPPRESS)
-    parser.add_argument("--agent", help=argparse.SUPPRESS)
-    parser.add_argument("--version", dest="top_version", help=argparse.SUPPRESS)
-    parser.add_argument("--alias", help=argparse.SUPPRESS)
-    parser.add_argument("--out-dir", dest="top_out_dir", type=Path, help=argparse.SUPPRESS)
-
     args = parser.parse_args(argv)
     setup_logging(args.verbose)
 
@@ -209,18 +174,10 @@ def main(argv: list[str] | None = None) -> int:
         print(diff_snapshots(args.a, args.b))
         return 0
 
-    # Either explicit "capture" subcommand or legacy top-level flags
-    env = getattr(args, "env", None)
-    agent = getattr(args, "agent", None)
-    if env is None or agent is None:
-        parser.error("--env and --agent are required (or use a subcommand).")
-
     snapshot_agent(
-        agent_fqn=agent,
-        env=env,
-        version=args.version if args.cmd == "capture" else args.top_version,
-        alias=args.alias,
-        out_dir=args.out_dir if args.cmd == "capture" else args.top_out_dir,
+        agent_fqn=args.agent,
+        env=args.env,
+        out_dir=args.out_dir,
     )
     return 0
 

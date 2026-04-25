@@ -189,11 +189,22 @@ def load_questions_to_snowflake(cursor, questions: list[dict], target_table: str
 def generate_snowflake_yaml(config: dict, dataset_name: str) -> str:
     agent = config["agent"]
     fq_agent = f'{agent["database"]}.{agent["schema"]}.{agent["name"]}'
-    # Cortex Agent Versioning selector: <fqn>!<version-or-alias>.
-    # version takes precedence over alias; either is optional.
+    # NOTE: EXECUTE_AI_EVALUATION does NOT accept agent_name!<alias> selectors
+    # (verified against Snowflake 10.14.103). Eval always runs against the
+    # default version (= most recent committed). If the caller supplied
+    # --alias or --version, we surface a warning. In practice this is fine
+    # because right after a deploy, the new version IS the default — so
+    # evaluating "validated" is equivalent to evaluating the default until
+    # the next deploy shifts the default forward.
     selector = agent.get("version") or agent.get("alias")
     if selector:
-        fq_agent = f"{fq_agent}!{selector}"
+        import sys as _sys
+        print(
+            f"[WARN] EXECUTE_AI_EVALUATION ignores version/alias selectors; "
+            f"evaluating DEFAULT version on {fq_agent} "
+            f"(requested selector '{selector}' is informational only).",
+            file=_sys.stderr,
+        )
     fq_table = config["dataset"]["snowflake_table"]
     eval_cfg = config.get("evaluation", {})
 
