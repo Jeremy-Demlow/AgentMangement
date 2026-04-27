@@ -336,6 +336,7 @@ def _cmd_log(args) -> int:
 
 def _cmd_promote(args) -> int:
     from agent_management.utils.config import get_all_configured_agents
+    from agent_management.version_log import discover_identity, record_deploy
 
     config = load_env_config(args.env)
     conn = connect(config)
@@ -345,10 +346,39 @@ def _cmd_promote(args) -> int:
             agents = [args.agent if "." in args.agent else get_agent_fqn(config, args.agent)]
         else:
             agents = [get_agent_fqn(config, name) for name in get_all_configured_agents()]
+
+        identity = discover_identity(args.env)
         promoted: dict[str, str] = {}
         for fqn in agents:
-            version = promote_alias(conn, fqn, from_alias=args.from_alias, to_alias=args.to_alias)
+            # Capture previous holder of to_alias before move, for audit.
+            before = get_aliases(conn, fqn)
+            prev_on_to = before.get(args.to_alias.upper())
+            version = promote_alias(
+                conn, fqn, from_alias=args.from_alias, to_alias=args.to_alias
+            )
             promoted[fqn] = version
+            # Append audit row so `versioning log` shows the promotion.
+            try:
+                record_deploy(
+                    conn,
+                    database=config["deployment"]["database"],
+                    schema=config["deployment"]["agents_schema"],
+                    agent_fqn=fqn,
+                    version_name=version,
+                    alias_set=args.to_alias,
+                    identity=identity,
+                    first_deploy=False,
+                    version_before=prev_on_to,
+                    spec_summary=(
+                        f"PROMOTE: {args.from_alias} -> {args.to_alias} "
+                        f"({prev_on_to or '<unset>'} -> {version})"
+                    ),
+                    extra={"event_type": "promote",
+                           "from_alias": args.from_alias,
+                           "to_alias": args.to_alias},
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("promote audit append failed (non-fatal): %s", exc)
         print(json.dumps(promoted, indent=2))
     finally:
         conn.close()
