@@ -72,9 +72,31 @@ def parse_dbt_sv(sql_path: Path) -> dict:
     raw = _strip_comments(sql_path.read_text())
 
     def extract_block(name: str) -> str:
-        # Match "KEYWORD (" up to the matching ")" — allow whitespace/newlines
-        m = re.search(rf"\b{name}\s*\(\s*\n(.*?)\n\s*\)", raw, re.IGNORECASE | re.DOTALL)
-        return m.group(1) if m else ""
+        """Extract a TABLES/DIMENSIONS/FACTS/METRICS block with proper paren
+        balancing.
+
+        The naive ``\\b<NAME>\\s*\\(...\\)`` regex approach breaks on multi-line
+        metric definitions like ``FACT.COL AS DIV0(... , ...)`` because the
+        non-greedy match closes on the first inner ``)``. We scan character by
+        character and count paren depth instead.
+        """
+        pattern = re.compile(rf"\b{name}\s*\(", re.IGNORECASE)
+        m = pattern.search(raw)
+        if not m:
+            return ""
+        start = m.end()  # position just after the opening (
+        depth = 1
+        i = start
+        while i < len(raw) and depth > 0:
+            ch = raw[i]
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    return raw[start:i]
+            i += 1
+        return raw[start:i]
 
     def extract_table_names(block: str) -> set[str]:
         # Tables: "  TABLE_NAME AS {{ ref(...) }}  ..."
