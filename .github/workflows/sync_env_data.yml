@@ -23,9 +23,9 @@ on:
   workflow_dispatch:
     inputs:
       target_envs:
-        description: 'Target environments (comma-separated: dev,qa)'
+        description: 'Target environments (comma-separated: dev)'
         required: true
-        default: 'dev,qa'
+        default: 'dev'
       full_refresh_dbt:
         description: 'Force full dbt refresh after sync'
         required: false
@@ -42,7 +42,7 @@ on:
         description: 'Target environments'
         required: true
         type: string
-        default: 'dev,qa'
+        default: 'dev'
       full_refresh_dbt:
         description: 'Force full dbt refresh'
         required: false
@@ -59,7 +59,7 @@ jobs:
       - name: Parse target environments into matrix
         id: set-matrix
         run: |
-          ENVS="${{ inputs.target_envs || 'dev,qa' }}"
+          ENVS="${{ inputs.target_envs || 'dev' }}"
           JSON=$(echo "$ENVS" | python3 -c "
           import sys, json
           envs = [e.strip() for e in sys.stdin.read().strip().split(',') if e.strip()]
@@ -76,7 +76,7 @@ jobs:
       matrix: ${{ fromJson(needs.build-matrix.outputs.matrix) }}
       fail-fast: false
 
-    environment: ${{ matrix.env == 'dev' && 'DEV' || matrix.env == 'qa' && 'QA' || 'PROD' }}
+    environment: ${{ matrix.env == 'dev' && 'DEV' || 'PROD' }}
 
     env:
       SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}

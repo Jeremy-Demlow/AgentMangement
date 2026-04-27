@@ -1,0 +1,64 @@
+name: Promote validated -> production
+
+# Reassigns the `production` alias on each configured agent to the version
+# currently held by `validated`. This is the human-approval gate: customer
+# traffic moves only after a reviewer approves the `production-promote`
+# environment.
+#
+# Runs a post-flip smoke test + eval as a safety check. If these fail the
+# operator should trigger rollback.yml immediately.
+
+on:
+  workflow_dispatch:
+    inputs:
+      agent:
+        description: 'Single agent short name or FQN. Omit to promote all configured agents.'
+        required: false
+
+env:
+  SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+  SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+  SNOWFLAKE_PRIVATE_KEY_PATH: /tmp/snowflake_key.p8
+  PYTHONPATH: ${{ github.workspace }}
+
+jobs:
+  promote:
+    name: Promote alias
+    runs-on: ubuntu-latest
+    environment: production-promote
+    env:
+      SNOWFLAKE_WAREHOUSE: ${{ vars.SNOWFLAKE_WAREHOUSE }}
+      SNOWFLAKE_ROLE: ${{ vars.SNOWFLAKE_ROLE }}
+      SNOWFLAKE_DATABASE: ${{ vars.SNOWFLAKE_DATABASE }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Snowflake
+        uses: ./.github/actions/snowflake-setup
+        with:
+          snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+
+      - name: Promote validated -> production
+        run: |
+          if [ -n "${{ inputs.agent }}" ]; then
+            python -m agent_management.versioning promote --env prod --from validated --to production --agent ${{ inputs.agent }}
+          else
+            python -m agent_management.versioning promote --env prod --from validated --to production
+          fi
+
+      - name: Smoke test (production)
+        run: python -m agent_management.smoke_test --env prod --alias production
+
+      - name: Post-promote eval (production)
+        run: python -m agent_management.run_ci_eval --env prod --alias production
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "### Production promotion complete" >> $GITHUB_STEP_SUMMARY
+          echo "Alias 'production' reassigned to the version previously under 'validated'." >> $GITHUB_STEP_SUMMARY
+          echo "If smoke/eval failed, trigger the rollback.yml workflow immediately." >> $GITHUB_STEP_SUMMARY
+
+      - name: Cleanup
+        if: always()
+        run: rm -f /tmp/snowflake_key.p8

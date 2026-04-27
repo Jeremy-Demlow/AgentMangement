@@ -1,0 +1,51 @@
+ROLLBACK FLOW — ALIAS REASSIGNMENT (single code path; no fallback)
+===================================================================
+
+  Operator triggers rollback.yml
+       |
+       v
+  +---------------------------------------+
+  |  rollback.py                          |
+  |                                       |
+  |  1. read last snapshot pointer        |   tiny JSON
+  |     for (env, agent, alias)           |
+  |                                       |
+  |  2. target = args.to or                |
+  |     pointer.alias_before[alias]       |   e.g. VERSION$6
+  |                                       |
+  |  3. guards (all raise on fail):       |
+  |     - version_exists(target)          |
+  |     - target != current alias target  |
+  |                                       |
+  |  4. SINGLE STATEMENT:                 |
+  |                                       |
+  |     ALTER AGENT <fqn>                 |
+  |       MODIFY VERSION VERSION$6        |
+  |       SET ALIAS = production;         |
+  |                                       |
+  |  5. smoke test                        |
+  +---------------------------------------+
+       |
+       v
+  AGENT reverted (alias reassigned)
+  VERSION$7 retained for forensic diff
+
+
+ALIAS TRANSITION (example prod)
+--------------------------------
+  before rollback:
+    VERSION$6  alias: (none)
+    VERSION$7  alias: production     <- bad version
+
+  after rollback:
+    VERSION$6  alias: production     <- traffic restored
+    VERSION$7  alias: (none)         <- bad version kept for diff
+
+
+PROPERTIES
+----------
+  * ~100ms (one DDL)
+  * Atomic (single statement)
+  * Reversible (re-point alias back to VERSION$7 if rollback was wrong)
+  * NO FALLBACK. If the SQL errors (API unavailable, version not found,
+    permission), the operator fixes the cause and re-runs.

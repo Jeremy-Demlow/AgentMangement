@@ -20,7 +20,6 @@ on:
         type: choice
         options:
           - DEV
-          - QA
           - PROD
       plan_only:
         description: 'Plan only (no deploy)'

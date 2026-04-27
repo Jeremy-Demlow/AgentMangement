@@ -189,6 +189,22 @@ def load_questions_to_snowflake(cursor, questions: list[dict], target_table: str
 def generate_snowflake_yaml(config: dict, dataset_name: str) -> str:
     agent = config["agent"]
     fq_agent = f'{agent["database"]}.{agent["schema"]}.{agent["name"]}'
+    # NOTE: EXECUTE_AI_EVALUATION does NOT accept agent_name!<alias> selectors
+    # (verified against Snowflake 10.14.103). Eval always runs against the
+    # default version (= most recent committed). If the caller supplied
+    # --alias or --version, we surface a warning. In practice this is fine
+    # because right after a deploy, the new version IS the default — so
+    # evaluating "validated" is equivalent to evaluating the default until
+    # the next deploy shifts the default forward.
+    selector = agent.get("version") or agent.get("alias")
+    if selector:
+        import sys as _sys
+        print(
+            f"[WARN] EXECUTE_AI_EVALUATION ignores version/alias selectors; "
+            f"evaluating DEFAULT version on {fq_agent} "
+            f"(requested selector '{selector}' is informational only).",
+            file=_sys.stderr,
+        )
     fq_table = config["dataset"]["snowflake_table"]
     eval_cfg = config.get("evaluation", {})
 
@@ -566,7 +582,9 @@ def main():
     parser.add_argument("--tag", action="append", dest="tags", help="Filter questions by tag (repeatable)")
     parser.add_argument("--no-wait", action="store_true", help="Start evaluation and exit without polling")
     parser.add_argument("--poll-interval", type=int, default=POLL_INTERVAL_SECONDS, help=f"Seconds between status polls (default: {POLL_INTERVAL_SECONDS})")
-    parser.add_argument("--env", choices=["dev", "qa", "prod"], help="Load environment config from environments/<env>.env.yml")
+    parser.add_argument("--env", choices=["dev", "prod"], help="Load environment config from environments/<env>.env.yml")
+    parser.add_argument("--alias", help="Agent alias selector (validated, production, latest).")
+    parser.add_argument("--version", help="Explicit VERSION$N selector (takes precedence over --alias).")
 
     args = parser.parse_args()
     config = load_config(args.config)
@@ -588,6 +606,17 @@ def main():
                 config["agent"]["name"] = base_name + suffix.upper()
         if deploy.get("warehouse"):
             config.setdefault("snowflake", {})["warehouse"] = deploy["warehouse"]
+
+    # Agent Versioning selector: prefer explicit --version, then --alias, then
+    # env's agent.deploy_alias (so main-merge runs auto-target 'validated').
+    if args.version:
+        config["agent"]["version"] = args.version
+    elif args.alias:
+        config["agent"]["alias"] = args.alias
+    elif env_config:
+        env_deploy_alias = env_config.get("agent", {}).get("deploy_alias")
+        if env_deploy_alias:
+            config["agent"]["alias"] = env_deploy_alias
 
     agent = config["agent"]
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

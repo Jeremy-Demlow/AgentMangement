@@ -1,14 +1,19 @@
-"""Rollback agents and/or semantic views to a previous snapshot.
+"""Rollback a Cortex Agent by reassigning an alias to a prior version.
 
-Reads local snapshot files (JSON for agents, YAML for SVs) and re-deploys
-them using ALTER AGENT or SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML.
+With Cortex Agent Versioning, rollback becomes a single DDL statement::
 
-Usage:
-    python -m agent_management.rollback --env prod --timestamp 20260402_030209
-    python -m agent_management.rollback --env prod --timestamp 20260402_030209 --target agents
-    python -m agent_management.rollback --env prod --timestamp 20260402_030209 --dry-run
+    ALTER AGENT <fqn> MODIFY VERSION <target_version> SET ALIAS = <alias>
 
-Implements REQ-005: Snapshot and Rollback.
+The target version is read from the most recent snapshot pointer (see
+agent_management.snapshot_state). There is no fallback to spec re-apply —
+if the SQL fails, the operator fixes the cause and re-runs.
+
+Usage::
+
+    python -m agent_management.rollback --env prod --agent RESORT_EXECUTIVE --alias production
+    python -m agent_management.rollback --env prod --agent RESORT_EXECUTIVE --alias production --to VERSION$5
+
+Implements REQ-005: Snapshot and Rollback (versioning era).
 """
 from __future__ import annotations
 
@@ -16,174 +21,195 @@ import argparse
 import json
 import logging
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from agent_management import setup_logging
-from agent_management.paths import agents_snapshots_dir, sv_snapshots_dir
-from agent_management.utils.config import get_agents_schema, get_semantic_schema, load_env_config
+from agent_management.paths import project_root
+from agent_management.utils.config import get_agent_fqn, load_env_config
 from agent_management.utils.snowflake_client import connect
+from agent_management.versioning import (
+    get_aliases,
+    set_alias,
+    version_exists,
+)
+from agent_management.version_log import discover_identity, record_deploy
 
 logger = logging.getLogger(__name__)
 
 
-def find_snapshots(base_dir: Path, env: str, timestamp: str, ext: str) -> list[Path]:
-    snap_dir = base_dir / env
-    if not snap_dir.exists():
-        return []
-    return sorted(snap_dir.glob(f"*_{timestamp}.{ext}"))
+@dataclass
+class RollbackResult:
+    agent_fqn: str
+    env: str
+    alias: str
+    target_version: str
+    previous_version: str | None
+    snapshot_path: Path | None
 
 
-def rollback_agents(cur, config: dict, timestamp: str, dry_run: bool) -> tuple[int, int]:
-    files = find_snapshots(agents_snapshots_dir(), config["environment"], timestamp, "json")
-    if not files:
-        logger.info("  No agent snapshots found for this timestamp")
-        return 0, 0
+def _snapshot_dir(env: str, agent_fqn: str) -> Path:
+    safe = agent_fqn.replace(".", "_")
+    return project_root() / ".snowflake" / "ci" / "snapshots" / env / safe
 
-    success = 0
-    failed = 0
-    for path in files:
-        snapshot = json.loads(path.read_text())
-        agent_name = snapshot["name"]
-        fqn = snapshot["fqn"]
-        spec_raw = snapshot.get("agent_spec")
 
-        if not spec_raw:
-            logger.info("  %s — SKIPPED (no agent_spec in snapshot)", agent_name)
-            continue
+def _latest_snapshot(env: str, agent_fqn: str) -> Path | None:
+    """Return the most recent snapshot pointer file for (env, agent)."""
+    d = _snapshot_dir(env, agent_fqn)
+    if not d.exists():
+        return None
+    files = sorted(d.glob("*.json"))
+    return files[-1] if files else None
 
-        try:
-            spec_json = spec_raw if isinstance(spec_raw, str) else json.dumps(spec_raw)
-        except Exception:
-            spec_json = str(spec_raw)
 
-        if "$$" in spec_json:
-            logger.info("  %s — SKIPPED (spec contains $$)", agent_name)
-            continue
+def _resolve_target_from_snapshot(
+    snapshot_path: Path,
+    *,
+    alias: str,
+) -> str:
+    payload = json.loads(snapshot_path.read_text())
+    alias_before = payload.get("alias_before") or {}
+    target = alias_before.get(alias)
+    if not target:
+        target = payload.get("version_before")
+    if not target:
+        raise RuntimeError(
+            f"Snapshot {snapshot_path} has no version_before or "
+            f"alias_before[{alias!r}]; cannot determine rollback target."
+        )
+    return str(target)
 
-        sql = (
-            f"ALTER AGENT {fqn}\n"
-            f"MODIFY LIVE VERSION SET SPECIFICATION =\n"
-            f"$$\n{spec_json}\n$$"
+
+def rollback_agent(
+    agent_fqn: str,
+    *,
+    env: str,
+    alias: str,
+    target_version: str | None = None,
+    snapshot_path: Path | None = None,
+    connection=None,
+) -> RollbackResult:
+    """Roll back the given alias to a prior version on the agent.
+
+    Args:
+        agent_fqn: Agent FQN.
+        env: Environment name (dev/prod).
+        alias: Alias to move (e.g. ``production``).
+        target_version: Explicit ``VERSION$N`` to reassign to. If omitted the
+            library reads the most recent snapshot pointer and uses
+            ``alias_before[alias]``.
+        snapshot_path: Explicit snapshot file; defaults to the latest for
+            (env, agent).
+        connection: Optional pre-opened Snowflake connection (tests).
+
+    Raises:
+        RuntimeError when target_version cannot be resolved or does not exist,
+        or when the alias is already at target (no-op guard).
+    """
+    config = load_env_config(env)
+    close_after = False
+    conn = connection
+    if conn is None:
+        conn = connect(config, schema=config["deployment"]["agents_schema"])
+        close_after = True
+
+    try:
+        snap_path = snapshot_path
+        if target_version is None:
+            snap_path = snap_path or _latest_snapshot(env, agent_fqn)
+            if snap_path is None:
+                raise RuntimeError(
+                    f"No snapshot pointer found for {env}/{agent_fqn}; "
+                    "pass --to VERSION$N explicitly."
+                )
+            target_version = _resolve_target_from_snapshot(snap_path, alias=alias)
+
+        if not version_exists(conn, agent_fqn, target_version):
+            raise RuntimeError(
+                f"Version {target_version} not found on {agent_fqn}; cannot rollback."
+            )
+
+        current = get_aliases(conn, agent_fqn)
+        # Snowflake stores aliases uppercase; normalize lookup.
+        previous_version = current.get(alias.upper())
+        if previous_version and previous_version.upper() == target_version.upper():
+            raise RuntimeError(
+                f"Alias {alias!r} is already at {target_version}; nothing to do."
+            )
+
+        set_alias(conn, agent_fqn, target_version, alias)
+        logger.info(
+            "rollback OK: %s alias=%s %s -> %s",
+            agent_fqn, alias, previous_version or "<unset>", target_version,
         )
 
-        if dry_run:
-            logger.info("  [DRY RUN] %s — would ALTER from %s", agent_name, path.name)
-            success += 1
-        else:
-            logger.info("  %s...", agent_name)
-            try:
-                cur.execute(sql)
-                logger.info("  %s... OK", agent_name)
-                success += 1
-            except Exception as e:
-                logger.error("  %s... FAILED — %s", agent_name, e)
-                failed += 1
+        # Best-effort audit log append so the rollback is visible in
+        # `agent_management.versioning log`.
+        try:
+            identity = discover_identity(env)
+            record_deploy(
+                conn,
+                database=config["deployment"]["database"],
+                schema=config["deployment"]["agents_schema"],
+                agent_fqn=agent_fqn,
+                version_name=target_version,
+                alias_set=alias,
+                identity=identity,
+                first_deploy=False,
+                version_before=previous_version,
+                spec_summary=f"ROLLBACK: {alias} -> {target_version}",
+                extra={"event_type": "rollback"},
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("rollback audit append failed (non-fatal): %s", exc)
 
-    return success, failed
-
-
-def rollback_semantic_views(cur, config: dict, timestamp: str, dry_run: bool) -> tuple[int, int]:
-    files = find_snapshots(sv_snapshots_dir(), config["environment"], timestamp, "yaml")
-    if not files:
-        logger.info("  No SV snapshots found for this timestamp")
-        return 0, 0
-
-    schema_fqn = get_semantic_schema(config)
-    success = 0
-    failed = 0
-    for path in files:
-        sv_name = path.stem.rsplit("_", 2)[0]
-        yaml_content = path.read_text()
-
-        if "$$" in yaml_content:
-            logger.info("  %s — SKIPPED (YAML contains $$)", sv_name)
-            continue
-
-        if dry_run:
-            logger.info("  [DRY RUN] %s — would restore from %s", sv_name, path.name)
-            success += 1
-        else:
-            logger.info("  %s...", sv_name)
-            try:
-                cur.execute(
-                    f"CALL SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML('{schema_fqn}', $${yaml_content}$$, FALSE)"
-                )
-                logger.info("  %s... OK", sv_name)
-                success += 1
-            except Exception as e:
-                logger.error("  %s... FAILED — %s", sv_name, e)
-                failed += 1
-
-    return success, failed
+        return RollbackResult(
+            agent_fqn=agent_fqn,
+            env=env,
+            alias=alias,
+            target_version=target_version,
+            previous_version=previous_version,
+            snapshot_path=snap_path,
+        )
+    finally:
+        if close_after:
+            conn.close()
 
 
-def list_available_timestamps(env: str) -> list[str]:
-    timestamps = set()
-    for base_dir in (agents_snapshots_dir(), sv_snapshots_dir()):
-        snap_dir = base_dir / env
-        if snap_dir.exists():
-            for f in snap_dir.iterdir():
-                parts = f.stem.rsplit("_", 2)
-                if len(parts) >= 3:
-                    timestamps.add(f"{parts[-2]}_{parts[-1]}")
-    return sorted(timestamps, reverse=True)
+def _resolve_fqn(config: dict, agent_arg: str) -> str:
+    if "." in agent_arg:
+        return agent_arg
+    return get_agent_fqn(config, agent_arg)
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Rollback to a previous snapshot")
-    parser.add_argument("--env", "-e", help="Environment (dev, qa, prod)")
-    parser.add_argument("--timestamp", "-ts", help="Snapshot timestamp (YYYYMMDD_HHMMSS)")
-    parser.add_argument("--target", "-t", choices=["agents", "semantic-views", "all"], default="all")
-    parser.add_argument("--dry-run", "-n", action="store_true", help="Show what would be restored")
-    parser.add_argument("--list", action="store_true", help="List available snapshots")
-    args = parser.parse_args()
-
-    setup_logging(1)
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Rollback a Cortex Agent via alias reassignment.")
+    parser.add_argument("--env", required=True, choices=["dev", "prod"])
+    parser.add_argument("--agent", required=True, help="Agent FQN or short name (resort_executive).")
+    parser.add_argument("--alias", required=True, help="Alias to move back (validated, production, latest).")
+    parser.add_argument("--to", dest="target_version", help="Explicit VERSION$N target.")
+    parser.add_argument("--snapshot", type=Path, help="Explicit snapshot pointer file.")
+    parser.add_argument("-v", "--verbose", action="count", default=1)
+    args = parser.parse_args(argv)
+    setup_logging(args.verbose)
 
     config = load_env_config(args.env)
+    fqn = _resolve_fqn(config, args.agent)
+    try:
+        result = rollback_agent(
+            agent_fqn=fqn,
+            env=args.env,
+            alias=args.alias,
+            target_version=args.target_version,
+            snapshot_path=args.snapshot,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.error("rollback FAILED: %s", exc)
+        return 1
 
-    if args.list:
-        ts_list = list_available_timestamps(config["environment"])
-        logger.info("Available snapshots for %s:", config['environment'])
-        for ts in ts_list:
-            logger.info("  %s", ts)
-        sys.exit(0)
-
-    if not args.timestamp:
-        logger.error("ERROR: --timestamp is required (use --list to see available)")
-        sys.exit(1)
-
-    logger.info("Environment: %s", config['environment'])
-    logger.info("Timestamp: %s", args.timestamp)
-    logger.info("Target: %s", args.target)
-    logger.info("Mode: %s", 'DRY RUN' if args.dry_run else 'LIVE')
-    logger.info("=" * 60)
-
-    conn = connect(config)
-    cur = conn.cursor()
-
-    total_success = 0
-    total_failed = 0
-
-    if args.target in ("agents", "all"):
-        logger.info("\nAgents:")
-        s, f = rollback_agents(cur, config, args.timestamp, args.dry_run)
-        total_success += s
-        total_failed += f
-
-    if args.target in ("semantic-views", "all"):
-        logger.info("\nSemantic Views:")
-        s, f = rollback_semantic_views(cur, config, args.timestamp, args.dry_run)
-        total_success += s
-        total_failed += f
-
-    logger.info("\n%s", "=" * 60)
-    logger.info("Restored: %d  Failed: %d  Environment: %s", total_success, total_failed, config['environment'])
-
-    cur.close()
-    conn.close()
-    sys.exit(1 if total_failed > 0 else 0)
+    print(json.dumps(result.__dict__, default=str, indent=2))
+    return 0
 
 
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__":  # pragma: no cover
+    sys.exit(main())

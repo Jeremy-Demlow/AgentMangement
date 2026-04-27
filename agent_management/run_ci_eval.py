@@ -99,6 +99,12 @@ def build_cmd(rendered_config_path: Path, args) -> list[str]:
         cmd.append("--no-wait")
     if args.poll_interval != 30:
         cmd.extend(["--poll-interval", str(args.poll_interval)])
+    # Versioning selectors (informational — EXECUTE_AI_EVALUATION evaluates
+    # the default version regardless; run_eval.py prints a warning).
+    if getattr(args, "alias", None):
+        cmd.extend(["--alias", args.alias])
+    if getattr(args, "version", None):
+        cmd.extend(["--version", args.version])
 
     return cmd
 
@@ -126,6 +132,8 @@ def main():
     parser.add_argument("--no-wait", action="store_true", help="Start eval and exit without waiting")
     parser.add_argument("--poll-interval", type=int, default=30, help="Seconds between polls")
     parser.add_argument("--max-parallel", type=int, default=10, help="Max concurrent agent evaluations (default: 10)")
+    parser.add_argument("--alias", help="Informational alias selector; EXECUTE_AI_EVALUATION uses default version regardless.")
+    parser.add_argument("--version", help="Informational VERSION$N selector; same caveat as --alias.")
     args = parser.parse_args()
 
     setup_logging(1)
