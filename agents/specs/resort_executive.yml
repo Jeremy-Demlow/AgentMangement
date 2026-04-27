@@ -1,6 +1,6 @@
 metadata:
   name: resort_executive
-  version: "1.2.0"
+  version: "1.2.1"
   owner: executive_team
   status: active
 
@@ -23,6 +23,7 @@ sample_questions:
   - How effective is our marketing spend?
   - What is our current NPS score and satisfaction trend?
   - How is ski school revenue performing?
+  - Show me YoY revenue growth by ticket category for the current season
 
 # ============================================================================
 # TOOLS — standardized format:
