@@ -1,27 +1,35 @@
-"""Detect drift between dbt semantic view sources and what's deployed.
+"""Detect drift between semantic view source-of-truth and what's deployed.
 
-Minimal version: verifies each dbt sem_*.sql model has a corresponding
-deployed semantic view in the target environment, and compares high-level
-table/metric/dimension counts between compiled dbt output and live SV.
+Supports two source-of-truth shapes, auto-detected per env:
 
-A full byte-level structural diff would require deploying the dbt-compiled
-SV to a scratch schema (which needs CREATE SCHEMA privileges we don't have
-in the CI deploy role). Instead we compare structure counts and the set of
-table/metric/dimension names, which is enough to catch the common drift
-cases:
-  - dbt model deployed in one env but not another
-  - dbt model has a new table/metric/dimension that isn't live
-  - live SV has a table/metric/dimension not in the dbt model
+  1. dbt:   ``dbt_ski_resort/models/marts/semantic/sem_*.sql``
+            parsed via structural regex (TABLES/DIMENSIONS/FACTS/METRICS blocks).
+  2. yaml:  ``semantic-views/definitions/sem_*.yaml``
+            Jinja-rendered against env config, then parsed as Snowflake SV YAML.
 
-Usage:
+The source is picked per env by the ``semantic_views.source`` field in
+``environments/<env>.env.yml``. If not set, the library falls back to the
+top-level ``project.yml`` default. Both modes compare the same structural
+signature (sets of table names, dimension aliases, fact aliases, metric
+names) against the deployed SV YAML returned by
+``SYSTEM$READ_YAML_FROM_SEMANTIC_VIEW``.
+
+When a consumer repo ships *without* a dbt project and only ships YAML SV
+definitions, this check still runs end to end. When a repo ships dbt
+models, we parse those instead. When neither exists for a given SV name we
+log a skipped warning but don't report drift.
+
+Usage::
+
     python -m agent_management.detect_sv_drift --env dev
     python -m agent_management.detect_sv_drift --env prod --view sem_safety_incidents
-    python -m agent_management.detect_sv_drift --env qa --fail-on-drift
+    python -m agent_management.detect_sv_drift --env dev --source yaml --fail-on-drift
+    python -m agent_management.detect_sv_drift --env dev --fail-on-drift
 
 Exit codes:
     0 = no drift (or --fail-on-drift not set)
     1 = drift detected and --fail-on-drift set
-    2 = error running dbt or reading live SV
+    2 = error running parser or reading live SV
 """
 from __future__ import annotations
 
@@ -34,12 +42,22 @@ from pathlib import Path
 import yaml as pyyaml
 
 from agent_management import setup_logging
-from agent_management.utils.config import get_database, load_env_config
+from agent_management.paths import (
+    project_root,
+    sv_definitions_dir,
+)
+from agent_management.render_template import render_file
+from agent_management.utils.config import (
+    get_database,
+    get_sv_source,
+    load_env_config,
+    load_project_config,
+)
 from agent_management.utils.snowflake_client import connect
 
 logger = logging.getLogger(__name__)
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = project_root()
 DBT_DIR = REPO_ROOT / "dbt_ski_resort"
 SV_MODEL_DIR = DBT_DIR / "models" / "marts" / "semantic"
 
@@ -187,62 +205,153 @@ def parse_live_sv(yaml_text: str) -> dict:
     }
 
 
+def _render_yaml_source(yaml_path: Path, config: dict) -> str:
+    """Render a Jinja-templated SV YAML against the env config."""
+    return render_file(str(yaml_path), config)
+
+
+def parse_source_yaml(yaml_path: Path, config: dict) -> dict[str, set[str]]:
+    """Parse a local YAML SV definition (same shape as the live SV YAML)."""
+    rendered = _render_yaml_source(yaml_path, config)
+    return parse_live_sv(rendered)
+
+
+def _find_source(sv_name: str, *, source: str) -> tuple[str, Path] | tuple[None, None]:
+    """Locate the source-of-truth file for sv_name.
+
+    Returns (kind, path) where kind is 'dbt' or 'yaml'. Returns (None, None)
+    if neither source file exists.
+    """
+    dbt_path = SV_MODEL_DIR / f"{sv_name}.sql"
+    yaml_path = sv_definitions_dir() / f"{sv_name}.yaml"
+    alt_yaml_path = sv_definitions_dir() / f"{sv_name}.yml"
+
+    # Honor the user's preference when present, fall back if missing.
+    if source == "dbt" and dbt_path.exists():
+        return ("dbt", dbt_path)
+    if source == "yaml":
+        if yaml_path.exists():
+            return ("yaml", yaml_path)
+        if alt_yaml_path.exists():
+            return ("yaml", alt_yaml_path)
+
+    # auto / fallback: prefer dbt, fall back to yaml
+    if dbt_path.exists():
+        return ("dbt", dbt_path)
+    if yaml_path.exists():
+        return ("yaml", yaml_path)
+    if alt_yaml_path.exists():
+        return ("yaml", alt_yaml_path)
+    return (None, None)
+
+
 # ---------- Drift check ----------
 
-def diff_sets(expected: set[str], actual: set[str], kind: str) -> list[str]:
+def diff_sets(expected: set[str], actual: set[str], kind: str, *, source_label: str) -> list[str]:
     msgs = []
     missing = expected - actual
     extra = actual - expected
     for m in sorted(missing):
-        msgs.append(f"  MISSING from live {kind}: {m} (in dbt but not deployed)")
+        msgs.append(f"  MISSING from live {kind}: {m} (in {source_label} but not deployed)")
     for e in sorted(extra):
-        msgs.append(f"  EXTRA in live {kind}: {e} (deployed but not in dbt)")
+        msgs.append(f"  EXTRA in live {kind}: {e} (deployed but not in {source_label})")
     return msgs
 
 
-def check_sv(cur, env: str, sv_name: str, database: str, semantic_schema: str) -> bool:
-    """Return True if drift detected."""
-    sql_path = SV_MODEL_DIR / f"{sv_name}.sql"
-    if not sql_path.exists():
-        logger.warning("  No dbt model for %s (skipping)", sv_name)
+def check_sv(
+    cur,
+    env: str,
+    sv_name: str,
+    database: str,
+    semantic_schema: str,
+    *,
+    source: str = "auto",
+    config: dict | None = None,
+) -> bool:
+    """Return True if drift detected.
+
+    ``source`` = 'dbt', 'yaml', or 'auto' (picks whichever file exists; prefers
+    dbt when both do). Repos without a dbt project simply ship YAML files in
+    ``semantic-views/definitions/`` and this check works identically.
+    """
+    kind, path = _find_source(sv_name, source=source)
+    if kind is None:
+        logger.warning(
+            "  No source of truth for %s (neither dbt model in %s nor YAML in %s) -- skipping",
+            sv_name, SV_MODEL_DIR, sv_definitions_dir(),
+        )
         return False
 
-    dbt_struct = parse_dbt_sv(sql_path)
+    if kind == "dbt":
+        source_struct = parse_dbt_sv(path)
+    else:
+        if config is None:
+            raise ValueError("parse_source_yaml requires env config for Jinja rendering")
+        source_struct = parse_source_yaml(path, config)
 
     live_yaml = read_deployed_sv_yaml(cur, database, semantic_schema, sv_name)
     if live_yaml is None:
-        logger.error("  DRIFT: %s has dbt model but no live SV in %s", sv_name, env)
+        logger.error(
+            "  DRIFT: %s has %s source (%s) but no live SV in %s",
+            sv_name, kind, path.name, env,
+        )
         return True
 
     live_struct = parse_live_sv(live_yaml)
 
     drift_msgs: list[str] = []
-    for kind in ("tables", "dimensions", "facts", "metrics"):
-        drift_msgs.extend(diff_sets(dbt_struct[kind], live_struct[kind], kind))
+    for facet in ("tables", "dimensions", "facts", "metrics"):
+        drift_msgs.extend(
+            diff_sets(source_struct[facet], live_struct[facet], facet, source_label=kind)
+        )
 
     if drift_msgs:
-        logger.error("[%s] %s DRIFT:", env, sv_name)
+        logger.error("[%s] %s DRIFT (source=%s):", env, sv_name, kind)
         for m in drift_msgs:
             logger.error(m)
         return True
 
-    logger.info("[%s] %s OK (tables=%d dims=%d facts=%d metrics=%d)",
-                env, sv_name,
-                len(dbt_struct["tables"]),
-                len(dbt_struct["dimensions"]),
-                len(dbt_struct["facts"]),
-                len(dbt_struct["metrics"]))
+    logger.info(
+        "[%s] %s OK (source=%s tables=%d dims=%d facts=%d metrics=%d)",
+        env, sv_name, kind,
+        len(source_struct["tables"]),
+        len(source_struct["dimensions"]),
+        len(source_struct["facts"]),
+        len(source_struct["metrics"]),
+    )
     return False
 
 
-def list_sv_models() -> list[str]:
-    return sorted(p.stem for p in SV_MODEL_DIR.glob("sem_*.sql"))
+def list_sv_models(*, source: str = "auto") -> list[str]:
+    """Return the SV names the library should check, union of dbt + yaml sources.
+
+    For ``source='dbt'`` or ``source='yaml'`` we return the respective set.
+    For ``source='auto'`` we union the names found in both locations so that a
+    repo with partial coverage (some SVs in dbt, some as YAML) still exercises
+    every SV.
+    """
+    names: set[str] = set()
+    if source in ("dbt", "auto"):
+        if SV_MODEL_DIR.exists():
+            names.update(p.stem for p in SV_MODEL_DIR.glob("sem_*.sql"))
+    if source in ("yaml", "auto"):
+        yaml_dir = sv_definitions_dir()
+        if yaml_dir.exists():
+            names.update(p.stem for p in yaml_dir.glob("sem_*.yaml"))
+            names.update(p.stem for p in yaml_dir.glob("sem_*.yml"))
+    return sorted(names)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Detect drift between deployed SV and dbt source of truth")
-    parser.add_argument("--env", "-e", required=True, help="Environment (dev, qa, prod)")
+    parser = argparse.ArgumentParser(
+        description="Detect drift between deployed SV and source-of-truth (dbt model or YAML definition).",
+    )
+    parser.add_argument("--env", "-e", required=True, help="Environment (dev, prod)")
     parser.add_argument("--view", "-v", help="Check single SV (e.g. sem_safety_incidents)")
+    parser.add_argument(
+        "--source", choices=["auto", "dbt", "yaml"],
+        help="Which source-of-truth format. Default: read semantic_views.source from env config; 'auto' if unset.",
+    )
     parser.add_argument("--fail-on-drift", action="store_true", help="Exit non-zero if any drift found")
     args = parser.parse_args()
 
@@ -252,13 +361,32 @@ def main():
     database = get_database(config)
     semantic_schema = config["deployment"].get("semantic_schema", "SEMANTIC")
 
-    logger.info("Environment: %s  Database: %s  Schema: %s", args.env, database, semantic_schema)
+    # Precedence: --source flag > env config semantic_views.source > 'auto'
+    if args.source:
+        source = args.source
+    else:
+        try:
+            source = get_sv_source(config)
+        except Exception:
+            source = "auto"
+        if source not in ("dbt", "yaml"):
+            source = "auto"
+
+    logger.info(
+        "Environment: %s  Database: %s  Schema: %s  Source-of-truth: %s",
+        args.env, database, semantic_schema, source,
+    )
     logger.info("=" * 60)
 
     if args.view:
         svs = [args.view.lower()]
     else:
-        svs = list_sv_models()
+        svs = list_sv_models(source=source)
+    if not svs:
+        logger.warning(
+            "No SVs found. Checked dbt dir (%s) and yaml dir (%s).",
+            SV_MODEL_DIR, sv_definitions_dir(),
+        )
     logger.info("SVs to check: %d", len(svs))
 
     conn = connect(config)
@@ -266,7 +394,10 @@ def main():
     any_drift = False
     try:
         for sv_name in svs:
-            drifted = check_sv(cur, args.env, sv_name, database, semantic_schema)
+            drifted = check_sv(
+                cur, args.env, sv_name, database, semantic_schema,
+                source=source, config=config,
+            )
             any_drift = any_drift or drifted
 
         logger.info("\n%s", "=" * 60)

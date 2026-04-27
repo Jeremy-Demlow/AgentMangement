@@ -13,19 +13,27 @@ This project deploys semantic views and agents to two Snowflake environments
 | Verified queries | `semantic-views/verified_queries/*.yaml` | `agent_management.sync_vqrs_to_dbt` (merged into dbt SV model) |
 | Evaluation datasets | `agent-evaluation/datasets/*.yaml` | Rendered into Snowflake by `agent-evaluation/scripts/run_eval.py` |
 
-### Semantic views: dbt is the only source
+### Semantic views: either source works
 
-`environments/{dev,prod}.env.yml` both set `semantic_views.source: dbt`.
+`environments/{dev,prod}.env.yml` set `semantic_views.source: dbt` here,
+but the library supports both shapes and auto-detects when the flag is
+absent:
 
-- SVs are created/updated exclusively by running the dbt `semantic_view`
-  materialization for the target environment.
-- The YAML files in `semantic-views/definitions/` are a **shadow copy** used
-  by `validate_specs`, `detect_sv_drift`, and the template rendering tests.
-  They do NOT deploy and can drift from the dbt model. The `detect_sv_drift`
-  job in the PR gate surfaces any drift.
-- **Never call `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML` by hand** against a
-  deployed environment. It creates silent divergence between dbt and the
-  deployed SV.
+| Config | Source of truth | Files |
+|--------|----------------|-------|
+| `semantic_views.source: dbt` | dbt SQL models | `dbt_ski_resort/models/marts/semantic/sem_*.sql` |
+| `semantic_views.source: yaml` | Jinja-templated YAML | `semantic-views/definitions/sem_*.yaml` |
+
+Repos that don't use dbt can remove `dbt_ski_resort/` entirely and ship
+YAML SV definitions; `deploy_semantic_views` and `detect_sv_drift` both
+work without any code change. Repos that use dbt can delete the YAML
+shadow copies if they want a single source.
+
+- `deploy_semantic_views.py` picks its deploy path from `semantic_views.source`.
+- `detect_sv_drift.py` honors the same field, or the `--source {dbt,yaml,auto}`
+  CLI flag. In `auto` mode it prefers dbt when both are present.
+- The drift check never calls `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML` by
+  hand — the deploy workflow owns that. Drift comparison is parse-only.
 
 ### Agents: versioning is the only source
 
