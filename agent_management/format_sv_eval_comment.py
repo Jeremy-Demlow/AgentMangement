@@ -29,9 +29,22 @@ def _row_status(entry: dict) -> str:
 
 def render_markdown(data: dict) -> str:
     env = data.get("environment", "?").upper()
-    threshold = data.get("threshold", 0.0)
+    threshold = data.get("threshold") or 0.80
     views = data.get("views", {})
     all_passed = data.get("all_passed", False)
+
+    # If the query returned nothing (empty views), make that explicit instead
+    # of misleading readers with a "0% / 0 views" table.
+    if not views:
+        return (
+            f"### Semantic View Evaluation Summary ({env}) — NO DATA\n\n"
+            f"Threshold: **{threshold * 100:.0f}%** sql_correctness\n\n"
+            f"_No SV eval results were returned for this run. This usually "
+            f"means the run-name lookup missed the just-completed run "
+            f"(observability log indexing lag) or the eval step itself "
+            f"failed. Check the `Run SV evaluations` and `Collect SV eval "
+            f"scores` step logs for details._\n"
+        )
 
     lines: list[str] = []
     header_icon = "PASSED" if all_passed else "ATTENTION"
