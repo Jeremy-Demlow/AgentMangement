@@ -261,14 +261,21 @@ jobs:
       - name: Run SV evaluations
         id: sv_eval
         continue-on-error: true
-        run: python -m agent_management.run_sv_eval --env dev --run-name "PR-${{ github.event.pull_request.number }}-${{ github.run_id }}"
+        env:
+          SV_RUN_NAME: "PR-${{ github.event.pull_request.number }}-${{ github.run_id }}"
+        run: python -m agent_management.run_sv_eval --env dev --run-name "$SV_RUN_NAME"
 
       - name: Collect SV eval scores (JSON)
         if: always()
         continue-on-error: true
+        env:
+          SV_RUN_NAME: "PR-${{ github.event.pull_request.number }}-${{ github.run_id }}"
         run: |
           mkdir -p agent-evaluation/results
-          python -m agent_management.get_sv_eval_scores --env dev --json > agent-evaluation/results/sv_eval_scores.json || echo '{"environment":"dev","views":{},"all_passed":false}' > agent-evaluation/results/sv_eval_scores.json
+          # Pass the same run-name so get_sv_eval_scores queries the exact rows
+          # run_sv_eval just wrote, instead of relying on find_latest_run (which
+          # depends on observability log indexing and often misses fresh runs).
+          python -m agent_management.get_sv_eval_scores --env dev --run-name "$SV_RUN_NAME" --json > agent-evaluation/results/sv_eval_scores.json || echo '{"environment":"dev","threshold":0.80,"views":{},"all_passed":false}' > agent-evaluation/results/sv_eval_scores.json
 
       - name: Format SV eval PR comment
         if: always()

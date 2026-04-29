@@ -423,7 +423,10 @@ jobs:
   sync-environments:
     name: Sync data to DEV
     needs: data-refresh
-    if: inputs.sync_to_envs != '' && inputs.sync_to_envs != 'none'
+    # Scheduled runs have no `inputs.*` (inputs only populated on workflow_dispatch),
+    # so defaulting via `inputs.sync_to_envs || 'dev'` produces empty on cron. We
+    # explicitly allow schedule OR any dispatch that didn't opt out with 'none'.
+    if: github.event_name == 'schedule' || (inputs.sync_to_envs != '' && inputs.sync_to_envs != 'none')
     uses: ./.github/workflows/sync_env_data.yml
     with:
       target_envs: ${{ inputs.sync_to_envs || 'dev' }}
