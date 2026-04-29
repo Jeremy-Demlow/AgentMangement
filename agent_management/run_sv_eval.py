@@ -162,12 +162,13 @@ def get_eval_results(cur, database: str, schema: str, sv_name: str, run_name: st
 
 def compute_score(results: list[dict]) -> dict:
     if not results:
-        return {"total": 0, "scored": 0, "sum_score": 0.0, "score": 0.0, "errors": 0}
+        return {"total": 0, "scored": 0, "sum_score": 0.0, "score": 0.0, "errors": 0, "flake_errors": 0}
 
     total = len(results)
     sum_score = 0.0
     scored = 0
     errors = 0
+    flake_errors = 0
 
     for r in results:
         agg = r.get("EVAL_AGG_SCORE")
@@ -176,6 +177,11 @@ def compute_score(results: list[dict]) -> dict:
             scored += 1
         else:
             errors += 1
+            err_text = (r.get("ERROR") or "").lower()
+            # Known Cortex Analyst platform flake: "Invocation failed" on
+            # individual VQR submission. Retryable.
+            if "invocation failed" in err_text:
+                flake_errors += 1
 
     return {
         "total": total,
@@ -183,7 +189,19 @@ def compute_score(results: list[dict]) -> dict:
         "sum_score": round(sum_score, 4),
         "score": round(sum_score / scored, 4) if scored > 0 else 0.0,
         "errors": errors,
+        "flake_errors": flake_errors,
     }
+
+
+def _is_retryable(metrics: dict) -> bool:
+    """True if the only failures are platform flakes ('Invocation failed').
+
+    We only retry when every non-scored row is a known flake — never retry
+    real metric failures (those are signal).
+    """
+    errors = metrics.get("errors", 0) or 0
+    flake = metrics.get("flake_errors", 0) or 0
+    return errors > 0 and flake == errors
 
 
 def start_sv_eval(
@@ -229,10 +247,34 @@ def poll_and_collect(
             if status in ("COMPLETED", "SUCCEEDED"):
                 logger.info("  [%s] Completed after %d poll(s)", sv_name, attempt)
                 results = get_eval_results(cur, database, schema, sv_name, run_name)
-                return compute_score(results)
+                metrics = compute_score(results)
+                # Auto-retry ONCE on pure platform flake (all errors are
+                # "Invocation failed"). Never retry real metric failures.
+                if _is_retryable(metrics):
+                    logger.warning(
+                        "  [%s] %d VQR(s) hit platform flake ('Invocation failed'); retrying once",
+                        sv_name, metrics["flake_errors"],
+                    )
+                    retry_run_name = f"{run_name}-r1"
+                    try:
+                        start_eval(cur, retry_run_name, stage, filename)
+                        for r_attempt in range(1, MAX_POLL_ATTEMPTS + 1):
+                            time.sleep(POLL_INTERVAL_SECONDS)
+                            r_status = check_status(cur, retry_run_name, stage, filename)
+                            if r_status in ("COMPLETED", "SUCCEEDED"):
+                                r_results = get_eval_results(cur, database, schema, sv_name, retry_run_name)
+                                r_metrics = compute_score(r_results)
+                                logger.info("  [%s] Retry succeeded: %d/%d scored", sv_name, r_metrics["scored"], r_metrics["total"])
+                                return r_metrics
+                            if r_status in ("FAILED", "ERROR", "CANCELLED"):
+                                logger.warning("  [%s] Retry terminal: %s (keeping original metrics)", sv_name, r_status)
+                                break
+                    except Exception as exc:
+                        logger.warning("  [%s] Retry attempt raised (keeping original): %s", sv_name, exc)
+                return metrics
             elif status in ("FAILED", "ERROR", "CANCELLED"):
                 logger.error("  [%s] Eval %s after %d poll(s)", sv_name, status, attempt)
-                return {"total": 0, "scored": 0, "score": 0.0, "errors": 0, "error": status}
+                return {"total": 0, "scored": 0, "score": 0.0, "errors": 0, "flake_errors": 0, "error": status}
 
             logger.info("    [%s] Poll %d/%d: %s", sv_name, attempt, MAX_POLL_ATTEMPTS, status)
 
@@ -282,10 +324,32 @@ def run_eval_for_sv(
         if status in ("COMPLETED", "SUCCEEDED"):
             logger.info("  Completed after %d poll(s)", attempt)
             results = get_eval_results(cur, database, schema, sv_name, run_name)
-            return compute_score(results)
+            metrics = compute_score(results)
+            if _is_retryable(metrics):
+                logger.warning(
+                    "  %d VQR(s) hit platform flake ('Invocation failed'); retrying once",
+                    metrics["flake_errors"],
+                )
+                retry_run_name = f"{run_name}-r1"
+                try:
+                    start_eval(cur, retry_run_name, stage, filename)
+                    for r_attempt in range(1, MAX_POLL_ATTEMPTS + 1):
+                        time.sleep(POLL_INTERVAL_SECONDS)
+                        r_status = check_status(cur, retry_run_name, stage, filename)
+                        if r_status in ("COMPLETED", "SUCCEEDED"):
+                            r_results = get_eval_results(cur, database, schema, sv_name, retry_run_name)
+                            r_metrics = compute_score(r_results)
+                            logger.info("  Retry succeeded: %d/%d scored", r_metrics["scored"], r_metrics["total"])
+                            return r_metrics
+                        if r_status in ("FAILED", "ERROR", "CANCELLED"):
+                            logger.warning("  Retry terminal: %s (keeping original metrics)", r_status)
+                            break
+                except Exception as exc:
+                    logger.warning("  Retry attempt raised (keeping original): %s", exc)
+            return metrics
         elif status in ("FAILED", "ERROR", "CANCELLED"):
             logger.error("  Eval %s after %d poll(s)", status, attempt)
-            return {"total": 0, "scored": 0, "score": 0.0, "errors": 0, "error": status}
+            return {"total": 0, "scored": 0, "score": 0.0, "errors": 0, "flake_errors": 0, "error": status}
 
         logger.info("    Poll %d/%d: %s", attempt, MAX_POLL_ATTEMPTS, status)
 
