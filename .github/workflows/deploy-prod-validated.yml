@@ -6,9 +6,11 @@ name: Deploy Prod (validated)
 #   3. move the `validated` alias to the new version
 #   4. smoke + eval the `validated` alias
 #
-# The `production` alias is NOT touched here. A separate approval-gated
-# workflow (promote-validated-to-production.yml) moves `production` onto the
-# version currently holding `validated`.
+# SINGLE APPROVAL GATE: only the `prod-gate` job carries `environment: PROD`.
+# Subsequent jobs `needs:` prod-gate and run automatically once the single
+# PROD approval is granted. The `production` alias (customer traffic) is
+# still behind a *separate* `production-promote` environment in the
+# promote-validated-to-production.yml workflow.
 
 on:
   push:
@@ -24,6 +26,11 @@ on:
 
   workflow_dispatch: {}
 
+# Cancel an in-flight deploy if a newer commit lands on main (protect warehouse credits).
+concurrency:
+  group: deploy-prod-validated
+  cancel-in-progress: false  # never cancel a prod deploy mid-run; queue instead
+
 env:
   SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
   SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
@@ -31,10 +38,24 @@ env:
   PYTHONPATH: ${{ github.workspace }}
 
 jobs:
+  # SINGLE APPROVAL GATE. The reviewer approves PROD once, and all 4
+  # subsequent jobs run automatically.
+  prod-gate:
+    name: PROD approval gate
+    runs-on: ubuntu-latest
+    environment: PROD
+    steps:
+      - name: Approval acknowledged
+        run: |
+          echo "### PROD deploy approved" >> $GITHUB_STEP_SUMMARY
+          echo "Approved by: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "Commit: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "Subsequent jobs (snapshot -> SVs -> deploy -> eval) will run automatically." >> $GITHUB_STEP_SUMMARY
+
   snapshot:
     name: Pre-deploy snapshot (prod)
     runs-on: ubuntu-latest
-    environment: PROD
+    needs: prod-gate
     env:
       SNOWFLAKE_WAREHOUSE: ${{ vars.SNOWFLAKE_WAREHOUSE }}
       SNOWFLAKE_ROLE: ${{ vars.SNOWFLAKE_ROLE }}
@@ -65,7 +86,6 @@ jobs:
     name: Deploy semantic views (prod)
     runs-on: ubuntu-latest
     needs: snapshot
-    environment: PROD
     env:
       SNOWFLAKE_WAREHOUSE: ${{ vars.SNOWFLAKE_WAREHOUSE }}
       SNOWFLAKE_ROLE: ${{ vars.SNOWFLAKE_ROLE }}
@@ -103,7 +123,6 @@ jobs:
     name: Deploy agents (alias=validated)
     runs-on: ubuntu-latest
     needs: deploy-svs
-    environment: PROD
     env:
       SNOWFLAKE_WAREHOUSE: ${{ vars.SNOWFLAKE_WAREHOUSE }}
       SNOWFLAKE_ROLE: ${{ vars.SNOWFLAKE_ROLE }}
@@ -130,7 +149,6 @@ jobs:
     name: Agent evaluation (validated)
     runs-on: ubuntu-latest
     needs: deploy-agents
-    environment: PROD
     env:
       SNOWFLAKE_WAREHOUSE: ${{ vars.SNOWFLAKE_WAREHOUSE }}
       SNOWFLAKE_ROLE: ${{ vars.SNOWFLAKE_ROLE }}

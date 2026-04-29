@@ -12,6 +12,12 @@ on:
 
   workflow_dispatch: {}
 
+# Cancel an in-flight DEV deploy if a newer commit lands on `dev`.
+# Developers iterate fast; the newest change is the one we care about.
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: true
+
 env:
   SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
   SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
