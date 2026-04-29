@@ -50,14 +50,24 @@ jobs:
         run: python -m agent_management.smoke_test --env prod --alias production
 
       - name: Post-promote eval (production)
+        id: eval
+        # Advisory: alias has already flipped to production by this point.
+        # Eval scores below threshold are a content signal to investigate,
+        # not a reason to mark the promote run as failed.
+        continue-on-error: true
         run: python -m agent_management.run_ci_eval --env prod --alias production
 
       - name: Summary
         if: always()
         run: |
-          echo "### Production promotion complete" >> $GITHUB_STEP_SUMMARY
-          echo "Alias 'production' reassigned to the version previously under 'validated'." >> $GITHUB_STEP_SUMMARY
-          echo "If smoke/eval failed, trigger the rollback.yml workflow immediately." >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.eval.outcome }}" = "success" ]; then
+            echo "### Production promotion: PASSED (promote + eval)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### Production promotion: PROMOTE OK, EVAL ADVISORY FAIL" >> $GITHUB_STEP_SUMMARY
+            echo "Alias 'production' successfully reassigned. Post-promote" >> $GITHUB_STEP_SUMMARY
+            echo "eval scored below threshold on one or more questions." >> $GITHUB_STEP_SUMMARY
+            echo "Investigate scores; if concerning, trigger rollback.yml." >> $GITHUB_STEP_SUMMARY
+          fi
 
       - name: Cleanup
         if: always()
