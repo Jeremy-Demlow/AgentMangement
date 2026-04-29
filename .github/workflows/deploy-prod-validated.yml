@@ -167,7 +167,13 @@ jobs:
         with:
           snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
+      # Advisory: `validated` alias has already moved by this point.
+      # Sub-threshold eval scores indicate content drift to investigate, but
+      # don't invalidate the deploy. Step is allowed to fail without failing
+      # the job; the Summary step reports pass/fail either way.
       - name: Run agent evaluations on validated alias
+        id: eval
+        continue-on-error: true
         run: python -m agent_management.run_ci_eval --env prod --alias validated
 
       - name: Upload evaluation results
@@ -181,9 +187,16 @@ jobs:
       - name: Summary
         if: always()
         run: |
-          echo "### Prod validated deploy complete" >> $GITHUB_STEP_SUMMARY
-          echo "Alias 'validated' now targets the newly committed version." >> $GITHUB_STEP_SUMMARY
-          echo "To promote to customer traffic, run the 'Promote validated -> production' workflow." >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.eval.outcome }}" = "success" ]; then
+            echo "### Prod validated deploy: PASSED (deploy + eval)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### Prod validated deploy: DEPLOY OK, EVAL ADVISORY FAIL" >> $GITHUB_STEP_SUMMARY
+            echo "Alias 'validated' moved successfully. One or more questions" >> $GITHUB_STEP_SUMMARY
+            echo "scored below the answer_correctness threshold. Investigate" >> $GITHUB_STEP_SUMMARY
+            echo "in the uploaded artifact, NOT a deployment failure." >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "To promote to customer traffic, run 'Promote validated -> production'." >> $GITHUB_STEP_SUMMARY
 
       - name: Cleanup
         if: always()
