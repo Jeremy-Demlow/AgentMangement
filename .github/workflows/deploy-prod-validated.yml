@@ -44,6 +44,12 @@ jobs:
     name: PROD approval gate
     runs-on: ubuntu-latest
     environment: PROD
+    # Export the env-scoped vars so downstream jobs (which do NOT attach
+    # environment: PROD — that would re-trigger approval) can read them.
+    outputs:
+      warehouse: ${{ vars.SNOWFLAKE_WAREHOUSE }}
+      role: ${{ vars.SNOWFLAKE_ROLE }}
+      database: ${{ vars.SNOWFLAKE_DATABASE }}
     steps:
       - name: Approval acknowledged
         run: |
@@ -57,9 +63,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: prod-gate
     env:
-      SNOWFLAKE_WAREHOUSE: ${{ vars.SNOWFLAKE_WAREHOUSE }}
-      SNOWFLAKE_ROLE: ${{ vars.SNOWFLAKE_ROLE }}
-      SNOWFLAKE_DATABASE: ${{ vars.SNOWFLAKE_DATABASE }}
+      SNOWFLAKE_WAREHOUSE: ${{ needs.prod-gate.outputs.warehouse }}
+      SNOWFLAKE_ROLE: ${{ needs.prod-gate.outputs.role }}
+      SNOWFLAKE_DATABASE: ${{ needs.prod-gate.outputs.database }}
     steps:
       - uses: actions/checkout@v6
 
@@ -85,11 +91,11 @@ jobs:
   deploy-svs:
     name: Deploy semantic views (prod)
     runs-on: ubuntu-latest
-    needs: snapshot
+    needs: [prod-gate, snapshot]
     env:
-      SNOWFLAKE_WAREHOUSE: ${{ vars.SNOWFLAKE_WAREHOUSE }}
-      SNOWFLAKE_ROLE: ${{ vars.SNOWFLAKE_ROLE }}
-      SNOWFLAKE_DATABASE: ${{ vars.SNOWFLAKE_DATABASE }}
+      SNOWFLAKE_WAREHOUSE: ${{ needs.prod-gate.outputs.warehouse }}
+      SNOWFLAKE_ROLE: ${{ needs.prod-gate.outputs.role }}
+      SNOWFLAKE_DATABASE: ${{ needs.prod-gate.outputs.database }}
     steps:
       - uses: actions/checkout@v6
 
@@ -122,11 +128,11 @@ jobs:
   deploy-agents:
     name: Deploy agents (alias=validated)
     runs-on: ubuntu-latest
-    needs: deploy-svs
+    needs: [prod-gate, deploy-svs]
     env:
-      SNOWFLAKE_WAREHOUSE: ${{ vars.SNOWFLAKE_WAREHOUSE }}
-      SNOWFLAKE_ROLE: ${{ vars.SNOWFLAKE_ROLE }}
-      SNOWFLAKE_DATABASE: ${{ vars.SNOWFLAKE_DATABASE }}
+      SNOWFLAKE_WAREHOUSE: ${{ needs.prod-gate.outputs.warehouse }}
+      SNOWFLAKE_ROLE: ${{ needs.prod-gate.outputs.role }}
+      SNOWFLAKE_DATABASE: ${{ needs.prod-gate.outputs.database }}
     steps:
       - uses: actions/checkout@v6
 
@@ -148,11 +154,11 @@ jobs:
   agent-eval:
     name: Agent evaluation (validated)
     runs-on: ubuntu-latest
-    needs: deploy-agents
+    needs: [prod-gate, deploy-agents]
     env:
-      SNOWFLAKE_WAREHOUSE: ${{ vars.SNOWFLAKE_WAREHOUSE }}
-      SNOWFLAKE_ROLE: ${{ vars.SNOWFLAKE_ROLE }}
-      SNOWFLAKE_DATABASE: ${{ vars.SNOWFLAKE_DATABASE }}
+      SNOWFLAKE_WAREHOUSE: ${{ needs.prod-gate.outputs.warehouse }}
+      SNOWFLAKE_ROLE: ${{ needs.prod-gate.outputs.role }}
+      SNOWFLAKE_DATABASE: ${{ needs.prod-gate.outputs.database }}
     steps:
       - uses: actions/checkout@v6
 
