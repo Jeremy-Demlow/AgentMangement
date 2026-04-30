@@ -1,59 +1,48 @@
-"""Snowflake connection helper.
+"""Snowflake connection helper - now a thin wrapper around SnowflakeConfig.
 
-Provides a connection factory that reads from environment config
-and supports both interactive (externalbrowser) and CI (key-pair) auth.
+Historical: this module used to silently allow role to be None and fall back
+to the user's DEFAULT_ROLE. That caused repeated production bugs (MCP_OPERATOR
+crash). The real implementation lives in agent_management.snowflake_config
+which REQUIRES role/warehouse/database explicitly.
+
+This file is kept for backward compatibility with callers that pass a dict
+config. New code should use SnowflakeConfig.resolve() + connect() directly
+from agent_management.snowflake_config.
 
 Implements REQ-001: Environment Configuration System.
+Implements REQ-020: Explicit Snowflake Connection Config.
 """
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import snowflake.connector
 
+from agent_management.snowflake_config import SnowflakeConfig, connect as _connect_from_config
+
 
 def connect(config: dict, **overrides: Any) -> snowflake.connector.SnowflakeConnection:
-    sf = config["snowflake"]
-    deploy = config["deployment"]
+    """Legacy shim: accept dict-style config and route through SnowflakeConfig.
 
-    if os.environ.get("SNOWFLAKE_CONNECTION_NAME"):
-        conn_params: dict[str, Any] = {
-            "connection_name": os.environ["SNOWFLAKE_CONNECTION_NAME"],
-            "role": sf["role"],
-            "warehouse": sf["warehouse"],
-            "database": deploy["database"],
-        }
-        conn_params.update(overrides)
-        return snowflake.connector.connect(**conn_params)
+    Callers should migrate to:
+        cfg = SnowflakeConfig.resolve(env=..., role=..., ...)
+        conn = connect_from_config(cfg)
+    """
+    sf = config.get("snowflake", {}) or {}
+    deploy = config.get("deployment", {}) or {}
 
-    params: dict[str, Any] = {
-        "account": sf.get("account", os.environ.get("SNOWFLAKE_ACCOUNT", "")),
-        "user": sf.get("user", os.environ.get("SNOWFLAKE_USER", "")),
-        "role": sf["role"],
-        "warehouse": sf["warehouse"],
-        "database": deploy["database"],
-    }
-
-    if os.environ.get("SNOWFLAKE_PRIVATE_KEY_PATH"):
-        from cryptography.hazmat.primitives import serialization
-        from pathlib import Path
-        key_path = Path(os.environ["SNOWFLAKE_PRIVATE_KEY_PATH"]).expanduser()
-        passphrase = os.environ.get("SNOWFLAKE_PRIVATE_KEY_PASSPHRASE")
-        with open(key_path, "rb") as f:
-            private_key = serialization.load_pem_private_key(
-                f.read(),
-                password=passphrase.encode() if passphrase else None,
-            )
-        params["private_key"] = private_key.private_bytes(
-            encoding=serialization.Encoding.DER,
-            format=serialization.PrivateFormat.PKCS8,
-            encryption_algorithm=serialization.NoEncryption(),
-        )
-    elif os.environ.get("SNOWFLAKE_PASSWORD"):
-        params["password"] = os.environ["SNOWFLAKE_PASSWORD"]
-    else:
-        params["authenticator"] = sf.get("authenticator", "externalbrowser")
-
-    params.update(overrides)
-    return snowflake.connector.connect(**params)
+    cfg = SnowflakeConfig.resolve(
+        env=config.get("environment"),
+        account=overrides.get("account", sf.get("account")),
+        user=overrides.get("user", sf.get("user")),
+        role=overrides.get("role", sf.get("role")),
+        warehouse=overrides.get("warehouse", sf.get("warehouse")),
+        database=overrides.get("database", deploy.get("database")),
+        schema=overrides.get("schema", deploy.get("semantic_schema")),
+        connection_name=overrides.get("connection_name"),
+        private_key_path=overrides.get("private_key_path"),
+        private_key_passphrase=overrides.get("private_key_passphrase"),
+        password=overrides.get("password"),
+        authenticator=overrides.get("authenticator", sf.get("authenticator")),
+    )
+    return _connect_from_config(cfg)

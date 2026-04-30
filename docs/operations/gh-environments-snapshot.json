@@ -1,0 +1,53 @@
+{
+  "envs": {
+    "DEV": {
+      "reviewers": [],
+      "variables": {
+        "SNOWFLAKE_DATABASE": "AM_SKI_RESORT_DEV",
+        "SNOWFLAKE_ROLE": "AM_DEPLOY_ROLE_DEV",
+        "SNOWFLAKE_WAREHOUSE": "AM_SKI_RESORT_WH_DEV"
+      },
+      "secrets": [
+        "SNOWFLAKE_DATABASE",
+        "SNOWFLAKE_ROLE",
+        "SNOWFLAKE_WAREHOUSE"
+      ]
+    },
+    "PROD": {
+      "reviewers": [
+        {
+          "type": "User",
+          "login": "Jeremy-Demlow"
+        }
+      ],
+      "variables": {
+        "SNOWFLAKE_DATABASE": "AM_SKI_RESORT",
+        "SNOWFLAKE_ROLE": "AM_DEPLOY_ROLE",
+        "SNOWFLAKE_WAREHOUSE": "AM_SKI_RESORT_WH"
+      },
+      "secrets": [
+        "SNOWFLAKE_DATABASE",
+        "SNOWFLAKE_ROLE",
+        "SNOWFLAKE_WAREHOUSE"
+      ]
+    },
+    "QA": {
+      "reviewers": [],
+      "variables": {
+        "SNOWFLAKE_DATABASE": "AM_SKI_RESORT_QA",
+        "SNOWFLAKE_ROLE": "AM_DEPLOY_ROLE_QA",
+        "SNOWFLAKE_WAREHOUSE": "AM_SKI_RESORT_WH_QA"
+      },
+      "secrets": [
+        "SNOWFLAKE_DATABASE",
+        "SNOWFLAKE_ROLE",
+        "SNOWFLAKE_WAREHOUSE"
+      ]
+    },
+    "production-promote": {
+      "reviewers": [],
+      "variables": {},
+      "secrets": []
+    }
+  }
+}
