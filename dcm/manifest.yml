@@ -51,6 +51,7 @@ templating:
     agents_schema_suffix: ''
     users:
       - 'JDEMLOW'
+      - 'JD_SERVICE_ACCOUNT_ADMIN'
   configurations:
     DEV:
       db: 'AM_SKI_RESORT_DEV'
