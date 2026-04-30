@@ -82,8 +82,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        env: [dev, prod]
-    environment: ${{ matrix.env == 'dev' && 'DEV' || 'PROD' }}
+        # Only DEV on PR validation. A PROD matrix entry would require PROD
+        # approval per PR for what is a read-only dry-run (dbt parse/compile
+        # + drift check, no writes). Real PROD compile runs on merge in
+        # deploy-prod-validated. Catching PROD-specific compile issues
+        # pre-merge is low value vs the approval friction it imposes.
+        env: [dev]
+    environment: DEV
     env:
       SNOWFLAKE_WAREHOUSE: ${{ vars.SNOWFLAKE_WAREHOUSE }}
       SNOWFLAKE_ROLE: ${{ vars.SNOWFLAKE_ROLE }}
