@@ -99,6 +99,12 @@ def build_cmd(rendered_config_path: Path, args) -> list[str]:
         cmd.append("--no-wait")
     if args.poll_interval != 30:
         cmd.extend(["--poll-interval", str(args.poll_interval)])
+    # CRITICAL: pass --env so run_eval loads env_config and sets role from
+    # environments/<env>.env.yml. Without this the connector falls back to
+    # the user's DEFAULT_ROLE (which may not have AGENTS privs), producing
+    # cryptic 'Insufficient privileges to operate on schema' errors.
+    if args.env:
+        cmd.extend(["--env", args.env])
     # Versioning selectors (informational — EXECUTE_AI_EVALUATION evaluates
     # the default version regardless; run_eval.py prints a warning).
     if getattr(args, "alias", None):
