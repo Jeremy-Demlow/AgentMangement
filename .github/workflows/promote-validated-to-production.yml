@@ -51,23 +51,26 @@ jobs:
 
       - name: Post-promote eval (production)
         id: eval
-        # Advisory: alias has already flipped to production by this point.
-        # Eval scores below threshold are a content signal to investigate,
-        # not a reason to mark the promote run as failed.
-        continue-on-error: true
-        run: python -m agent_management.run_ci_eval --env prod --alias production
+        # Advisory for threshold-fail only; crashes still fail the job.
+        run: |
+          set +e
+          python -m agent_management.run_ci_eval --env prod --alias production
+          code=$?
+          echo "eval_exit=$code" >> $GITHUB_OUTPUT
+          if [ "$code" = "0" ] || [ "$code" = "1" ]; then exit 0; else exit $code; fi
 
       - name: Summary
         if: always()
         run: |
-          if [ "${{ steps.eval.outcome }}" = "success" ]; then
-            echo "### Production promotion: PASSED (promote + eval)" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "### Production promotion: PROMOTE OK, EVAL ADVISORY FAIL" >> $GITHUB_STEP_SUMMARY
-            echo "Alias 'production' successfully reassigned. Post-promote" >> $GITHUB_STEP_SUMMARY
-            echo "eval scored below threshold on one or more questions." >> $GITHUB_STEP_SUMMARY
-            echo "Investigate scores; if concerning, trigger rollback.yml." >> $GITHUB_STEP_SUMMARY
-          fi
+          code="${{ steps.eval.outputs.eval_exit }}"
+          case "$code" in
+            0)  echo "### Production promotion: PASSED (promote + eval)" >> $GITHUB_STEP_SUMMARY ;;
+            1)  echo "### Production promotion: PROMOTE OK, EVAL ADVISORY FAIL" >> $GITHUB_STEP_SUMMARY
+                echo "Alias 'production' reassigned. Post-promote eval scored below threshold." >> $GITHUB_STEP_SUMMARY
+                echo "Investigate scores; if concerning, trigger rollback.yml." >> $GITHUB_STEP_SUMMARY ;;
+            *)  echo "### Production promotion: EVAL CRASHED" >> $GITHUB_STEP_SUMMARY
+                echo "Infrastructure error — eval script could not complete." >> $GITHUB_STEP_SUMMARY ;;
+          esac
 
       - name: Cleanup
         if: always()

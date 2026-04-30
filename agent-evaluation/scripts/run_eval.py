@@ -455,9 +455,19 @@ def compute_summary(results: list[dict]) -> dict[str, dict]:
 
 
 def check_thresholds(summary: dict[str, dict], thresholds: dict[str, float]) -> bool:
+    # If no metrics were computed at all, something went wrong (e.g.,
+    # METRIC_NAME returned NULL for every row). A silent pass here hides
+    # real breakage — treat empty summary against any configured threshold
+    # as a failure.
+    if thresholds and not summary:
+        print("  ERROR: no metrics present in results; eval likely malformed")
+        return False
     passed = True
+    checked = 0
     for metric, threshold in thresholds.items():
         if metric not in summary:
+            print(f"  {metric:25s} MISSING (threshold {threshold:.2f}) [FAIL]")
+            passed = False
             continue
         avg = summary[metric]["avg"]
         ok = avg >= threshold
@@ -465,6 +475,10 @@ def check_thresholds(summary: dict[str, dict], thresholds: dict[str, float]) -> 
         print(f"  {metric:25s} {avg:.3f}  (threshold: {threshold:.2f})  [{status}]")
         if not ok:
             passed = False
+        checked += 1
+    if thresholds and checked == 0:
+        print("  ERROR: no configured threshold matched any reported metric")
+        return False
     return passed
 
 
