@@ -167,14 +167,23 @@ jobs:
         with:
           snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
-      # Advisory: `validated` alias has already moved by this point.
-      # Sub-threshold eval scores indicate content drift to investigate, but
-      # don't invalidate the deploy. Step is allowed to fail without failing
-      # the job; the Summary step reports pass/fail either way.
+      # Eval exit codes from run_ci_eval:
+      #   0 = all passed
+      #   1 = ran but below threshold (advisory — alias has already moved)
+      #   2 = crashed (infrastructure bug — fail the job hard)
       - name: Run agent evaluations on validated alias
         id: eval
-        continue-on-error: true
-        run: python -m agent_management.run_ci_eval --env prod --alias validated
+        run: |
+          set +e
+          python -m agent_management.run_ci_eval --env prod --alias validated
+          code=$?
+          echo "eval_exit=$code" >> $GITHUB_OUTPUT
+          # Treat threshold fail (1) as success for the step; only crash (2) fails.
+          if [ "$code" = "0" ] || [ "$code" = "1" ]; then
+            exit 0
+          else
+            exit $code
+          fi
 
       - name: Upload evaluation results
         if: always()
@@ -187,14 +196,16 @@ jobs:
       - name: Summary
         if: always()
         run: |
-          if [ "${{ steps.eval.outcome }}" = "success" ]; then
-            echo "### Prod validated deploy: PASSED (deploy + eval)" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "### Prod validated deploy: DEPLOY OK, EVAL ADVISORY FAIL" >> $GITHUB_STEP_SUMMARY
-            echo "Alias 'validated' moved successfully. One or more questions" >> $GITHUB_STEP_SUMMARY
-            echo "scored below the answer_correctness threshold. Investigate" >> $GITHUB_STEP_SUMMARY
-            echo "in the uploaded artifact, NOT a deployment failure." >> $GITHUB_STEP_SUMMARY
-          fi
+          code="${{ steps.eval.outputs.eval_exit }}"
+          case "$code" in
+            0)  echo "### Prod validated deploy: PASSED (deploy + eval)" >> $GITHUB_STEP_SUMMARY ;;
+            1)  echo "### Prod validated deploy: DEPLOY OK, EVAL ADVISORY FAIL" >> $GITHUB_STEP_SUMMARY
+                echo "Alias 'validated' moved successfully. Eval ran but scored below threshold." >> $GITHUB_STEP_SUMMARY
+                echo "Investigate scores in the uploaded artifact." >> $GITHUB_STEP_SUMMARY ;;
+            *)  echo "### Prod validated deploy: EVAL CRASHED" >> $GITHUB_STEP_SUMMARY
+                echo "Infrastructure error — eval script could not complete." >> $GITHUB_STEP_SUMMARY
+                echo "Check step logs: likely a permission/role or SQL error, NOT a content issue." >> $GITHUB_STEP_SUMMARY ;;
+          esac
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "To promote to customer traffic, run 'Promote validated -> production'." >> $GITHUB_STEP_SUMMARY
 
