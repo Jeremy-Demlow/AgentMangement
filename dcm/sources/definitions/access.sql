@@ -49,5 +49,6 @@ GRANT USAGE ON DATABASE {{db}} TO DATABASE ROLE {{db}}.ANALYST;
 
 {% for user_name in users %}
 GRANT ROLE {{wh_role}} TO USER {{user_name}};
+GRANT ROLE {{deploy_role}} TO USER {{user_name}};
 GRANT DATABASE ROLE {{db}}.DEVELOPER TO USER {{user_name}};
 {% endfor %}
