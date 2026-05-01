@@ -26,7 +26,7 @@ staged as (
         downtime_minutes::int as downtime_minutes,
         during_operating_hours::boolean as during_operating_hours,
 
-        parts_replaced::boolean as parts_replaced,
+        parts_replaced IS NOT NULL as parts_replaced,
         parts_cost::float as parts_cost,
         labor_hours::float as labor_hours,
         labor_cost::float as labor_cost,
