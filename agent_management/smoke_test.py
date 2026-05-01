@@ -129,6 +129,53 @@ def _invoke_once(
     version: str | None,
     latency_ceiling_s: float,
     session: Any | None = None,
+    max_attempts: int = 2,
+    retry_sleep_s: float = 30.0,
+) -> PromptResult:
+    """Send a single prompt with 2-attempt retry on transient 5xx / request errors.
+
+    Cortex Agent REST sometimes returns HTTP 500 INTERNAL_ERROR or connection
+    drops on the first call immediately after deploy. A short sleep + one
+    retry reliably papers over this without masking real failures.
+    """
+    last: PromptResult | None = None
+    for attempt in range(1, max_attempts + 1):
+        result = _invoke_once_raw(
+            conn, base_url, agent_fqn, prompt,
+            alias=alias, version=version,
+            latency_ceiling_s=latency_ceiling_s, session=session,
+        )
+        if result.ok:
+            return result
+        # Retry only on transient-looking failures (HTTP 5xx or request exceptions)
+        err = (result.error or "").lower()
+        transient = (
+            "request_exception" in err
+            or "http 5" in err
+            or "timeout" in err
+            or "internal_error" in err
+        )
+        last = result
+        if not transient or attempt >= max_attempts:
+            return result
+        logger.warning(
+            "smoke prompt transient failure on attempt %d/%d: %s — retrying in %.0fs",
+            attempt, max_attempts, result.error, retry_sleep_s,
+        )
+        time.sleep(retry_sleep_s)
+    return last  # type: ignore[return-value]
+
+
+def _invoke_once_raw(
+    conn,
+    base_url: str,
+    agent_fqn: str,
+    prompt: str,
+    *,
+    alias: str | None,
+    version: str | None,
+    latency_ceiling_s: float,
+    session: Any | None = None,
 ) -> PromptResult:
     import requests  # local import; keeps module import-lightweight
 
