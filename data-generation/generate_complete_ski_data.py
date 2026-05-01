@@ -1681,9 +1681,13 @@ def main():
             # call TO_DATE / DATE_PART on these — they need real temporal types.
             for col in list(df.columns):
                 lc = col.lower()
-                if any(tok in lc for tok in ("timestamp", "_at", "scan_time", "start_ts", "end_ts")) or (
-                    lc.endswith("_date") and not lc.endswith("_date_id")
-                ):
+                is_ts = (
+                    lc.endswith("_timestamp")
+                    or lc.endswith("_at")
+                    or lc in ("scan_time", "start_ts", "end_ts", "created_at", "updated_at")
+                )
+                is_dt = lc.endswith("_date") and not lc.endswith("_date_id")
+                if is_ts or is_dt:
                     try:
                         df[col] = pd.to_datetime(df[col], errors="coerce")
                     except Exception:
