@@ -70,3 +70,49 @@ Living inventory of manual steps that had to be performed during the teardown/re
 ---
 
 When this document stops growing, the infra is fully codified.
+
+## 7. sync_env_data workflow doesn't bootstrap fresh envs
+
+**Gap**: `sync_env_data.yml` uses `INSERT INTO <target>` which requires target
+tables to exist. After a teardown, DEV has zero tables in RAW, so the workflow
+fails on first run with "Table ... does not exist or not authorized".
+
+**Current workaround**: run `generate_complete_ski_data.py` directly against
+each target env to bootstrap, then `sync_env_data` handles subsequent refreshes.
+
+**Proposed fix**: make the sync step a `CREATE OR REPLACE TABLE <target> AS
+SELECT ... FROM <source>` instead of TRUNCATE + INSERT. Idempotent, handles
+bootstrap, slightly heavier but DEV sync runs rarely.
+
+## 8. Snowflake SV Optimization object requires warm-up after DROP/CREATE
+
+**Gap**: `EXECUTE_AI_EVALUATION(sv_name, ...)` depends on a
+`<schema>.SYSTEM_AI_OBS_ANALYST_EVAL_<sv_name>` optimization object. After
+DROP + CREATE of a semantic view, this object is missing and all SV eval
+runs fail with:
+
+```
+Semantic View Optimization 'AM_SKI_RESORT_DEV.SEMANTIC.SYSTEM_AI_OBS_ANALYST_EVAL_<sv>' does not exist or not authorized.
+```
+
+**Impact**: blocks SV Evaluation Gate in CI after any full rebuild. Also
+appears to block agent evaluations that route to `cortex_analyst` tool.
+
+**Current workaround**: wait or poke via a simple Cortex Analyst REST call
+per SV; Snowflake's AI Observability service eventually auto-creates the
+object. Needs more testing to find a reliable trigger.
+
+**Proposed fix**: add a post-SV-deploy step that either
+(a) warm-pings each SV via a single `POST /api/v2/cortex/analyst/message`
+    call (Snowflake creates the AI OBS object on first query), or
+(b) polls `SHOW SEMANTIC VIEWS` with a post-condition that the OBS object
+    exists before proceeding to SV Eval Gate.
+
+## 9. Agent smoke test is flaky on first deploy
+
+**Gap**: Immediately after `deploy_agents.py` creates agents, the first
+smoke test query gets `HTTP 500 INTERNAL_ERROR` with no details. Second
+call usually succeeds.
+
+**Proposed fix**: already have a 2-attempt retry on the eval step (PR #29).
+Same pattern for smoke test: 2 attempts with a 30s gap.
