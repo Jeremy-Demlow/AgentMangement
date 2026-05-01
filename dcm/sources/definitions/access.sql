@@ -23,6 +23,13 @@ GRANT USAGE ON WAREHOUSE {{wh_name}} TO ROLE {{wh_role}};
 GRANT EXECUTE TASK ON ACCOUNT TO ROLE {{deploy_role}};
 GRANT USAGE ON DATABASE {{db}} TO DATABASE ROLE {{db}}.ANALYST;
 
+-- Cortex Analyst Evaluations (SV Eval Gate) requires this account-level
+-- privilege to read the AI OBS events table. Without it, EXECUTE_AI_EVALUATION
+-- fails with "Semantic View Optimization does not exist or not authorized".
+-- Ref: Snowflake bug notice — fix rolling out, but this grant is needed for
+-- reliable evals. See docs/operations/IAC_GAPS.md #8.
+GRANT READ UNREDACTED AI OBSERVABILITY EVENTS TABLE ON ACCOUNT TO ROLE {{deploy_role}};
+
 {{ schema_read_grants(db, 'RAW', 'ANALYST') }}
 {{ schema_read_grants(db, 'STAGING', 'ANALYST') }}
 {{ schema_read_grants(db, 'MARTS', 'ANALYST') }}
