@@ -259,6 +259,76 @@ def _invoke_once_raw(
     )
 
 
+def _preflight_selector(
+    conn,
+    agent_fqn: str,
+    *,
+    alias: str | None,
+    version: str | None,
+) -> None:
+    """Validate that the requested alias/version exists BEFORE hitting REST.
+
+    Uses ``DESCRIBE AGENT`` to read the canonical alias dict. Raises
+    ``RuntimeError`` with a precise message when:
+      - the agent exists but the requested alias is not set
+      - neither alias nor version is given but DEFAULT alias is missing
+        (bare ``/agents/X:run`` would then fail with the ``Version 'live'
+        not found`` error the deploy pipeline hit in earlier runs)
+
+    Keeps smoke tests from masking post-deploy alias issues as generic
+    Cortex API errors.
+    """
+    # Local import avoids circular dependency with versioning.
+    from agent_management.versioning import get_aliases, list_versions
+
+    try:
+        aliases = get_aliases(conn, agent_fqn)
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(f"smoke preflight: DESCRIBE AGENT {agent_fqn} failed: {exc}") from exc
+
+    if version:
+        versions = {v.name.upper() for v in list_versions(conn, agent_fqn)}
+        if version.upper() not in versions:
+            raise RuntimeError(
+                f"smoke preflight: version {version!r} does not exist on "
+                f"{agent_fqn}. known versions: {sorted(versions)}"
+            )
+        return
+
+    if alias:
+        key = alias.upper()
+        # LIVE/FIRST/LAST/DEFAULT are always computed; user aliases (latest,
+        # validated, production) must be explicitly set.
+        if key in {"FIRST", "LAST", "DEFAULT", "LIVE"}:
+            if key == "LIVE":
+                # LIVE only exists while an uncommitted draft exists, which is
+                # almost never what smoke tests want.
+                from agent_management.versioning import has_live_draft
+                if not has_live_draft(conn, agent_fqn):
+                    raise RuntimeError(
+                        f"smoke preflight: alias 'LIVE' requested but no LIVE "
+                        f"draft exists on {agent_fqn}. Smoke should point at a "
+                        f"user alias (latest/validated/production), not LIVE."
+                    )
+            return
+        if key not in aliases:
+            raise RuntimeError(
+                f"smoke preflight: alias {alias!r} is not set on {agent_fqn}. "
+                f"current aliases: {sorted(aliases)!r}. Deploy must set this "
+                f"alias before smoke-testing."
+            )
+        return
+
+    # No alias, no version: rely on DEFAULT.
+    if "DEFAULT" not in aliases:
+        raise RuntimeError(
+            f"smoke preflight: no alias/version specified and DEFAULT alias "
+            f"is missing on {agent_fqn}. Bare /agents/{agent_fqn}:run would "
+            f"hit the 'Version live not found' path. Pass --alias latest "
+            f"(or equivalent) or make sure deploy set DEFAULT."
+        )
+
+
 def run_smoke_test(
     agent_fqn: str,
     *,
@@ -280,6 +350,11 @@ def run_smoke_test(
         close_after = True
 
     try:
+        # Pre-flight: verify the target selector resolves to a real version
+        # BEFORE hitting the Cortex REST path. A missing alias produces a
+        # cryptic "Version 'X' not found" from the agent runtime; we can
+        # name the problem here instead.
+        _preflight_selector(conn, agent_fqn, alias=alias, version=version)
         base_url = _base_url(conn)
         selector = f"{agent_fqn}!{version or alias}" if (version or alias) else agent_fqn
         logger.info("smoke-test target=%s prompts=%d", selector, len(prompts))
