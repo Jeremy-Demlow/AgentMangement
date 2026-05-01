@@ -1675,14 +1675,28 @@ def main():
 
         if not table_exists:
             logger.info(f"  table {table_name} does not exist — creating via write_pandas")
-            # write_pandas uploads via internal stage + COPY; auto_create_table
-            # infers column types from the DataFrame.
+            # Coerce obvious date/timestamp string columns to pandas datetime64
+            # so write_pandas + use_logical_type=True maps them to TIMESTAMP_NTZ
+            # / DATE (not VARCHAR or NUMBER of nanos). Downstream dbt models
+            # call TO_DATE / DATE_PART on these — they need real temporal types.
+            for col in list(df.columns):
+                lc = col.lower()
+                if any(tok in lc for tok in ("timestamp", "_at", "scan_time", "start_ts", "end_ts")) or (
+                    lc.endswith("_date") and not lc.endswith("_date_id")
+                ):
+                    try:
+                        df[col] = pd.to_datetime(df[col], errors="coerce")
+                    except Exception:
+                        pass
+            # use_logical_type=True writes a Parquet stage with proper logical
+            # types so auto_create_table picks TIMESTAMP_NTZ / DATE.
             conn.session.write_pandas(
                 df,
                 table_name=table_name,
                 auto_create_table=True,
                 overwrite=True,
                 quote_identifiers=False,
+                use_logical_type=True,
             )
             logger.info(f"  ✓ Created + loaded {table_name}")
             return
