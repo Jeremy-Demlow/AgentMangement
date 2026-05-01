@@ -134,15 +134,78 @@ def version_exists(conn, agent_fqn: str, version: str) -> bool:
 
 
 def get_aliases(conn, agent_fqn: str) -> dict[str, str]:
-    """Return alias -> version mapping (from SHOW VERSIONS ``alias`` column).
+    """Return alias -> version mapping.
 
-    Alias names are uppercased by Snowflake.
+    Reads from ``DESCRIBE AGENT`` which exposes the full alias dict
+    (DEFAULT, FIRST, LAST, LATEST, plus user-assigned aliases) as JSON on
+    the ``aliases`` column. ``SHOW VERSIONS`` only carries a per-row ``alias``
+    value which is frequently empty even when aliases exist, so it is not a
+    reliable source for this mapping.
+
+    Alias names come back uppercased.
     """
+    _assert_identifier(agent_fqn, kind="agent fqn")
+    cur = conn.cursor()
+    cur.execute(f"DESCRIBE AGENT {agent_fqn}")
+    cols = [c[0].lower() for c in cur.description]
+    row = cur.fetchone()
+    if not row:
+        return {}
+    row_dict = dict(zip(cols, row))
+    raw = row_dict.get("aliases")
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else raw
+    except (json.JSONDecodeError, TypeError):
+        return {}
     out: dict[str, str] = {}
-    for v in list_versions(conn, agent_fqn):
-        if v.alias and v.name:
-            out[v.alias.upper()] = v.name.upper()
+    for alias, version in (data or {}).items():
+        if alias and version:
+            out[str(alias).upper()] = str(version).upper()
     return out
+
+
+def assert_alias_points_to(
+    conn,
+    agent_fqn: str,
+    alias: str,
+    expected_version: str,
+) -> None:
+    """Fail loudly if ``alias`` on ``agent_fqn`` does not point at
+    ``expected_version``. Runs after set_alias() to catch alias misses.
+
+    Also verifies the DEFAULT alias is populated — without DEFAULT, REST
+    calls to ``/agents/<name>:run`` (no selector) fail with
+    ``Version 'live' not found`` and smoke tests silently misroute.
+    """
+    _assert_identifier(agent_fqn, kind="agent fqn")
+    _assert_version_name(expected_version)
+    aliases = get_aliases(conn, agent_fqn)
+    key = alias.upper()
+    actual = aliases.get(key)
+    if not actual:
+        raise RuntimeError(
+            f"post-deploy assertion failed: alias {alias!r} is not set on "
+            f"{agent_fqn}. aliases={aliases!r}"
+        )
+    if actual.upper() != expected_version.upper():
+        raise RuntimeError(
+            f"post-deploy assertion failed: alias {alias!r} on {agent_fqn} "
+            f"points at {actual!r}, expected {expected_version!r}. "
+            f"aliases={aliases!r}"
+        )
+    if "DEFAULT" not in aliases:
+        raise RuntimeError(
+            f"post-deploy assertion failed: DEFAULT alias missing on "
+            f"{agent_fqn}. A committed version must be the DEFAULT or REST "
+            f"calls without a selector will fail with 'Version live not found'. "
+            f"aliases={aliases!r}"
+        )
+    logger.info(
+        "post-deploy assertion OK: %s[%s]=%s (DEFAULT=%s)",
+        agent_fqn, alias, actual, aliases.get("DEFAULT"),
+    )
 
 
 def has_live_draft(conn, agent_fqn: str) -> bool:

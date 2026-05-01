@@ -55,6 +55,40 @@ logger = logging.getLogger(__name__)
 POLL_INTERVAL_SECONDS = 30
 MAX_POLL_ATTEMPTS = 60
 
+# Exit code taxonomy (matches run_ci_eval.py):
+#   0 = all SVs passed threshold
+#   1 = one or more SVs below threshold (advisory in DEV, hard-fail in PROD)
+#   2 = crash / unhandled error (always hard-fail)
+#   3 = platform blocker (Snowflake Cortex Analyst Evaluations PuPr bug —
+#       SYSTEM_AI_OBS_ANALYST_EVAL_* object missing). Always advisory; the
+#       rest of the pipeline should proceed.
+EXIT_PASS = 0
+EXIT_THRESHOLD_FAIL = 1
+EXIT_CRASH = 2
+EXIT_PLATFORM_BLOCKED = 3
+
+# Error signatures that indicate Snowflake platform issues, not our code or
+# spec. Detecting these lets CI classify the failure instead of dumping the
+# raw stack and confusing operators.
+_PLATFORM_BLOCKER_PATTERNS = (
+    # The Cortex Analyst Evaluations PuPr optimization-object bug. See
+    # docs/operations/IAC_GAPS.md #8.
+    "semantic view optimization",
+    "system_ai_obs_analyst_eval",
+    # Also seen on platform outages / maintenance windows.
+    "service is currently unavailable",
+    "execute_ai_evaluation.*internal error",
+)
+
+
+def is_platform_blocker(err: object) -> bool:
+    """True if an error looks like the known Cortex Analyst PuPr bug or a
+    platform outage. Never returns True for threshold failures or code bugs."""
+    if err is None:
+        return False
+    msg = str(err).lower()
+    return any(pat in msg for pat in _PLATFORM_BLOCKER_PATTERNS)
+
 
 def generate_eval_yaml(
     database: str,
@@ -242,7 +276,19 @@ def poll_and_collect(
 
         for attempt in range(1, MAX_POLL_ATTEMPTS + 1):
             time.sleep(POLL_INTERVAL_SECONDS)
-            status = check_status(cur, run_name, stage, filename)
+            try:
+                status = check_status(cur, run_name, stage, filename)
+            except Exception as exc:
+                if is_platform_blocker(exc):
+                    logger.warning(
+                        "  [%s] PLATFORM BLOCKED while polling: %s",
+                        sv_name, str(exc)[:200],
+                    )
+                    return {"total": 0, "scored": 0, "score": 0.0,
+                            "errors": 0, "flake_errors": 0,
+                            "error": "PLATFORM_BLOCKED",
+                            "platform_blocked": True}
+                raise
 
             if status in ("COMPLETED", "SUCCEEDED"):
                 logger.info("  [%s] Completed after %d poll(s)", sv_name, attempt)
@@ -474,6 +520,7 @@ def main():
                     all_passed = False
         else:
             started: list[tuple[str, str, str]] = []
+            platform_blocked: list[str] = []
             for sv_name in sv_names:
                 sv_run_name = f"{run_name}_{sv_name.lower()}"
                 try:
@@ -482,8 +529,15 @@ def main():
                     )
                     started.append((sv_name, sv_run_name, filename))
                 except Exception as e:
-                    logger.error("  [%s] Failed to start: %s", sv_name, e)
-                    all_passed = False
+                    if is_platform_blocker(e):
+                        logger.warning(
+                            "  [%s] PLATFORM BLOCKED (Cortex Analyst Eval PuPr bug): %s",
+                            sv_name, str(e)[:200],
+                        )
+                        platform_blocked.append(sv_name)
+                    else:
+                        logger.error("  [%s] Failed to start: %s", sv_name, e)
+                        all_passed = False
 
             if args.no_wait:
                 logger.info("\nStarted %d eval(s) — use --status to check progress", len(started))
@@ -512,6 +566,10 @@ def main():
 
                 for sv_name, _, _ in started:
                     metrics = sv_metrics.get(sv_name, {})
+                    if metrics.get("platform_blocked"):
+                        logger.warning("  %s: PLATFORM BLOCKED (advisory)", sv_name)
+                        platform_blocked.append(sv_name)
+                        continue
                     if "error" in metrics:
                         logger.error("  %s: ERROR — %s", sv_name, metrics["error"])
                         all_passed = False
@@ -534,14 +592,30 @@ def main():
             logger.info("DRY RUN complete — no evals started")
         elif args.no_wait:
             logger.info("All evals started — use --status to check progress")
-        elif total_checked == 0:
+        elif total_checked == 0 and len(sv_names) > 0:
+            # Distinguish "platform blocked every SV" from "everything crashed"
+            if 'platform_blocked' in dir() and len(platform_blocked) == len(sv_names):
+                logger.warning(
+                    "SV EVAL GATE: PLATFORM BLOCKED for all %d view(s). "
+                    "Snowflake Cortex Analyst Evaluations PuPr bug — the "
+                    "SYSTEM_AI_OBS_ANALYST_EVAL_* optimization object is "
+                    "missing / not queryable. See docs/operations/IAC_GAPS.md #8. "
+                    "Advisory: pipeline will continue.",
+                    len(sv_names),
+                )
+                sys.exit(EXIT_PLATFORM_BLOCKED)
             logger.warning("NO EVAL RESULTS — cannot determine pass/fail")
-            sys.exit(2)
+            sys.exit(EXIT_CRASH)
         elif all_passed:
             logger.info("SV EVAL GATE: PASSED (%d views)", total_checked)
+            if 'platform_blocked' in dir() and platform_blocked:
+                logger.warning(
+                    "  NOTE: %d view(s) platform-blocked (advisory): %s",
+                    len(platform_blocked), ", ".join(platform_blocked),
+                )
         else:
             logger.error("SV EVAL GATE: FAILED (%d views)", total_checked)
-            sys.exit(1)
+            sys.exit(EXIT_THRESHOLD_FAIL)
     finally:
         cur.close()
         conn.close()

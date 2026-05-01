@@ -38,6 +38,7 @@ from agent_management.utils.config import (
 )
 from agent_management.utils.snowflake_client import connect
 from agent_management.versioning import (
+    assert_alias_points_to,
     commit_version,
     has_live_draft,
     list_versions,
@@ -339,6 +340,12 @@ def deploy_agent(
         )
         _apply_metadata(cur, agent_fqn, agent_dict, profile)
         set_alias(conn, agent_fqn, version_after, deploy_alias)
+
+        # Post-deploy invariant: the deploy alias points at the version we
+        # just committed AND a DEFAULT alias exists. Without DEFAULT, the bare
+        # REST path /agents/<name>:run fails with "Version 'live' not found"
+        # and smoke tests become misleading.
+        assert_alias_points_to(conn, agent_fqn, deploy_alias, version_after)
 
         # Attach identity metadata to the new version so "what is VERSION$N?"
         # is answerable from SHOW VERSIONS alone.

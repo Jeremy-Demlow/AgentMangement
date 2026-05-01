@@ -2,6 +2,8 @@
 
 Living inventory of manual steps that had to be performed during the teardown/rebuild exercise. Each entry lists the current workaround and the proposed codification.
 
+Exit criteria for the whole pipeline: see [`PIPELINE_HEALTH.md`](PIPELINE_HEALTH.md).
+
 ## 1. Snowflake user -> role grants post-DCM
 
 **Gap**: DCM creates the roles (`AM_DEPLOY_ROLE`, `AM_DEPLOY_ROLE_DEV`, `AM_SKI_RESORT_WH_USER`, `AM_SKI_RESORT_WH_USER_DEV`), but DCM does NOT grant them to users. Without this grant, `USE ROLE AM_DEPLOY_ROLE` fails for CI and for personal developer use.
@@ -125,8 +127,40 @@ Deploy Agents and Agent Evaluation regardless.
 
 ## 9. Agent smoke test is flaky on first deploy
 
-**Status**: CLOSED (PR #39).
+**Status**: CLOSED (PR #39 + smoke pre-flight).
 
-`agent_management/smoke_test.py::_invoke_once` now retries once on
-transient 5xx / request_exception / timeout failures with a 30s sleep.
-Same pattern as eval retry (PR #29).
+`agent_management/smoke_test.py::_invoke_once` retries once on transient
+5xx / request_exception / timeout failures with a 30s sleep, and
+`_preflight_selector` now rejects missing aliases BEFORE calling REST so
+"Version 'live' not found" is caught with a precise diagnostic.
+
+## 10. Agent post-deploy state must be asserted
+
+**Status**: CLOSED.
+
+After `commit_version()` + `set_alias()`, deploy_agents.py calls
+`versioning.assert_alias_points_to()` which uses DESCRIBE AGENT (not SHOW
+VERSIONS — the alias column on SHOW is unreliable) to verify the deploy
+alias and DEFAULT both resolve correctly. Without this, a missing
+DEFAULT makes bare `/agents/<name>:run` fail with "Version 'live' not
+found" even though the agent "looks deployed".
+
+## 11. dbt RAW seed tables were not bootstrapped in CI
+
+**Status**: CLOSED.
+
+Dimensions models depend on `source('raw', 'lifts' | 'locations' |
+'products' | 'ticket_types')`. These CSVs live under
+`dbt_ski_resort/seeds/` but were loaded by a hand-run script. Added
+`scripts/bootstrap_raw_seeds.py` (idempotent, overwrite=True,
+use_logical_type=True) and wired it into `deploy-dev.yml` between "Sync
+VQRs" and "Run dbt".
+
+## 12. DCM workflow auth broken on CI
+
+**Status**: CLOSED.
+
+Replaced `Snowflake-Labs/snowflake_dcm_projects/actions/*` with direct
+`snow dcm create/plan/deploy` invocations driven by the
+`SNOWFLAKE_CONNECTIONS_DEFAULT_*` env-var shape the snow CLI actually
+respects. Workflow now mirrors our working local flow.
