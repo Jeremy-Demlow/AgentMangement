@@ -86,33 +86,47 @@ bootstrap, slightly heavier but DEV sync runs rarely.
 
 ## 8. Snowflake SV Optimization object requires warm-up after DROP/CREATE
 
-**Gap**: `EXECUTE_AI_EVALUATION(sv_name, ...)` depends on a
-`<schema>.SYSTEM_AI_OBS_ANALYST_EVAL_<sv_name>` optimization object. After
-DROP + CREATE of a semantic view, this object is missing and all SV eval
-runs fail with:
+**Status**: partially mitigated; blocked on Snowflake PuPr fix.
+
+**Gap**: `EXECUTE_AI_EVALUATION(sv_name, ...)` fails with:
 
 ```
 Semantic View Optimization 'AM_SKI_RESORT_DEV.SEMANTIC.SYSTEM_AI_OBS_ANALYST_EVAL_<sv>' does not exist or not authorized.
 ```
 
-**Impact**: blocks SV Evaluation Gate in CI after any full rebuild. Also
-appears to block agent evaluations that route to `cortex_analyst` tool.
+**What we confirmed**:
+1. Evaluation tasks DO run in the background (visible in
+   `SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY` as `AI_EVALS_FINALIZER_*` and
+   `AI_EVALS_COMPUTE_METRICS_*`) and DO produce results.
+2. `SEM_<sv>_SYSTEM_EVAL` datasets are created with the eval output.
+3. The START call returns an error immediately but the run proceeds async.
+4. `GET_ANALYST_AI_EVALUATION_DATA` also fails with the same error, making
+   results not queryable from SQL.
 
-**Current workaround**: wait or poke via a simple Cortex Analyst REST call
-per SV; Snowflake's AI Observability service eventually auto-creates the
-object. Needs more testing to find a reliable trigger.
+**Partial mitigation (PR #38)**: `GRANT READ UNREDACTED AI OBSERVABILITY
+EVENTS TABLE ON ACCOUNT TO ROLE <deploy_role>` — added to DCM access.sql.
+This was the mitigation published in Snowflake's April 29 bug notice.
 
-**Proposed fix**: add a post-SV-deploy step that either
-(a) warm-pings each SV via a single `POST /api/v2/cortex/analyst/message`
-    call (Snowflake creates the AI OBS object on first query), or
-(b) polls `SHOW SEMANTIC VIEWS` with a post-condition that the OBS object
-    exists before proceeding to SV Eval Gate.
+**Remaining blocker**: even with the grant, the OPTIMIZATION object lookup
+fails. This is the deeper Cortex Analyst Evaluations PuPr bug — the
+account-wide fix is still rolling out. Once Snowflake deploys the fix,
+both error paths should resolve.
+
+**Current workaround in CI**: SV Evaluation Gate runs with
+`continue-on-error: true` at the job level, so workflow failures here
+are advisory and don't block agent deploys. The workflow proceeds to
+Deploy Agents and Agent Evaluation regardless.
+
+**Proposed long-term fix (once platform bug is fixed)**:
+- Switch `run_sv_eval.py` to a poll-results-from-dataset model instead
+  of relying on the START/STATUS API response, OR
+- Wait for Snowflake to deploy the PuPr fix and revert the advisory gate
+  to hard-fail.
 
 ## 9. Agent smoke test is flaky on first deploy
 
-**Gap**: Immediately after `deploy_agents.py` creates agents, the first
-smoke test query gets `HTTP 500 INTERNAL_ERROR` with no details. Second
-call usually succeeds.
+**Status**: CLOSED (PR #39).
 
-**Proposed fix**: already have a 2-attempt retry on the eval step (PR #29).
-Same pattern for smoke test: 2 attempts with a 30s gap.
+`agent_management/smoke_test.py::_invoke_once` now retries once on
+transient 5xx / request_exception / timeout failures with a 30s sleep.
+Same pattern as eval retry (PR #29).
