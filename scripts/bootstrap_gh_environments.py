@@ -105,6 +105,14 @@ def ensure_environment(repo: str, env_name: str, spec: dict, dry_run: bool):
             print(f"    - {s}  (set manually via gh secret set or UI)")
 
 
+def validate_required_secrets(repo: str, required: list[str]) -> list[str]:
+    """Return list of missing required secrets. Does NOT read secret values
+    (gh CLI only exposes NAMES for security), only verifies existence."""
+    result = gh("api", f"/repos/{repo}/actions/secrets", capture=True)
+    present = {s["name"] for s in json.loads(result.stdout).get("secrets", [])}
+    return [name for name in required if name not in present]
+
+
 def main():
     ap = argparse.ArgumentParser(description="Bootstrap GitHub Environments from snapshot")
     ap.add_argument("--repo", required=True, help="owner/name (e.g. Jeremy-Demlow/AgentMangement)")
@@ -113,6 +121,8 @@ def main():
     ap.add_argument("--only", help="Only process this env name (e.g. PROD)")
     ap.add_argument("--skip", action="append", default=[], help="Env name to skip (repeatable)")
     ap.add_argument("--dry-run", action="store_true", help="Show what would happen without making changes")
+    ap.add_argument("--check-secrets", action="store_true",
+                    help="Also check required repo-level secrets exist; fails if any missing")
     args = ap.parse_args()
 
     if not args.snapshot.exists():
@@ -128,6 +138,17 @@ def main():
     print(f"Snapshot: {args.snapshot}")
     print(f"Dry-run: {args.dry_run}")
     print(f"Envs in snapshot: {list(envs.keys())}")
+
+    if args.check_secrets:
+        required = data.get("required_repo_secrets", [])
+        if required:
+            print(f"\n=== Required repo secrets: {required} ===")
+            missing = validate_required_secrets(args.repo, required)
+            if missing:
+                print(f"MISSING SECRETS: {missing}")
+                print("Set them with: gh secret set <NAME> --body '<VALUE>'")
+                sys.exit(2)
+            print("All required secrets present.")
 
     for env_name, spec in envs.items():
         if args.only and env_name != args.only:

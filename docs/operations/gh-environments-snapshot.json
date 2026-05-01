@@ -1,4 +1,10 @@
 {
+  "required_repo_secrets": [
+    "SNOWFLAKE_ACCOUNT",
+    "SNOWFLAKE_USER",
+    "SNOWFLAKE_PRIVATE_KEY",
+    "SNOWFLAKE_PRIVATE_KEY_RAW"
+  ],
   "envs": {
     "DEV": {
       "reviewers": [],

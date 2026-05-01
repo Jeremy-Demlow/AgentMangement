@@ -12,9 +12,10 @@
 #   2. Called by daily_data_refresh.yml after PROD data generation completes
 #   3. Called by deploy workflows when new tables are added
 #
-# Strategy: TRUNCATE + INSERT (full replace) for each RAW table. This ensures
-# DEV/QA always mirror PROD exactly. For large tables, consider switching to
-# CLONE or incremental sync.
+# Strategy: CREATE OR REPLACE TABLE AS CLONE for each RAW table. Zero-copy clone
+# is metadata-only, bootstrap-friendly (no pre-existing target required), and
+# always replaces the target exactly to mirror PROD. Earlier version used
+# TRUNCATE + INSERT which broke on fresh envs; see IAC_GAPS.md #7.
 # =============================================================================
 
 name: Sync Environment Data
@@ -177,11 +178,8 @@ jobs:
             fi
 
             snow sql -q "
-              BEGIN;
-              TRUNCATE TABLE IF EXISTS ${TARGET_DB}.${RAW_SCHEMA}.${TABLE};
-              INSERT INTO ${TARGET_DB}.${RAW_SCHEMA}.${TABLE}
-                SELECT * FROM ${PROD_DB}.${RAW_SCHEMA}.${TABLE};
-              COMMIT;
+              CREATE OR REPLACE TABLE ${TARGET_DB}.${RAW_SCHEMA}.${TABLE}
+                CLONE ${PROD_DB}.${RAW_SCHEMA}.${TABLE};
             " && {
               TARGET_COUNT=$(snow sql -q "SELECT COUNT(*) as CNT FROM ${TARGET_DB}.${RAW_SCHEMA}.${TABLE}" --format json | python3 -c "import json,sys; print(json.load(sys.stdin)[0]['CNT'])")
               echo "  Synced: ${TARGET_COUNT} rows"
