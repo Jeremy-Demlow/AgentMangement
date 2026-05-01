@@ -37,7 +37,10 @@ DEFAULT_PROMPTS: tuple[str, ...] = (
     "what can you do?",
 )
 
-DEFAULT_LATENCY_CEILING_S: float = 30.0
+DEFAULT_LATENCY_CEILING_S: float = 60.0
+# Cortex Agent cold-start observed up to ~32s for the second prompt on a
+# freshly-deployed agent, so 30s ceiling produces false failures. 60s is
+# still low enough to catch real latency regressions.
 
 
 @dataclass

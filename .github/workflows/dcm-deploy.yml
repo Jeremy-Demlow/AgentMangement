@@ -71,6 +71,16 @@ jobs:
         with:
           snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
+      - name: Write snow CLI connection file
+        # snow CLI needs a connections.toml section for any name passed via
+        # -c. Env-only connections aren't supported. We write an empty
+        # [default] stub; the SNOWFLAKE_CONNECTIONS_DEFAULT_* env vars then
+        # populate every field of the connection.
+        run: |
+          mkdir -p ~/.snowflake
+          printf '[default]\n' > ~/.snowflake/connections.toml
+          chmod 600 ~/.snowflake/connections.toml
+
       - name: Connection sanity
         run: |
           set -euo pipefail
@@ -94,7 +104,7 @@ jobs:
 
       - name: Cleanup
         if: always()
-        run: rm -f /tmp/snowflake_key.p8
+        run: rm -f /tmp/snowflake_key.p8 ~/.snowflake/connections.toml
 
   # Push to main: create (idempotent) + deploy to DEV.
   deploy-dev:
@@ -108,6 +118,12 @@ jobs:
         uses: ./.github/actions/snowflake-setup
         with:
           snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+
+      - name: Write snow CLI connection file
+        run: |
+          mkdir -p ~/.snowflake
+          printf '[default]\n' > ~/.snowflake/connections.toml
+          chmod 600 ~/.snowflake/connections.toml
 
       - name: Connection sanity
         run: |
@@ -131,7 +147,7 @@ jobs:
 
       - name: Cleanup
         if: always()
-        run: rm -f /tmp/snowflake_key.p8
+        run: rm -f /tmp/snowflake_key.p8 ~/.snowflake/connections.toml
 
   # Manual dispatch: plan + optional deploy for DEV or PROD.
   plan-manual:
@@ -145,6 +161,12 @@ jobs:
         uses: ./.github/actions/snowflake-setup
         with:
           snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+
+      - name: Write snow CLI connection file
+        run: |
+          mkdir -p ~/.snowflake
+          printf '[default]\n' > ~/.snowflake/connections.toml
+          chmod 600 ~/.snowflake/connections.toml
 
       - name: Connection sanity
         run: |
@@ -168,7 +190,7 @@ jobs:
 
       - name: Cleanup
         if: always()
-        run: rm -f /tmp/snowflake_key.p8
+        run: rm -f /tmp/snowflake_key.p8 ~/.snowflake/connections.toml
 
   deploy-manual:
     if: github.event_name == 'workflow_dispatch' && inputs.plan_only == false
@@ -182,6 +204,12 @@ jobs:
         uses: ./.github/actions/snowflake-setup
         with:
           snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+
+      - name: Write snow CLI connection file
+        run: |
+          mkdir -p ~/.snowflake
+          printf '[default]\n' > ~/.snowflake/connections.toml
+          chmod 600 ~/.snowflake/connections.toml
 
       - name: DCM deploy (${{ inputs.target }})
         working-directory: ${{ env.DCM_PROJECT_PATH }}
@@ -198,4 +226,4 @@ jobs:
 
       - name: Cleanup
         if: always()
-        run: rm -f /tmp/snowflake_key.p8
+        run: rm -f /tmp/snowflake_key.p8 ~/.snowflake/connections.toml
