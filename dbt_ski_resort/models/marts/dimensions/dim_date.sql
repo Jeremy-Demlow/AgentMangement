@@ -46,12 +46,28 @@ date_attributes AS (
         -- Year attributes
         YEAR(date_day) AS calendar_year,
 
-        -- Ski season logic (Nov 1 - Apr 30)
+        -- Ski season logic
+        --   Nov-Dec YYYY   -> 'YYYY-YYYY+1' (in-season, current year)
+        --   Jan-Apr YYYY   -> 'YYYY-1-YYYY' (in-season, prior year)
+        --   May-Oct YYYY   -> 'YYYY-1-YYYY' (off-season, attributed to the
+        --                    season that just ended). This mirrors the agent's
+        --                    spec: when the current date is off-season, the
+        --                    "current season" is the most recent one. Without
+        --                    this, validation_query SELECTs that resolve the
+        --                    season for CURRENT_DATE() return NULL during
+        --                    summer and silently break every eval question.
         CASE
             WHEN MONTH(date_day) >= 11 THEN YEAR(date_day) || '-' || (YEAR(date_day) + 1)
-            WHEN MONTH(date_day) <= 4 THEN (YEAR(date_day) - 1) || '-' || YEAR(date_day)
-            ELSE NULL
+            ELSE (YEAR(date_day) - 1) || '-' || YEAR(date_day)
         END AS ski_season,
+
+        -- True ski-season flag (Nov 1 - Apr 30). Use this when you want the
+        -- literal "was the mountain open?" filter rather than the
+        -- off-season-attributed ski_season string above.
+        CASE
+            WHEN MONTH(date_day) >= 11 OR MONTH(date_day) <= 4 THEN TRUE
+            ELSE FALSE
+        END AS is_in_season,
 
         -- Season month (1-6 for Nov-Apr)
         CASE
@@ -136,6 +152,7 @@ SELECT
     quarter_start_date,
     calendar_year,
     ski_season,
+    is_in_season,
     season_month,
     week_of_season,
     is_weekend,
@@ -147,5 +164,9 @@ SELECT
     is_operating,
     CURRENT_TIMESTAMP() AS created_at
 FROM date_attributes
-WHERE ski_season IS NOT NULL  -- Only include ski season dates
+-- Include every date in the range. Off-season rows are tagged with the
+-- ski_season that just ended so that queries like
+--   SELECT SKI_SEASON FROM DIM_DATE WHERE FULL_DATE = CURRENT_DATE()
+-- always return a value. Use is_in_season = TRUE to filter to real
+-- operating days when that's what you actually want.
 ORDER BY date_key
