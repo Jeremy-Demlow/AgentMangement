@@ -541,6 +541,15 @@ def main():
 
             if args.no_wait:
                 logger.info("\nStarted %d eval(s) — use --status to check progress", len(started))
+            elif not started:
+                # Every SV failed to start (either platform-blocked or crashed
+                # before the poll stage). Skip ThreadPoolExecutor (max_workers
+                # must be >0) and let the main exit logic below classify.
+                logger.info(
+                    "\nNo evals successfully started (started=0, platform_blocked=%d). "
+                    "Skipping poll phase.",
+                    len(platform_blocked),
+                )
             else:
                 workers = min(args.max_parallel, len(started))
                 logger.info("\nPolling %d eval(s) in parallel (workers=%d)...", len(started), workers)

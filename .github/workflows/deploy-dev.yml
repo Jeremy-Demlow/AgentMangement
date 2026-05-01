@@ -8,6 +8,8 @@ on:
       - 'semantic-views/definitions/**'
       - 'semantic-views/verified_queries/**'
       - 'agent_management/**'
+      - 'agent-evaluation/**'
+      - 'dbt_ski_resort/**'
       - 'environments/**'
 
   workflow_dispatch: {}
