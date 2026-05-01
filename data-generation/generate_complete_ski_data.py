@@ -1639,12 +1639,22 @@ def main():
 
     logger.info("Loading to Snowflake...")
     load_start = time.perf_counter()
-    conn = SnowflakeConnection.from_snow_cli('snowflake_agents')
+    # Prefer env-var driven connection (portable across envs); fall back to
+    # snow CLI 'snowflake_agents' connection for local use.
+    try:
+        conn = SnowflakeConnection.from_env()
+    except Exception as e:
+        logger.info(f"from_env failed ({e}); trying snow CLI 'snowflake_agents'")
+        conn = SnowflakeConnection.from_snow_cli('snowflake_agents')
     conn.execute(f"USE DATABASE {DATABASE}")
     conn.execute(f"USE SCHEMA {RAW_SCHEMA}")
 
     def load_table(df, table_name, batch_size=100000):
-        """Helper to load DataFrame using PUT/COPY INTO for robust NULL handling"""
+        """Helper to load DataFrame using PUT/COPY INTO for robust NULL handling.
+
+        Uses write_pandas(auto_create_table=True, overwrite=True) on first load
+        so that a fresh environment (no pre-existing tables) bootstraps itself.
+        """
         import tempfile
         import os
 
@@ -1655,6 +1665,27 @@ def main():
         df.columns = df.columns.str.upper()
         n_rows = len(df)
         logger.info(f"Loading {n_rows:,} {table_name}...")
+
+        # Check if table exists; if not, use write_pandas to auto-create
+        try:
+            conn.session.sql(f"DESC TABLE {table_name}").collect()
+            table_exists = True
+        except Exception:
+            table_exists = False
+
+        if not table_exists:
+            logger.info(f"  table {table_name} does not exist — creating via write_pandas")
+            # write_pandas uploads via internal stage + COPY; auto_create_table
+            # infers column types from the DataFrame.
+            conn.session.write_pandas(
+                df,
+                table_name=table_name,
+                auto_create_table=True,
+                overwrite=True,
+                quote_identifiers=False,
+            )
+            logger.info(f"  ✓ Created + loaded {table_name}")
+            return
 
         # Write to temp CSV file (empty string = NULL)
         with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
