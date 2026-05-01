@@ -4,10 +4,12 @@ Reads database, warehouse, and schema names from the project-level
 project.yml so data generation scripts don't hardcode Snowflake object names.
 
 Supports environment-aware database resolution via get_database_for_env().
-The module-level DATABASE constant defaults to prod for backward compatibility.
+The module-level DATABASE constant defaults to prod for backward compatibility,
+but respects SNOWFLAKE_DATABASE env var when set (for CI/cross-env scripts).
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import yaml
@@ -28,9 +30,10 @@ _SF = _DEFAULTS.get("snowflake", {})
 _SCHEMAS = _DEFAULTS.get("schemas", {})
 _ENVS = _CFG.get("environments", {})
 
-DATABASE = _ENVS.get("prod", {}).get("database", "SKI_RESORT_DB")
-WAREHOUSE = _SF.get("warehouse", "COMPUTE_WH")
-RAW_SCHEMA = _SCHEMAS.get("raw", "RAW")
+# Env var takes precedence so the same script can target DEV/QA without edits
+DATABASE = os.environ.get("SNOWFLAKE_DATABASE") or _ENVS.get("prod", {}).get("database", "SKI_RESORT_DB")
+WAREHOUSE = os.environ.get("SNOWFLAKE_WAREHOUSE") or _SF.get("warehouse", "COMPUTE_WH")
+RAW_SCHEMA = os.environ.get("SNOWFLAKE_SCHEMA") or _SCHEMAS.get("raw", "RAW")
 STAGING_SCHEMA = _SCHEMAS.get("staging", "STAGING")
 MARTS_SCHEMA = _SCHEMAS.get("marts", "MARTS")
 DOCS_SCHEMA = "DOCS"
