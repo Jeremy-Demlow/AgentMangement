@@ -37,7 +37,10 @@ DEFAULT_PROMPTS: tuple[str, ...] = (
     "what can you do?",
 )
 
-DEFAULT_LATENCY_CEILING_S: float = 30.0
+DEFAULT_LATENCY_CEILING_S: float = 60.0
+# Cortex Agent cold-start observed up to ~32s for the second prompt on a
+# freshly-deployed agent, so 30s ceiling produces false failures. 60s is
+# still low enough to catch real latency regressions.
 
 
 @dataclass
@@ -120,6 +123,53 @@ def _build_url(base_url: str, agent_fqn: str, *, alias: str | None, version: str
 
 
 def _invoke_once(
+    conn,
+    base_url: str,
+    agent_fqn: str,
+    prompt: str,
+    *,
+    alias: str | None,
+    version: str | None,
+    latency_ceiling_s: float,
+    session: Any | None = None,
+    max_attempts: int = 2,
+    retry_sleep_s: float = 30.0,
+) -> PromptResult:
+    """Send a single prompt with 2-attempt retry on transient 5xx / request errors.
+
+    Cortex Agent REST sometimes returns HTTP 500 INTERNAL_ERROR or connection
+    drops on the first call immediately after deploy. A short sleep + one
+    retry reliably papers over this without masking real failures.
+    """
+    last: PromptResult | None = None
+    for attempt in range(1, max_attempts + 1):
+        result = _invoke_once_raw(
+            conn, base_url, agent_fqn, prompt,
+            alias=alias, version=version,
+            latency_ceiling_s=latency_ceiling_s, session=session,
+        )
+        if result.ok:
+            return result
+        # Retry only on transient-looking failures (HTTP 5xx or request exceptions)
+        err = (result.error or "").lower()
+        transient = (
+            "request_exception" in err
+            or "http 5" in err
+            or "timeout" in err
+            or "internal_error" in err
+        )
+        last = result
+        if not transient or attempt >= max_attempts:
+            return result
+        logger.warning(
+            "smoke prompt transient failure on attempt %d/%d: %s — retrying in %.0fs",
+            attempt, max_attempts, result.error, retry_sleep_s,
+        )
+        time.sleep(retry_sleep_s)
+    return last  # type: ignore[return-value]
+
+
+def _invoke_once_raw(
     conn,
     base_url: str,
     agent_fqn: str,
@@ -212,6 +262,76 @@ def _invoke_once(
     )
 
 
+def _preflight_selector(
+    conn,
+    agent_fqn: str,
+    *,
+    alias: str | None,
+    version: str | None,
+) -> None:
+    """Validate that the requested alias/version exists BEFORE hitting REST.
+
+    Uses ``DESCRIBE AGENT`` to read the canonical alias dict. Raises
+    ``RuntimeError`` with a precise message when:
+      - the agent exists but the requested alias is not set
+      - neither alias nor version is given but DEFAULT alias is missing
+        (bare ``/agents/X:run`` would then fail with the ``Version 'live'
+        not found`` error the deploy pipeline hit in earlier runs)
+
+    Keeps smoke tests from masking post-deploy alias issues as generic
+    Cortex API errors.
+    """
+    # Local import avoids circular dependency with versioning.
+    from agent_management.versioning import get_aliases, list_versions
+
+    try:
+        aliases = get_aliases(conn, agent_fqn)
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(f"smoke preflight: DESCRIBE AGENT {agent_fqn} failed: {exc}") from exc
+
+    if version:
+        versions = {v.name.upper() for v in list_versions(conn, agent_fqn)}
+        if version.upper() not in versions:
+            raise RuntimeError(
+                f"smoke preflight: version {version!r} does not exist on "
+                f"{agent_fqn}. known versions: {sorted(versions)}"
+            )
+        return
+
+    if alias:
+        key = alias.upper()
+        # LIVE/FIRST/LAST/DEFAULT are always computed; user aliases (latest,
+        # validated, production) must be explicitly set.
+        if key in {"FIRST", "LAST", "DEFAULT", "LIVE"}:
+            if key == "LIVE":
+                # LIVE only exists while an uncommitted draft exists, which is
+                # almost never what smoke tests want.
+                from agent_management.versioning import has_live_draft
+                if not has_live_draft(conn, agent_fqn):
+                    raise RuntimeError(
+                        f"smoke preflight: alias 'LIVE' requested but no LIVE "
+                        f"draft exists on {agent_fqn}. Smoke should point at a "
+                        f"user alias (latest/validated/production), not LIVE."
+                    )
+            return
+        if key not in aliases:
+            raise RuntimeError(
+                f"smoke preflight: alias {alias!r} is not set on {agent_fqn}. "
+                f"current aliases: {sorted(aliases)!r}. Deploy must set this "
+                f"alias before smoke-testing."
+            )
+        return
+
+    # No alias, no version: rely on DEFAULT.
+    if "DEFAULT" not in aliases:
+        raise RuntimeError(
+            f"smoke preflight: no alias/version specified and DEFAULT alias "
+            f"is missing on {agent_fqn}. Bare /agents/{agent_fqn}:run would "
+            f"hit the 'Version live not found' path. Pass --alias latest "
+            f"(or equivalent) or make sure deploy set DEFAULT."
+        )
+
+
 def run_smoke_test(
     agent_fqn: str,
     *,
@@ -233,6 +353,11 @@ def run_smoke_test(
         close_after = True
 
     try:
+        # Pre-flight: verify the target selector resolves to a real version
+        # BEFORE hitting the Cortex REST path. A missing alias produces a
+        # cryptic "Version 'X' not found" from the agent runtime; we can
+        # name the problem here instead.
+        _preflight_selector(conn, agent_fqn, alias=alias, version=version)
         base_url = _base_url(conn)
         selector = f"{agent_fqn}!{version or alias}" if (version or alias) else agent_fqn
         logger.info("smoke-test target=%s prompts=%d", selector, len(prompts))

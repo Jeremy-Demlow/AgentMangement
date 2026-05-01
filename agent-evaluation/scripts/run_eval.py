@@ -455,9 +455,19 @@ def compute_summary(results: list[dict]) -> dict[str, dict]:
 
 
 def check_thresholds(summary: dict[str, dict], thresholds: dict[str, float]) -> bool:
+    # If no metrics were computed at all, something went wrong (e.g.,
+    # METRIC_NAME returned NULL for every row). A silent pass here hides
+    # real breakage — treat empty summary against any configured threshold
+    # as a failure.
+    if thresholds and not summary:
+        print("  ERROR: no metrics present in results; eval likely malformed")
+        return False
     passed = True
+    checked = 0
     for metric, threshold in thresholds.items():
         if metric not in summary:
+            print(f"  {metric:25s} MISSING (threshold {threshold:.2f}) [FAIL]")
+            passed = False
             continue
         avg = summary[metric]["avg"]
         ok = avg >= threshold
@@ -465,6 +475,10 @@ def check_thresholds(summary: dict[str, dict], thresholds: dict[str, float]) -> 
         print(f"  {metric:25s} {avg:.3f}  (threshold: {threshold:.2f})  [{status}]")
         if not ok:
             passed = False
+        checked += 1
+    if thresholds and checked == 0:
+        print("  ERROR: no configured threshold matched any reported metric")
+        return False
     return passed
 
 
@@ -496,58 +510,40 @@ def save_results_json(config: dict, run_name: str, summary: dict, results: list[
 
 
 def _connect(args, env_config: dict = None):
-    if args.account and args.user and args.private_key_path:
-        from cryptography.hazmat.primitives import serialization
-        key_path = os.path.expanduser(args.private_key_path)
-        key_data = Path(key_path).read_bytes()
-        private_key = serialization.load_pem_private_key(key_data, password=None)
-        pkb = private_key.private_bytes(
-            encoding=serialization.Encoding.DER,
-            format=serialization.PrivateFormat.PKCS8,
-            encryption_algorithm=serialization.NoEncryption(),
-        )
-        conn_kwargs = dict(account=args.account, user=args.user, private_key=pkb)
-        if env_config:
-            deploy = env_config.get("deployment", {})
-            conn_kwargs.update({
-                k: v for k, v in {
-                    "warehouse": deploy.get("warehouse"),
-                    "database": deploy.get("database"),
-                    "schema": deploy.get("schema"),
-                    "role": env_config.get("snowflake", {}).get("role"),
-                }.items() if v
-            })
-        return snowflake.connector.connect(**conn_kwargs)
-    elif args.connection:
-        toml_path = Path("~/.snowflake/connections.toml").expanduser()
-        if toml_path.exists():
-            with open(toml_path, "rb") as f:
-                connections = tomllib.load(f)
-            if args.connection in connections:
-                cfg = connections[args.connection]
-                key_path_raw = cfg.get("private_key_path", "")
-                if key_path_raw and "~" in key_path_raw:
-                    key_path = str(Path(key_path_raw).expanduser())
-                    conn_kwargs = dict(
-                        account=cfg["account"],
-                        user=cfg["user"],
-                        private_key_file=key_path,
-                    )
-                    if env_config:
-                        deploy = env_config.get("deployment", {})
-                        conn_kwargs.update({
-                            k: v for k, v in {
-                                "warehouse": deploy.get("warehouse"),
-                                "database": deploy.get("database"),
-                                "schema": deploy.get("schema"),
-                                "role": env_config.get("snowflake", {}).get("role"),
-                            }.items() if v
-                        })
-                    return snowflake.connector.connect(**conn_kwargs)
-        return snowflake.connector.connect(connection_name=args.connection)
-    else:
-        print("Error: --connection or (--account + --user + --private-key-path) required")
-        sys.exit(1)
+    """Open a Snowflake connection via SnowflakeConfig.
+
+    Hard-fails with ConfigError if role/warehouse/database cannot be resolved
+    from (kwargs > env vars > env_config yaml). Never silently falls back to
+    the authenticating user's DEFAULT_ROLE — that bug is why this function
+    was rewritten (MCP_OPERATOR crash on every PROD eval).
+    """
+    # Import locally to keep module import-time light for non-connecting code paths.
+    try:
+        from agent_management.snowflake_config import SnowflakeConfig, connect as _connect_cfg
+    except ImportError:
+        # Fallback only if agent_management package isn't importable (rare —
+        # indicates PYTHONPATH is misconfigured). Preserve old behaviour so
+        # error messages are familiar.
+        import sys as _sys
+        print("ERROR: agent_management.snowflake_config not importable. "
+              "Set PYTHONPATH to repo root.", file=_sys.stderr)
+        _sys.exit(2)
+
+    sf = (env_config or {}).get("snowflake", {}) or {}
+    deploy = (env_config or {}).get("deployment", {}) or {}
+
+    cfg = SnowflakeConfig.resolve(
+        env=getattr(args, "env", None),
+        account=getattr(args, "account", None) or sf.get("account"),
+        user=getattr(args, "user", None) or sf.get("user"),
+        role=sf.get("role"),  # run_eval.py has no --role flag; rely on yaml/env
+        warehouse=sf.get("warehouse") or deploy.get("warehouse"),
+        database=deploy.get("database"),
+        schema=deploy.get("schema"),
+        connection_name=getattr(args, "connection", None),
+        private_key_path=getattr(args, "private_key_path", None) or sf.get("private_key_path"),
+    )
+    return _connect_cfg(cfg)
 
 
 def main():

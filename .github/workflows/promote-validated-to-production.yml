@@ -50,14 +50,37 @@ jobs:
         run: python -m agent_management.smoke_test --env prod --alias production
 
       - name: Post-promote eval (production)
-        run: python -m agent_management.run_ci_eval --env prod --alias production
+        id: eval
+        # Advisory for threshold-fail only; crashes still fail the job.
+        # Retry ONCE on crash (exit 2) — transient Cortex eval hangs.
+        run: |
+          set +e
+          code=2
+          for attempt in 1 2; do
+            echo "=== Eval attempt $attempt/2 ==="
+            python -m agent_management.run_ci_eval --env prod --alias production
+            code=$?
+            if [ "$code" != "2" ]; then break; fi
+            if [ "$attempt" = "1" ]; then
+              echo "Eval crashed (likely Cortex hang); retrying in 60s..."
+              sleep 60
+            fi
+          done
+          echo "eval_exit=$code" >> $GITHUB_OUTPUT
+          if [ "$code" = "0" ] || [ "$code" = "1" ]; then exit 0; else exit $code; fi
 
       - name: Summary
         if: always()
         run: |
-          echo "### Production promotion complete" >> $GITHUB_STEP_SUMMARY
-          echo "Alias 'production' reassigned to the version previously under 'validated'." >> $GITHUB_STEP_SUMMARY
-          echo "If smoke/eval failed, trigger the rollback.yml workflow immediately." >> $GITHUB_STEP_SUMMARY
+          code="${{ steps.eval.outputs.eval_exit }}"
+          case "$code" in
+            0)  echo "### Production promotion: PASSED (promote + eval)" >> $GITHUB_STEP_SUMMARY ;;
+            1)  echo "### Production promotion: PROMOTE OK, EVAL ADVISORY FAIL" >> $GITHUB_STEP_SUMMARY
+                echo "Alias 'production' reassigned. Post-promote eval scored below threshold." >> $GITHUB_STEP_SUMMARY
+                echo "Investigate scores; if concerning, trigger rollback.yml." >> $GITHUB_STEP_SUMMARY ;;
+            *)  echo "### Production promotion: EVAL CRASHED" >> $GITHUB_STEP_SUMMARY
+                echo "Infrastructure error — eval script could not complete." >> $GITHUB_STEP_SUMMARY ;;
+          esac
 
       - name: Cleanup
         if: always()

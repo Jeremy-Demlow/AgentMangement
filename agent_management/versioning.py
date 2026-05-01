@@ -134,15 +134,78 @@ def version_exists(conn, agent_fqn: str, version: str) -> bool:
 
 
 def get_aliases(conn, agent_fqn: str) -> dict[str, str]:
-    """Return alias -> version mapping (from SHOW VERSIONS ``alias`` column).
+    """Return alias -> version mapping.
 
-    Alias names are uppercased by Snowflake.
+    Reads from ``DESCRIBE AGENT`` which exposes the full alias dict
+    (DEFAULT, FIRST, LAST, LATEST, plus user-assigned aliases) as JSON on
+    the ``aliases`` column. ``SHOW VERSIONS`` only carries a per-row ``alias``
+    value which is frequently empty even when aliases exist, so it is not a
+    reliable source for this mapping.
+
+    Alias names come back uppercased.
     """
+    _assert_identifier(agent_fqn, kind="agent fqn")
+    cur = conn.cursor()
+    cur.execute(f"DESCRIBE AGENT {agent_fqn}")
+    cols = [c[0].lower() for c in cur.description]
+    row = cur.fetchone()
+    if not row:
+        return {}
+    row_dict = dict(zip(cols, row))
+    raw = row_dict.get("aliases")
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else raw
+    except (json.JSONDecodeError, TypeError):
+        return {}
     out: dict[str, str] = {}
-    for v in list_versions(conn, agent_fqn):
-        if v.alias and v.name:
-            out[v.alias.upper()] = v.name.upper()
+    for alias, version in (data or {}).items():
+        if alias and version:
+            out[str(alias).upper()] = str(version).upper()
     return out
+
+
+def assert_alias_points_to(
+    conn,
+    agent_fqn: str,
+    alias: str,
+    expected_version: str,
+) -> None:
+    """Fail loudly if ``alias`` on ``agent_fqn`` does not point at
+    ``expected_version``. Runs after set_alias() to catch alias misses.
+
+    Also verifies the DEFAULT alias is populated — without DEFAULT, REST
+    calls to ``/agents/<name>:run`` (no selector) fail with
+    ``Version 'live' not found`` and smoke tests silently misroute.
+    """
+    _assert_identifier(agent_fqn, kind="agent fqn")
+    _assert_version_name(expected_version)
+    aliases = get_aliases(conn, agent_fqn)
+    key = alias.upper()
+    actual = aliases.get(key)
+    if not actual:
+        raise RuntimeError(
+            f"post-deploy assertion failed: alias {alias!r} is not set on "
+            f"{agent_fqn}. aliases={aliases!r}"
+        )
+    if actual.upper() != expected_version.upper():
+        raise RuntimeError(
+            f"post-deploy assertion failed: alias {alias!r} on {agent_fqn} "
+            f"points at {actual!r}, expected {expected_version!r}. "
+            f"aliases={aliases!r}"
+        )
+    if "DEFAULT" not in aliases:
+        raise RuntimeError(
+            f"post-deploy assertion failed: DEFAULT alias missing on "
+            f"{agent_fqn}. A committed version must be the DEFAULT or REST "
+            f"calls without a selector will fail with 'Version live not found'. "
+            f"aliases={aliases!r}"
+        )
+    logger.info(
+        "post-deploy assertion OK: %s[%s]=%s (DEFAULT=%s)",
+        agent_fqn, alias, actual, aliases.get("DEFAULT"),
+    )
 
 
 def has_live_draft(conn, agent_fqn: str) -> bool:
@@ -336,6 +399,7 @@ def _cmd_log(args) -> int:
 
 def _cmd_promote(args) -> int:
     from agent_management.utils.config import get_all_configured_agents
+    from agent_management.version_log import discover_identity, record_deploy
 
     config = load_env_config(args.env)
     conn = connect(config)
@@ -345,10 +409,39 @@ def _cmd_promote(args) -> int:
             agents = [args.agent if "." in args.agent else get_agent_fqn(config, args.agent)]
         else:
             agents = [get_agent_fqn(config, name) for name in get_all_configured_agents()]
+
+        identity = discover_identity(args.env)
         promoted: dict[str, str] = {}
         for fqn in agents:
-            version = promote_alias(conn, fqn, from_alias=args.from_alias, to_alias=args.to_alias)
+            # Capture previous holder of to_alias before move, for audit.
+            before = get_aliases(conn, fqn)
+            prev_on_to = before.get(args.to_alias.upper())
+            version = promote_alias(
+                conn, fqn, from_alias=args.from_alias, to_alias=args.to_alias
+            )
             promoted[fqn] = version
+            # Append audit row so `versioning log` shows the promotion.
+            try:
+                record_deploy(
+                    conn,
+                    database=config["deployment"]["database"],
+                    schema=config["deployment"]["agents_schema"],
+                    agent_fqn=fqn,
+                    version_name=version,
+                    alias_set=args.to_alias,
+                    identity=identity,
+                    first_deploy=False,
+                    version_before=prev_on_to,
+                    spec_summary=(
+                        f"PROMOTE: {args.from_alias} -> {args.to_alias} "
+                        f"({prev_on_to or '<unset>'} -> {version})"
+                    ),
+                    extra={"event_type": "promote",
+                           "from_alias": args.from_alias,
+                           "to_alias": args.to_alias},
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("promote audit append failed (non-fatal): %s", exc)
         print(json.dumps(promoted, indent=2))
     finally:
         conn.close()

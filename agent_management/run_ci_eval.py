@@ -99,6 +99,12 @@ def build_cmd(rendered_config_path: Path, args) -> list[str]:
         cmd.append("--no-wait")
     if args.poll_interval != 30:
         cmd.extend(["--poll-interval", str(args.poll_interval)])
+    # CRITICAL: pass --env so run_eval loads env_config and sets role from
+    # environments/<env>.env.yml. Without this the connector falls back to
+    # the user's DEFAULT_ROLE (which may not have AGENTS privs), producing
+    # cryptic 'Insufficient privileges to operate on schema' errors.
+    if args.env:
+        cmd.extend(["--env", args.env])
     # Versioning selectors (informational — EXECUTE_AI_EVALUATION evaluates
     # the default version regardless; run_eval.py prints a warning).
     if getattr(args, "alias", None):
@@ -189,6 +195,7 @@ def main():
                 logger.info("  Finished: %s — %s", agent_name, status)
 
         overall_passed = True
+        had_crash = False
         run_names = {}
         for agent_name, parsed, _ in prepared:
             returncode, stdout, stderr = results[agent_name]
@@ -205,7 +212,20 @@ def main():
                 for line in stderr.rstrip().split("\n"):
                     print(line, file=sys.stderr)
             if returncode != 0:
-                logger.error("RESULT: %s FAILED (exit code %d)", agent_name, returncode)
+                # Distinguish a true crash (no THRESHOLD CHECK section in stdout
+                # or a Traceback in stderr) from a threshold failure (eval ran,
+                # scored below threshold). Crashes are infrastructure bugs and
+                # must fail the job hard; threshold fails are advisory content
+                # signals.
+                crashed = (
+                    "THRESHOLD CHECK" not in (stdout or "")
+                    or "Traceback" in (stderr or "")
+                )
+                if crashed:
+                    logger.error("RESULT: %s CRASHED (exit code %d) — infrastructure error", agent_name, returncode)
+                    had_crash = True
+                else:
+                    logger.error("RESULT: %s FAILED (exit code %d) — threshold", agent_name, returncode)
                 overall_passed = False
             else:
                 logger.info("RESULT: %s PASSED", agent_name)
@@ -217,9 +237,15 @@ def main():
             logger.info("Run names written to %s", run_names_file)
 
     logger.info("\n%s", "=" * 60)
-    status = "ALL PASSED" if overall_passed else "FAILURES DETECTED"
-    logger.info("Overall: %s", status)
-    sys.exit(0 if overall_passed else 1)
+    if had_crash:
+        logger.error("Overall: CRASH DETECTED — evaluation could not complete")
+        sys.exit(2)
+    elif not overall_passed:
+        logger.warning("Overall: EVAL RAN, THRESHOLDS NOT MET")
+        sys.exit(1)
+    else:
+        logger.info("Overall: ALL PASSED")
+        sys.exit(0)
 
 
 if __name__ == "__main__":

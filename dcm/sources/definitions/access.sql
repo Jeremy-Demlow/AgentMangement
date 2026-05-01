@@ -10,6 +10,10 @@ COMMENT = 'DML on RAW/STAGING, read on all, stage write for evals';
 DEFINE DATABASE ROLE {{db}}.ANALYST
 COMMENT = 'Read-only: SELECT on all schemas (includes future objects)';
 
+-- NOTE: The template variable is named {{wh_role}} for historical reasons but
+-- the actual role name follows the pattern AM_SKI_RESORT_WH_USER[_<env>]. Do
+-- not rename without coordinating with manifest.yml and all target configs.
+-- See docs/operations/IAC_GAPS.md #5.
 DEFINE ROLE {{wh_role}}
 COMMENT = 'Warehouse USAGE for {{wh_name}}';
 
@@ -22,6 +26,13 @@ GRANT ROLE {{deploy_role}} TO ROLE SYSADMIN;
 GRANT USAGE ON WAREHOUSE {{wh_name}} TO ROLE {{wh_role}};
 GRANT EXECUTE TASK ON ACCOUNT TO ROLE {{deploy_role}};
 GRANT USAGE ON DATABASE {{db}} TO DATABASE ROLE {{db}}.ANALYST;
+
+-- Cortex Analyst Evaluations (SV Eval Gate) requires this account-level
+-- privilege to read the AI OBS events table. Without it, EXECUTE_AI_EVALUATION
+-- fails with "Semantic View Optimization does not exist or not authorized".
+-- Ref: Snowflake bug notice — fix rolling out, but this grant is needed for
+-- reliable evals. See docs/operations/IAC_GAPS.md #8.
+GRANT READ UNREDACTED AI OBSERVABILITY EVENTS TABLE ON ACCOUNT TO ROLE {{deploy_role}};
 
 {{ schema_read_grants(db, 'RAW', 'ANALYST') }}
 {{ schema_read_grants(db, 'STAGING', 'ANALYST') }}
@@ -49,5 +60,6 @@ GRANT USAGE ON DATABASE {{db}} TO DATABASE ROLE {{db}}.ANALYST;
 
 {% for user_name in users %}
 GRANT ROLE {{wh_role}} TO USER {{user_name}};
+GRANT ROLE {{deploy_role}} TO USER {{user_name}};
 GRANT DATABASE ROLE {{db}}.DEVELOPER TO USER {{user_name}};
 {% endfor %}

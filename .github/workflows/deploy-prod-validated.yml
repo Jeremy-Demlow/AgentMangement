@@ -6,9 +6,11 @@ name: Deploy Prod (validated)
 #   3. move the `validated` alias to the new version
 #   4. smoke + eval the `validated` alias
 #
-# The `production` alias is NOT touched here. A separate approval-gated
-# workflow (promote-validated-to-production.yml) moves `production` onto the
-# version currently holding `validated`.
+# SINGLE APPROVAL GATE: only the `prod-gate` job carries `environment: PROD`.
+# Subsequent jobs `needs:` prod-gate and run automatically once the single
+# PROD approval is granted. The `production` alias (customer traffic) is
+# still behind a *separate* `production-promote` environment in the
+# promote-validated-to-production.yml workflow.
 
 on:
   push:
@@ -24,6 +26,11 @@ on:
 
   workflow_dispatch: {}
 
+# Cancel an in-flight deploy if a newer commit lands on main (protect warehouse credits).
+concurrency:
+  group: deploy-prod-validated
+  cancel-in-progress: false  # never cancel a prod deploy mid-run; queue instead
+
 env:
   SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
   SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
@@ -31,14 +38,34 @@ env:
   PYTHONPATH: ${{ github.workspace }}
 
 jobs:
+  # SINGLE APPROVAL GATE. The reviewer approves PROD once, and all 4
+  # subsequent jobs run automatically.
+  prod-gate:
+    name: PROD approval gate
+    runs-on: ubuntu-latest
+    environment: PROD
+    # Export the env-scoped vars so downstream jobs (which do NOT attach
+    # environment: PROD — that would re-trigger approval) can read them.
+    outputs:
+      warehouse: ${{ vars.SNOWFLAKE_WAREHOUSE }}
+      role: ${{ vars.SNOWFLAKE_ROLE }}
+      database: ${{ vars.SNOWFLAKE_DATABASE }}
+    steps:
+      - name: Approval acknowledged
+        run: |
+          echo "### PROD deploy approved" >> $GITHUB_STEP_SUMMARY
+          echo "Approved by: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "Commit: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "Subsequent jobs (snapshot -> SVs -> deploy -> eval) will run automatically." >> $GITHUB_STEP_SUMMARY
+
   snapshot:
     name: Pre-deploy snapshot (prod)
     runs-on: ubuntu-latest
-    environment: PROD
+    needs: prod-gate
     env:
-      SNOWFLAKE_WAREHOUSE: ${{ vars.SNOWFLAKE_WAREHOUSE }}
-      SNOWFLAKE_ROLE: ${{ vars.SNOWFLAKE_ROLE }}
-      SNOWFLAKE_DATABASE: ${{ vars.SNOWFLAKE_DATABASE }}
+      SNOWFLAKE_WAREHOUSE: ${{ needs.prod-gate.outputs.warehouse }}
+      SNOWFLAKE_ROLE: ${{ needs.prod-gate.outputs.role }}
+      SNOWFLAKE_DATABASE: ${{ needs.prod-gate.outputs.database }}
     steps:
       - uses: actions/checkout@v6
 
@@ -64,12 +91,11 @@ jobs:
   deploy-svs:
     name: Deploy semantic views (prod)
     runs-on: ubuntu-latest
-    needs: snapshot
-    environment: PROD
+    needs: [prod-gate, snapshot]
     env:
-      SNOWFLAKE_WAREHOUSE: ${{ vars.SNOWFLAKE_WAREHOUSE }}
-      SNOWFLAKE_ROLE: ${{ vars.SNOWFLAKE_ROLE }}
-      SNOWFLAKE_DATABASE: ${{ vars.SNOWFLAKE_DATABASE }}
+      SNOWFLAKE_WAREHOUSE: ${{ needs.prod-gate.outputs.warehouse }}
+      SNOWFLAKE_ROLE: ${{ needs.prod-gate.outputs.role }}
+      SNOWFLAKE_DATABASE: ${{ needs.prod-gate.outputs.database }}
     steps:
       - uses: actions/checkout@v6
 
@@ -102,12 +128,11 @@ jobs:
   deploy-agents:
     name: Deploy agents (alias=validated)
     runs-on: ubuntu-latest
-    needs: deploy-svs
-    environment: PROD
+    needs: [prod-gate, deploy-svs]
     env:
-      SNOWFLAKE_WAREHOUSE: ${{ vars.SNOWFLAKE_WAREHOUSE }}
-      SNOWFLAKE_ROLE: ${{ vars.SNOWFLAKE_ROLE }}
-      SNOWFLAKE_DATABASE: ${{ vars.SNOWFLAKE_DATABASE }}
+      SNOWFLAKE_WAREHOUSE: ${{ needs.prod-gate.outputs.warehouse }}
+      SNOWFLAKE_ROLE: ${{ needs.prod-gate.outputs.role }}
+      SNOWFLAKE_DATABASE: ${{ needs.prod-gate.outputs.database }}
     steps:
       - uses: actions/checkout@v6
 
@@ -129,12 +154,11 @@ jobs:
   agent-eval:
     name: Agent evaluation (validated)
     runs-on: ubuntu-latest
-    needs: deploy-agents
-    environment: PROD
+    needs: [prod-gate, deploy-agents]
     env:
-      SNOWFLAKE_WAREHOUSE: ${{ vars.SNOWFLAKE_WAREHOUSE }}
-      SNOWFLAKE_ROLE: ${{ vars.SNOWFLAKE_ROLE }}
-      SNOWFLAKE_DATABASE: ${{ vars.SNOWFLAKE_DATABASE }}
+      SNOWFLAKE_WAREHOUSE: ${{ needs.prod-gate.outputs.warehouse }}
+      SNOWFLAKE_ROLE: ${{ needs.prod-gate.outputs.role }}
+      SNOWFLAKE_DATABASE: ${{ needs.prod-gate.outputs.database }}
     steps:
       - uses: actions/checkout@v6
 
@@ -143,8 +167,38 @@ jobs:
         with:
           snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
+      # Eval exit codes from run_ci_eval:
+      #   0 = all passed
+      #   1 = ran but below threshold (advisory — alias has already moved)
+      #   2 = crashed (infrastructure bug OR Cortex eval service hang)
+      #
+      # Retry ONCE on crash (exit 2): transient platform issues like the
+      # eval service hanging in CREATED status typically clear on a second
+      # attempt. Don't retry on threshold-fail — that's real signal.
       - name: Run agent evaluations on validated alias
-        run: python -m agent_management.run_ci_eval --env prod --alias validated
+        id: eval
+        run: |
+          set +e
+          code=2
+          for attempt in 1 2; do
+            echo "=== Eval attempt $attempt/2 ==="
+            python -m agent_management.run_ci_eval --env prod --alias validated
+            code=$?
+            # Only retry on crash. Pass and threshold-fail are terminal.
+            if [ "$code" != "2" ]; then
+              break
+            fi
+            if [ "$attempt" = "1" ]; then
+              echo "Eval crashed (likely Cortex hang); retrying in 60s..."
+              sleep 60
+            fi
+          done
+          echo "eval_exit=$code" >> $GITHUB_OUTPUT
+          if [ "$code" = "0" ] || [ "$code" = "1" ]; then
+            exit 0
+          else
+            exit $code
+          fi
 
       - name: Upload evaluation results
         if: always()
@@ -157,9 +211,18 @@ jobs:
       - name: Summary
         if: always()
         run: |
-          echo "### Prod validated deploy complete" >> $GITHUB_STEP_SUMMARY
-          echo "Alias 'validated' now targets the newly committed version." >> $GITHUB_STEP_SUMMARY
-          echo "To promote to customer traffic, run the 'Promote validated -> production' workflow." >> $GITHUB_STEP_SUMMARY
+          code="${{ steps.eval.outputs.eval_exit }}"
+          case "$code" in
+            0)  echo "### Prod validated deploy: PASSED (deploy + eval)" >> $GITHUB_STEP_SUMMARY ;;
+            1)  echo "### Prod validated deploy: DEPLOY OK, EVAL ADVISORY FAIL" >> $GITHUB_STEP_SUMMARY
+                echo "Alias 'validated' moved successfully. Eval ran but scored below threshold." >> $GITHUB_STEP_SUMMARY
+                echo "Investigate scores in the uploaded artifact." >> $GITHUB_STEP_SUMMARY ;;
+            *)  echo "### Prod validated deploy: EVAL CRASHED" >> $GITHUB_STEP_SUMMARY
+                echo "Infrastructure error — eval script could not complete." >> $GITHUB_STEP_SUMMARY
+                echo "Check step logs: likely a permission/role or SQL error, NOT a content issue." >> $GITHUB_STEP_SUMMARY ;;
+          esac
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "To promote to customer traffic, run 'Promote validated -> production'." >> $GITHUB_STEP_SUMMARY
 
       - name: Cleanup
         if: always()

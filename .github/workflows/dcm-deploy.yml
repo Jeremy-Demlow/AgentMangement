@@ -1,5 +1,19 @@
 name: Deploy Infrastructure (DCM)
 
+# Deploys DCM (Database Change Management) project to DEV (push to main) or
+# any target (manual dispatch).
+#
+# Connection strategy: use the same snowflake-setup composite action as the
+# other workflows (Python + key file) and drive `snow dcm` via the
+# SNOWFLAKE_CONNECTIONS_DEFAULT_* env-var family. This is the only env-var
+# shape the snow CLI reliably respects for every subcommand (the bare
+# SNOWFLAKE_AUTHENTICATOR is NOT picked up by `snow dcm create`).
+#
+# Historical note: we previously used Snowflake-Labs/snowflake_dcm_projects
+# actions but they called `snow dcm create --if-not-exists` in a way that
+# ignored JWT auth env vars, making push-to-main always fail. The direct
+# snow CLI path works consistently and matches how engineers run DCM locally.
+
 on:
   pull_request:
     branches: [main]
@@ -27,11 +41,16 @@ on:
         default: true
         type: boolean
 
+# snow CLI connection config (nested format). These map onto the "default"
+# named connection the CLI implicitly constructs from env vars.
 env:
   DCM_PROJECT_PATH: dcm/
-  SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
-  SNOWFLAKE_PRIVATE_KEY_RAW: ${{ secrets.SNOWFLAKE_PRIVATE_KEY_RAW }}
-  SNOWFLAKE_AUTHENTICATOR: SNOWFLAKE_JWT
+  SNOWFLAKE_CONNECTIONS_DEFAULT_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+  SNOWFLAKE_CONNECTIONS_DEFAULT_USER: ${{ secrets.SNOWFLAKE_USER }}
+  SNOWFLAKE_CONNECTIONS_DEFAULT_ROLE: ACCOUNTADMIN
+  SNOWFLAKE_CONNECTIONS_DEFAULT_WAREHOUSE: COMPUTE_WH
+  SNOWFLAKE_CONNECTIONS_DEFAULT_AUTHENTICATOR: SNOWFLAKE_JWT
+  SNOWFLAKE_CONNECTIONS_DEFAULT_PRIVATE_KEY_FILE: /tmp/snowflake_key.p8
 
 permissions:
   id-token: write
@@ -39,7 +58,7 @@ permissions:
   pull-requests: write
 
 jobs:
-  # --- PR: plan only, post as comment ---
+  # PR: plan only, post to step summary.
   plan-pr:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -47,14 +66,47 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: Snowflake-Labs/snowflake_dcm_projects/actions/dcm-plan@v1
+      - name: Setup Snowflake
+        uses: ./.github/actions/snowflake-setup
         with:
-          target: DEV
-          project-path: ${{ env.DCM_PROJECT_PATH }}
-          snowflake-user: ${{ env.SNOWFLAKE_USER }}
-          comment-on-pr: "true"
+          snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
-  # --- Push to main: plan + deploy DEV ---
+      - name: Write snow CLI connection file
+        # snow CLI needs a connections.toml section for any name passed via
+        # -c. Env-only connections aren't supported. We write an empty
+        # [default] stub; the SNOWFLAKE_CONNECTIONS_DEFAULT_* env vars then
+        # populate every field of the connection.
+        run: |
+          mkdir -p ~/.snowflake
+          printf '[default]\n' > ~/.snowflake/connections.toml
+          chmod 600 ~/.snowflake/connections.toml
+
+      - name: Connection sanity
+        run: |
+          set -euo pipefail
+          snow --version
+          snow connection test -c default | tee /tmp/conn_test.txt
+          grep -E 'Status\s+\|\s+OK' /tmp/conn_test.txt
+
+      - name: DCM plan (DEV)
+        working-directory: ${{ env.DCM_PROJECT_PATH }}
+        run: |
+          set -euo pipefail
+          snow dcm create --if-not-exists --target DEV -c default
+          snow dcm plan --target DEV -c default | tee /tmp/dcm_plan.txt
+          {
+            echo "### DCM Plan (DEV)"
+            echo ""
+            echo '```'
+            cat /tmp/dcm_plan.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cleanup
+        if: always()
+        run: rm -f /tmp/snowflake_key.p8 ~/.snowflake/connections.toml
+
+  # Push to main: create (idempotent) + deploy to DEV.
   deploy-dev:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -62,21 +114,42 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: Snowflake-Labs/snowflake_dcm_projects/actions/dcm-plan@v1
+      - name: Setup Snowflake
+        uses: ./.github/actions/snowflake-setup
         with:
-          target: DEV
-          project-path: ${{ env.DCM_PROJECT_PATH }}
-          snowflake-user: ${{ env.SNOWFLAKE_USER }}
+          snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
-      - uses: Snowflake-Labs/snowflake_dcm_projects/actions/dcm-deploy@v1
-        with:
-          target: DEV
-          project-path: ${{ env.DCM_PROJECT_PATH }}
-          snowflake-user: ${{ env.SNOWFLAKE_USER }}
-          allow-drops: "false"
-          post-scripts-path: ""
+      - name: Write snow CLI connection file
+        run: |
+          mkdir -p ~/.snowflake
+          printf '[default]\n' > ~/.snowflake/connections.toml
+          chmod 600 ~/.snowflake/connections.toml
 
-  # --- Manual: plan (+ optional deploy) for any target ---
+      - name: Connection sanity
+        run: |
+          set -euo pipefail
+          snow --version
+          snow connection test -c default
+
+      - name: DCM create + deploy (DEV)
+        working-directory: ${{ env.DCM_PROJECT_PATH }}
+        run: |
+          set -euo pipefail
+          snow dcm create --if-not-exists --target DEV -c default
+          snow dcm deploy --target DEV -c default | tee /tmp/dcm_deploy.txt
+          {
+            echo "### DCM Deploy (DEV)"
+            echo ""
+            echo '```'
+            cat /tmp/dcm_deploy.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cleanup
+        if: always()
+        run: rm -f /tmp/snowflake_key.p8 ~/.snowflake/connections.toml
+
+  # Manual dispatch: plan + optional deploy for DEV or PROD.
   plan-manual:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -84,17 +157,40 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: Snowflake-Labs/snowflake_dcm_projects/actions/dcm-connection-test@v1
+      - name: Setup Snowflake
+        uses: ./.github/actions/snowflake-setup
         with:
-          target: ${{ inputs.target }}
-          project-path: ${{ env.DCM_PROJECT_PATH }}
-          snowflake-user: ${{ env.SNOWFLAKE_USER }}
+          snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
-      - uses: Snowflake-Labs/snowflake_dcm_projects/actions/dcm-plan@v1
-        with:
-          target: ${{ inputs.target }}
-          project-path: ${{ env.DCM_PROJECT_PATH }}
-          snowflake-user: ${{ env.SNOWFLAKE_USER }}
+      - name: Write snow CLI connection file
+        run: |
+          mkdir -p ~/.snowflake
+          printf '[default]\n' > ~/.snowflake/connections.toml
+          chmod 600 ~/.snowflake/connections.toml
+
+      - name: Connection sanity
+        run: |
+          set -euo pipefail
+          snow --version
+          snow connection test -c default
+
+      - name: DCM plan (${{ inputs.target }})
+        working-directory: ${{ env.DCM_PROJECT_PATH }}
+        run: |
+          set -euo pipefail
+          snow dcm create --if-not-exists --target "${{ inputs.target }}" -c default
+          snow dcm plan --target "${{ inputs.target }}" -c default | tee /tmp/dcm_plan.txt
+          {
+            echo "### DCM Plan (${{ inputs.target }})"
+            echo ""
+            echo '```'
+            cat /tmp/dcm_plan.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cleanup
+        if: always()
+        run: rm -f /tmp/snowflake_key.p8 ~/.snowflake/connections.toml
 
   deploy-manual:
     if: github.event_name == 'workflow_dispatch' && inputs.plan_only == false
@@ -104,16 +200,30 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: Snowflake-Labs/snowflake_dcm_projects/actions/dcm-plan@v1
+      - name: Setup Snowflake
+        uses: ./.github/actions/snowflake-setup
         with:
-          target: ${{ inputs.target }}
-          project-path: ${{ env.DCM_PROJECT_PATH }}
-          snowflake-user: ${{ env.SNOWFLAKE_USER }}
+          snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
-      - uses: Snowflake-Labs/snowflake_dcm_projects/actions/dcm-deploy@v1
-        with:
-          target: ${{ inputs.target }}
-          project-path: ${{ env.DCM_PROJECT_PATH }}
-          snowflake-user: ${{ env.SNOWFLAKE_USER }}
-          allow-drops: "false"
-          post-scripts-path: ""
+      - name: Write snow CLI connection file
+        run: |
+          mkdir -p ~/.snowflake
+          printf '[default]\n' > ~/.snowflake/connections.toml
+          chmod 600 ~/.snowflake/connections.toml
+
+      - name: DCM deploy (${{ inputs.target }})
+        working-directory: ${{ env.DCM_PROJECT_PATH }}
+        run: |
+          set -euo pipefail
+          snow dcm deploy --target "${{ inputs.target }}" -c default | tee /tmp/dcm_deploy.txt
+          {
+            echo "### DCM Deploy (${{ inputs.target }})"
+            echo ""
+            echo '```'
+            cat /tmp/dcm_deploy.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cleanup
+        if: always()
+        run: rm -f /tmp/snowflake_key.p8 ~/.snowflake/connections.toml
