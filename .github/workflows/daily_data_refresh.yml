@@ -246,6 +246,48 @@ jobs:
           echo "   Days to generate: $DAYS"
           echo "   End date: $TODAY"
 
+      # ─── Reconcile RAW Schema Drift ─────────────────────────────────────
+      # Snowflake's write_pandas(auto_create_table=True) infers column types
+      # from the FIRST sample. CUSTOMER_FEEDBACK was bootstrapped with
+      # SUBCATEGORY=NULL so the inferred type became NUMBER(38,0). The daily
+      # incremental generator emits string subcategories (speed, value, ...)
+      # which fails to cast. Idempotently widen the column to VARCHAR so
+      # appends succeed. Safe to run on every refresh - the IS NOT NULL guard
+      # short-circuits when the column type is already correct.
+      - name: Reconcile RAW Schema Drift
+        if: steps.plan.outputs.skip_generation != 'true'
+        env:
+          PROD_DB: ${{ steps.config.outputs.prod_database }}
+          RAW_SCHEMA: ${{ steps.config.outputs.raw_schema }}
+          SNOWFLAKE_CONNECTIONS_DEFAULT_DATABASE: ${{ steps.config.outputs.prod_database }}
+          SNOWFLAKE_CONNECTIONS_DEFAULT_WAREHOUSE: ${{ steps.config.outputs.warehouse }}
+          SNOWFLAKE_CONNECTIONS_DEFAULT_ROLE: ${{ steps.config.outputs.role }}
+        run: |
+          DB="${PROD_DB}"
+          SCHEMA="${RAW_SCHEMA}"
+
+          CURRENT_TYPE=$(snow sql --format json -q "
+            SELECT DATA_TYPE FROM ${DB}.INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = '${SCHEMA}'
+              AND TABLE_NAME = 'CUSTOMER_FEEDBACK'
+              AND COLUMN_NAME = 'SUBCATEGORY'
+          " | python3 -c "import json,sys; rows=json.load(sys.stdin); print(rows[0]['DATA_TYPE'] if rows else 'MISSING')")
+
+          echo "CUSTOMER_FEEDBACK.SUBCATEGORY current type: $CURRENT_TYPE"
+
+          if [ "$CURRENT_TYPE" = "NUMBER" ]; then
+            echo "Repairing SUBCATEGORY column (NUMBER -> VARCHAR(50))"
+            echo "Safe: existing rows all have NULL subcategory; this is a one-shot."
+            snow sql -q "
+              ALTER TABLE ${DB}.${SCHEMA}.CUSTOMER_FEEDBACK
+                DROP COLUMN SUBCATEGORY;
+              ALTER TABLE ${DB}.${SCHEMA}.CUSTOMER_FEEDBACK
+                ADD COLUMN SUBCATEGORY VARCHAR(50);
+            "
+          else
+            echo "No reconciliation needed (already VARCHAR or table absent)"
+          fi
+
       # ─── Clear Raw Data (Optional - for corruption recovery) ────────────
       - name: Clear Raw Data (if requested)
         if: github.event.inputs.clear_raw_data == 'true'
