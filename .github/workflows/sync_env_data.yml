@@ -106,7 +106,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install pyyaml dbt-snowflake
+          pip install pyyaml 'dbt-snowflake==1.11.4'
 
       - name: Load Project Config
         id: config
