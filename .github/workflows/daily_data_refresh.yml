@@ -203,13 +203,20 @@ jobs:
         id: plan
         run: |
           TODAY=$(date +%Y-%m-%d)
-          LAST_DATE="${{ steps.check_data.outputs.last_date }}"
+          # snow sql --format json may return DATE as 'YYYY-MM-DDT00:00:00';
+          # strip any time portion so strptime('%Y-%m-%d') succeeds.
+          LAST_DATE_RAW="${{ steps.check_data.outputs.last_date }}"
+          LAST_DATE="${LAST_DATE_RAW%%T*}"
+
+          # Fail fast if upstream returns something we can't parse.
+          python3 -c "from datetime import datetime; datetime.strptime('$LAST_DATE', '%Y-%m-%d')" \
+            || { echo "::error::LAST_DATE='$LAST_DATE_RAW' did not normalize to YYYY-MM-DD"; exit 1; }
 
           REBUILD_FROM="${{ github.event.inputs.rebuild_from_date }}"
           MANUAL_DAYS="${{ github.event.inputs.days }}"
 
           if [ -n "$REBUILD_FROM" ]; then
-            START_DATE="$REBUILD_FROM"
+            START_DATE="${REBUILD_FROM%%T*}"
             DAYS=$(python3 -c "from datetime import datetime; start = datetime.strptime('$START_DATE', '%Y-%m-%d'); today = datetime.strptime('$TODAY', '%Y-%m-%d'); print(max((today - start).days + 1, 0))")
             echo "Manual rebuild from $START_DATE ($DAYS days)"
           elif [ -n "$MANUAL_DAYS" ]; then
