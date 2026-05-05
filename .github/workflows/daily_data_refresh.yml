@@ -355,7 +355,7 @@ jobs:
 
       # ─── DBT Setup & Run ────────────────────────────────────────────────
       - name: Install DBT
-        run: pip install dbt-snowflake
+        run: pip install 'dbt-snowflake==1.11.4'
 
       - name: Configure DBT Profile
         run: echo "Using project profiles.yml with env vars"

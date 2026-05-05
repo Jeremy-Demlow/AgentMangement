@@ -112,7 +112,7 @@ jobs:
         env:
           DBT_TARGET: prod
         run: |
-          pip install dbt-snowflake
+          pip install 'dbt-snowflake==1.11.4'
           cd dbt_ski_resort
           dbt deps
           dbt run --target prod --select "+marts.facts" --profiles-dir .
