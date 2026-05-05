@@ -109,10 +109,34 @@ Semantic View Optimization 'AM_SKI_RESORT_DEV.SEMANTIC.SYSTEM_AI_OBS_ANALYST_EVA
 EVENTS TABLE ON ACCOUNT TO ROLE <deploy_role>` — added to DCM access.sql.
 This was the mitigation published in Snowflake's April 29 bug notice.
 
-**Remaining blocker**: even with the grant, the OPTIMIZATION object lookup
-fails. This is the deeper Cortex Analyst Evaluations PuPr bug — the
-account-wide fix is still rolling out. Once Snowflake deploys the fix,
-both error paths should resolve.
+**Expanded mitigation (May 1)**: Added the full privilege set documented
+at `docs.snowflake.com/.../cortex-analyst/evaluation` to
+`dcm/sources/definitions/access.sql`:
+
+```
+GRANT DATABASE ROLE SNOWFLAKE.CORTEX_USER TO ROLE {{deploy_role}};
+GRANT APPLICATION ROLE SNOWFLAKE.AI_OBSERVABILITY_EVENTS_LOOKUP TO ROLE {{deploy_role}};
+GRANT CREATE TASK ON SCHEMA {{db}}.SEMANTIC TO ROLE {{deploy_role}};
+GRANT CREATE DATASET ON SCHEMA {{db}}.SEMANTIC TO ROLE {{deploy_role}};
+GRANT SELECT ON ALL SEMANTIC VIEWS IN SCHEMA {{db}}.SEMANTIC TO ROLE {{deploy_role}};
+GRANT MONITOR ON ALL SEMANTIC VIEWS IN SCHEMA {{db}}.SEMANTIC TO ROLE {{deploy_role}};
+GRANT SELECT ON FUTURE SEMANTIC VIEWS IN SCHEMA {{db}}.SEMANTIC TO ROLE {{deploy_role}};
+GRANT MONITOR ON FUTURE SEMANTIC VIEWS IN SCHEMA {{db}}.SEMANTIC TO ROLE {{deploy_role}};
+```
+
+Yesterday's deploy-dev run at 01:43 UTC PASSED SV Eval against the same
+deploy role without these grants — indicating the companion object
+`SYSTEM_AI_OBS_ANALYST_EVAL_<sv>` existed from a prior account state.
+After teardown/rebuild today it was not re-provisioned, even after the
+full documented grant set was applied and the semantic views were
+dropped and recreated via dbt.
+
+**Remaining blocker**: the companion optimization object is Snowflake-
+internal and auto-provisioned; even with all documented privileges we
+cannot force its creation via SQL. Snowsight's "Evaluations" tab may
+trigger provisioning on first click — not yet verified. Open a Snowflake
+support case referencing error code `210007` and the exact object name
+`<db>.SEMANTIC.SYSTEM_AI_OBS_ANALYST_EVAL_<sv>`.
 
 **Current workaround in CI**: SV Evaluation Gate runs with
 `continue-on-error: true` at the job level, so workflow failures here
