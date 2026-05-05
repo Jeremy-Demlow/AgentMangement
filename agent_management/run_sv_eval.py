@@ -1,24 +1,26 @@
 """Run Cortex Analyst semantic view evaluations end-to-end.
 
 Generates eval config YAML, uploads to stage, starts EXECUTE_AI_EVALUATION,
-polls until complete, fetches results via GET_ANALYST_AI_EVALUATION_DATA,
+polls until complete, fetches results from SNOWFLAKE.LOCAL.AI_OBSERVABILITY_EVENTS,
 and checks thresholds.
 
 When evaluating multiple SVs, evals are started sequentially then polled
 in parallel using a thread pool (each thread gets its own Snowflake
 connection). This cuts wall time from ~25 min to ~3-5 min for 11 SVs.
 
-Function reference:
-    SNOWFLAKE.LOCAL.GET_ANALYST_AI_EVALUATION_DATA(
-        <DATABASE>, <SCHEMA>, <OBJECT_NAME>, 'SEMANTIC VIEW', <RUN_NAME>
-    )
-    Returns: RECORD_ID, INPUT_ID, REQUEST_ID, TIMESTAMP, DURATION_MS,
-             INPUT, OUTPUT, ERROR, GROUND_TRUTH, METRIC_NAME,
-             EVAL_AGG_SCORE (1=correct, 0.5=partial, 0=wrong, NULL=error),
-             METRIC_TYPE, METRIC_STATUS, METRIC_CALLS
+Reading eval results:
+    The previously-used SNOWFLAKE.LOCAL.GET_ANALYST_AI_EVALUATION_DATA TVF
+    is broken (error 210007 — companion SYSTEM_AI_OBS_ANALYST_EVAL_* object
+    reference fails). We now read directly from the AI Observability events
+    table per the official docs. See get_eval_results() and IAC_GAPS.md #8.
 
-    NOTE: GET_AI_EVALUATION_DATA does NOT work for semantic view evals.
-          Always use GET_ANALYST_AI_EVALUATION_DATA instead.
+    Required grants on deploy role (codified in dcm/sources/definitions/access.sql):
+      - SNOWFLAKE.CORTEX_USER (database role)
+      - SNOWFLAKE.AI_OBSERVABILITY_EVENTS_LOOKUP (application role)
+      - READ UNREDACTED AI OBSERVABILITY EVENTS TABLE (account)
+      - EXECUTE TASK (account)
+      - CREATE TASK / CREATE DATASET on SEMANTIC schema
+      - SELECT / MONITOR on SEMANTIC views (+ FUTURE)
 
 Usage:
     python -m agent_management.run_sv_eval --env prod
@@ -180,17 +182,67 @@ def check_status(cur, run_name: str, stage: str, filename: str) -> str:
 
 
 def get_eval_results(cur, database: str, schema: str, sv_name: str, run_name: str) -> list[dict]:
+    """Read SV eval results from SNOWFLAKE.LOCAL.AI_OBSERVABILITY_EVENTS.
+
+    The previously-used SNOWFLAKE.LOCAL.GET_ANALYST_AI_EVALUATION_DATA TVF
+    is broken on every account we've tested (error 210007 — companion
+    SYSTEM_AI_OBS_ANALYST_EVAL_<sv> object reference fails). The actual
+    eval output lands in the AI Observability events table per the docs:
+    https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-analyst/evaluation
+
+    Each verified-query row produces an event with:
+      ai.observability.eval.metric_name   (e.g. 'sql_correctness')
+      ai.observability.eval_root.score    (1=correct, 0.5=partial, 0=wrong)
+      ai.observability.eval_root.status.code (200=ok, 500=error)
+      ai.observability.eval_root.status.message (error text when status!=200)
+      snow.ai.observability.run.name      (matches our run_name)
+      snow.ai.observability.object.name   (SYSTEM_AI_OBS_ANALYST_EVAL_<SV>)
+
+    We map this back into the same dict keys compute_score() already
+    consumes (EVAL_AGG_SCORE, ERROR, METRIC_NAME, etc.) so downstream
+    threshold logic is unchanged.
+
+    Returns [] when no events exist for the run yet — caller treats this
+    as a platform-blocked outcome (the eval task chain failed to write
+    any score events) rather than a real zero-score result.
+    """
+    optimization_object = f"SYSTEM_AI_OBS_ANALYST_EVAL_{sv_name.upper()}"
     try:
         cur.execute(f"""
-            SELECT *
-            FROM TABLE(SNOWFLAKE.LOCAL.GET_ANALYST_AI_EVALUATION_DATA(
-                '{database}', '{schema}', '{sv_name}', 'SEMANTIC VIEW', '{run_name}'
-            ))
+            SELECT
+              RECORD_ATTRIBUTES:"snow.ai.observability.input_id"::VARCHAR    AS input_id,
+              RECORD_ATTRIBUTES:"ai.observability.eval.metric_name"::VARCHAR AS metric_name,
+              RECORD_ATTRIBUTES:"ai.observability.eval.metric_type"::VARCHAR AS metric_type,
+              RECORD_ATTRIBUTES:"ai.observability.eval_root.score"::FLOAT    AS eval_agg_score,
+              RECORD_ATTRIBUTES:"ai.observability.eval_root.status.code"::VARCHAR    AS metric_status,
+              RECORD_ATTRIBUTES:"ai.observability.eval_root.status.message"::VARCHAR AS error_message,
+              TIMESTAMP                                                       AS event_ts
+            FROM SNOWFLAKE.LOCAL.AI_OBSERVABILITY_EVENTS
+            WHERE RECORD_ATTRIBUTES:"snow.ai.observability.database.name"::VARCHAR = '{database}'
+              AND RECORD_ATTRIBUTES:"snow.ai.observability.schema.name"::VARCHAR   = '{schema}'
+              AND RECORD_ATTRIBUTES:"snow.ai.observability.object.name"::VARCHAR   = '{optimization_object}'
+              AND RECORD_ATTRIBUTES:"snow.ai.observability.run.name"::VARCHAR      = '{run_name}'
+              AND RECORD_ATTRIBUTES:"ai.observability.eval_root.score" IS NOT NULL
+            ORDER BY TIMESTAMP
         """)
-        columns = [col[0] for col in cur.description]
-        return [dict(zip(columns, row)) for row in cur.fetchall()]
+        columns = [col[0].upper() for col in cur.description]
+        rows = []
+        for row in cur.fetchall():
+            d = dict(zip(columns, row))
+            # Normalize keys to match the legacy GET_ANALYST_AI_EVALUATION_DATA
+            # output so compute_score() doesn't need any conditional.
+            rows.append({
+                "INPUT_ID": d.get("INPUT_ID"),
+                "METRIC_NAME": d.get("METRIC_NAME"),
+                "METRIC_TYPE": d.get("METRIC_TYPE"),
+                "EVAL_AGG_SCORE": d.get("EVAL_AGG_SCORE"),
+                "METRIC_STATUS": d.get("METRIC_STATUS"),
+                "ERROR": d.get("ERROR_MESSAGE") or None,
+            })
+        return rows
     except Exception as e:
-        logger.error("  Error fetching eval data: %s", e)
+        logger.error("  Error reading AI_OBSERVABILITY_EVENTS for %s/%s: %s",
+                     sv_name, run_name, e)
         return []
 
 

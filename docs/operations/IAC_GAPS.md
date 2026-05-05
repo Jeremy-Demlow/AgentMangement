@@ -149,6 +149,20 @@ Deploy Agents and Agent Evaluation regardless.
 - Wait for Snowflake to deploy the PuPr fix and revert the advisory gate
   to hard-fail.
 
+**Update 2026-05-05**: Reader rewritten in PR (fix/sv-eval-events-reader)
+to query `SNOWFLAKE.LOCAL.AI_OBSERVABILITY_EVENTS` directly instead of
+the broken `GET_ANALYST_AI_EVALUATION_DATA` TVF. This is the architecture
+the official docs describe and is robust to the broken TVF. Live probe
+against historical runs (PR-28, PR-30) returns real scores.
+
+The remaining gap is **upstream**: post-PR-30 evals aren't producing any
+score events at all, because `EXECUTE_AI_EVALUATION('START', ...)` fails
+fast with the missing-companion-object error before the eval task chain
+runs to completion. So even with a correct reader, fresh runs return
+zero rows from the events table. Once Snowflake fixes the companion
+object provisioning, runs will produce events again and the new reader
+will pick them up automatically — no further code change needed.
+
 ## 9. Agent smoke test is flaky on first deploy
 
 **Status**: CLOSED (PR #39 + smoke pre-flight).
