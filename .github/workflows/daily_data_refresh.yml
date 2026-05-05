@@ -284,6 +284,22 @@ jobs:
               ALTER TABLE ${DB}.${SCHEMA}.CUSTOMER_FEEDBACK
                 ADD COLUMN SUBCATEGORY VARCHAR(50);
             "
+            # Downstream MARTS.FACT_FEEDBACK is a dbt incremental model whose
+            # SUBCATEGORY column was inherited from the old NUMBER type. dbt
+            # will fail with 'cannot change column from NUMBER(38,0) to VARCHAR'
+            # on the next run because Snowflake disallows cross-family ALTER.
+            # Drop the downstream table so dbt rebuilds it from the now-correct
+            # RAW source. Safe because dbt re-materializes from RAW each run.
+            MARTS_TYPE=$(snow sql --format json -q "
+              SELECT DATA_TYPE FROM ${DB}.INFORMATION_SCHEMA.COLUMNS
+              WHERE TABLE_SCHEMA = 'MARTS'
+                AND TABLE_NAME = 'FACT_FEEDBACK'
+                AND COLUMN_NAME = 'SUBCATEGORY'
+            " | python3 -c "import json,sys; rows=json.load(sys.stdin); print(rows[0]['DATA_TYPE'] if rows else 'MISSING')")
+            if [ "$MARTS_TYPE" = "NUMBER" ]; then
+              echo "Dropping MARTS.FACT_FEEDBACK so dbt rebuilds with VARCHAR SUBCATEGORY"
+              snow sql -q "DROP TABLE IF EXISTS ${DB}.MARTS.FACT_FEEDBACK"
+            fi
           else
             echo "No reconciliation needed (already VARCHAR or table absent)"
           fi
