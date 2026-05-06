@@ -12,6 +12,18 @@ import sys
 from pathlib import Path
 
 
+DEFAULT_THRESHOLD = 0.80
+
+# Outcome statuses emitted by ``get_sv_eval_scores``. Anything not in this set
+# blocks ``PASSED`` and is surfaced explicitly in the comment footer so the
+# reader is not misled by hidden defaults.
+PASS_STATUSES = {"PASS"}
+FAIL_STATUSES = {"FAIL"}
+ERROR_STATUSES = {"error"}
+NO_RUN_STATUSES = {"no_run"}
+EMPTY_STATUSES = {"empty"}
+
+
 def _row_status(entry: dict) -> str:
     status = entry.get("status", "?")
     if status == "PASS":
@@ -27,14 +39,56 @@ def _row_status(entry: dict) -> str:
     return status
 
 
-def render_markdown(data: dict) -> str:
-    env = data.get("environment", "?").upper()
-    threshold = data.get("threshold") or 0.80
-    views = data.get("views", {})
-    all_passed = data.get("all_passed", False)
+def _coalesce_threshold(value) -> float:
+    """Return ``value`` if it is a real number, else the default.
 
-    # If the query returned nothing (empty views), make that explicit instead
-    # of misleading readers with a "0% / 0 views" table.
+    Avoids the ``data.get("threshold") or DEFAULT`` idiom which silently
+    swaps an explicit ``0.0`` with the default. Truthfulness over brevity.
+    """
+    return value if isinstance(value, (int, float)) else DEFAULT_THRESHOLD
+
+
+def _derive_all_passed(views: dict) -> bool:
+    """Truthful ``all_passed`` regardless of the producer's default.
+
+    A run is only PASSED when every recorded view is PASS. ERROR/NO_RUN/
+    NO_DATA/FAIL all block PASSED; an empty view dict is also not PASSED.
+    """
+    if not views:
+        return False
+    return all(v.get("status") in PASS_STATUSES for v in views.values())
+
+
+def _classify_header(views: dict, all_passed: bool) -> str:
+    """Return the header word matching the actual fleet outcome."""
+    if not views:
+        return "NO DATA"
+    if all_passed:
+        return "PASSED"
+    statuses = [v.get("status") for v in views.values()]
+    if any(s in FAIL_STATUSES for s in statuses):
+        return "FAILED"
+    if any(s in ERROR_STATUSES for s in statuses):
+        return "ERRORED"
+    if any(s in NO_RUN_STATUSES | EMPTY_STATUSES for s in statuses):
+        return "INCOMPLETE"
+    return "ATTENTION"
+
+
+def render_markdown(data: dict) -> str:
+    env = (data.get("environment") or "?").upper()
+    threshold = _coalesce_threshold(data.get("threshold"))
+    views = data.get("views") or {}
+
+    # Re-derive ``all_passed`` locally so the renderer is not at the mercy of
+    # an upstream default like ``all_passed = True``. The producer's value is
+    # advisory; the views dict is truth.
+    producer_all_passed = data.get("all_passed")
+    all_passed = _derive_all_passed(views)
+    if isinstance(producer_all_passed, bool) and producer_all_passed != all_passed:
+        # The producer disagrees with the data. Trust the data.
+        all_passed = all_passed and producer_all_passed
+
     if not views:
         return (
             f"### Semantic View Evaluation Summary ({env}) — NO DATA\n\n"
@@ -47,7 +101,7 @@ def render_markdown(data: dict) -> str:
         )
 
     lines: list[str] = []
-    header_icon = "PASSED" if all_passed else "ATTENTION"
+    header_icon = _classify_header(views, all_passed)
     lines.append(f"### Semantic View Evaluation Summary ({env}) — {header_icon}")
     lines.append("")
     lines.append(f"Threshold: **{threshold * 100:.0f}%** sql_correctness")
@@ -70,21 +124,27 @@ def render_markdown(data: dict) -> str:
             f"| `{sv_name}` | {status} | {score_str} | {scored} | {errors} | `{run}` |"
         )
 
-    # Footer
+    # Footer with distinct buckets so reviewers can tell PASS/FAIL/ERROR/
+    # NO_RUN/NO_DATA apart at a glance.
     lines.append("")
-    passing = sum(1 for v in views.values() if v.get("status") == "PASS")
-    failing = sum(1 for v in views.values() if v.get("status") == "FAIL")
+    statuses = [v.get("status") for v in views.values()]
+    passing = sum(1 for s in statuses if s in PASS_STATUSES)
+    failing = sum(1 for s in statuses if s in FAIL_STATUSES)
+    errored = sum(1 for s in statuses if s in ERROR_STATUSES)
+    no_run = sum(1 for s in statuses if s in NO_RUN_STATUSES)
+    no_data = sum(1 for s in statuses if s in EMPTY_STATUSES)
     total = len(views)
     lines.append(
-        f"Summary: **{passing} PASS**, **{failing} FAIL**, {total - passing - failing} no-data  "
-        f"(out of {total} semantic views)"
+        f"Summary: **{passing} PASS**, **{failing} FAIL**, **{errored} ERROR**, "
+        f"**{no_run} NO RUN**, **{no_data} NO DATA**  (out of {total} semantic views)"
     )
     lines.append("")
     lines.append(
-        "_Note: SV eval is advisory. Platform flakiness on Cortex Analyst "
-        "(`Invocation failed`) is auto-retried once; remaining failures "
-        "are reported here. The blocking SV gate is "
-        "`detect_sv_drift --fail-on-drift` in the dbt Quality Gate._"
+        "_Header reflects worst observed outcome. Threshold-fail and lookup-error "
+        "both block PASSED. Cortex Analyst platform flakes (`Invocation failed`) "
+        "surface as ERROR rows; the structural drift gate "
+        "(`detect_sv_drift --fail-on-drift` in the dbt Quality Gate) remains the "
+        "separate blocking check on source-vs-deployed coherence._"
     )
     return "\n".join(lines) + "\n"
 

@@ -69,6 +69,50 @@ def fetch_eval_data(
     return [dict(zip(columns, row)) for row in cur.fetchall()]
 
 
+def run_name_candidates(base_run_name: str, sv_name: str) -> list[str]:
+    """Generate candidate run names to try when looking up eval results.
+
+    `run_sv_eval` writes per-SV run names of the form ``{base}_{sv_lower}``
+    (e.g. ``PR-51-25457687951_sem_staffing_analytics``). Callers, however,
+    typically pass only the base (``PR-51-25457687951``). Try the exact
+    match first, then the per-SV suffix form, so a single base run-name
+    transparently resolves to the per-SV events.
+    """
+    if not base_run_name:
+        return []
+    candidates = [base_run_name]
+    suffixed = f"{base_run_name}_{sv_name.lower()}"
+    if suffixed != base_run_name:
+        candidates.append(suffixed)
+    return candidates
+
+
+def fetch_eval_data_with_fallback(
+    cur, database: str, schema: str, sv_name: str, base_run_name: str
+) -> tuple[list[dict], str | None]:
+    """Try each run-name candidate; return (results, matched_run_name).
+
+    Returns ([], None) when every candidate ran cleanly but produced no rows
+    (the empty case). Re-raises the last exception only when EVERY candidate
+    raised -- a partial success (some empty, some raised) prefers the empty
+    signal because it represents a successful Snowflake call.
+    """
+    last_error: Exception | None = None
+    saw_clean_empty = False
+    for candidate in run_name_candidates(base_run_name, sv_name):
+        try:
+            results = fetch_eval_data(cur, database, schema, sv_name, candidate)
+        except Exception as exc:  # noqa: BLE001 - re-raise only if all fail
+            last_error = exc
+            continue
+        if results:
+            return results, candidate
+        saw_clean_empty = True
+    if last_error is not None and not saw_clean_empty:
+        raise last_error
+    return [], None
+
+
 def score_results(results: list[dict]) -> dict:
     if not results:
         return {"total": 0, "scored": 0, "sum_score": 0.0, "score": 0.0, "errors": 0, "vqrs": []}
@@ -156,7 +200,11 @@ def main():
     database = get_database(config)
     schema = config["deployment"]["semantic_schema"]
     thresholds = get_thresholds(config)
-    sv_threshold = args.threshold or thresholds.get("sv_sql_correctness", 0.80)
+    sv_threshold = (
+        args.threshold
+        if args.threshold is not None
+        else thresholds.get("sv_sql_correctness", 0.80)
+    )
 
     conn = connect(config)
     cur = conn.cursor()
@@ -170,9 +218,7 @@ def main():
             cur.execute(f"SHOW SEMANTIC VIEWS IN SCHEMA {database}.{schema}")
             sv_names = [row[1] for row in cur.fetchall() if row[7]]
 
-        all_scores = {}
-        all_passed = True
-        no_data_count = 0
+        all_scores: dict[str, dict] = {}
 
         if not args.json_output:
             logger.info("=" * 70)
@@ -189,32 +235,34 @@ def main():
                 if not args.json_output:
                     logger.info("\n  %-35s  NO EVAL RUN FOUND", sv_name)
                 all_scores[sv_name] = {"status": "no_run"}
-                no_data_count += 1
                 continue
 
             try:
-                results = fetch_eval_data(cur, database, schema, sv_name, run_name)
+                results, matched_run = fetch_eval_data_with_fallback(
+                    cur, database, schema, sv_name, run_name
+                )
             except Exception as e:
                 if not args.json_output:
                     logger.info("\n  %-35s  ERROR: %s", sv_name, e)
-                all_scores[sv_name] = {"status": "error", "error": str(e)}
+                all_scores[sv_name] = {
+                    "status": "error",
+                    "run_name": run_name,
+                    "error": str(e),
+                }
                 continue
 
             if not results:
                 if not args.json_output:
                     logger.info("\n  %-35s  NO RESULTS (run=%s)", sv_name, run_name)
                 all_scores[sv_name] = {"status": "empty", "run_name": run_name}
-                no_data_count += 1
                 continue
 
             metrics = score_results(results)
             passed = metrics["score"] >= sv_threshold
-            if not passed:
-                all_passed = False
 
             all_scores[sv_name] = {
                 "status": "PASS" if passed else "FAIL",
-                "run_name": run_name,
+                "run_name": matched_run or run_name,
                 **metrics,
             }
 
@@ -223,7 +271,8 @@ def main():
                 pct = metrics["score"] * 100
                 logger.info(
                     "\n  %-35s  %5.1f%%  (%s/%s scored)  [%s]  run=%s",
-                    sv_name, pct, metrics["sum_score"], metrics["scored"], flag, run_name,
+                    sv_name, pct, metrics["sum_score"], metrics["scored"], flag,
+                    matched_run or run_name,
                 )
                 if metrics["errors"]:
                     logger.info("    %d VQR(s) returned NULL score (error)", metrics["errors"])
@@ -237,6 +286,18 @@ def main():
                         if v["has_error"] and v["error_preview"]:
                             logger.info("        ERROR: %s", v["error_preview"][:120])
 
+        # Derive truthful aggregate counts from the per-SV outcomes -- never
+        # default ``all_passed`` to True. A run with zero scored views is not
+        # a pass; it is incomplete. ERROR/NO_RUN/NO_DATA are first-class
+        # outcomes and each block ``all_passed``.
+        passing = sum(1 for v in all_scores.values() if v.get("status") == "PASS")
+        failing = sum(1 for v in all_scores.values() if v.get("status") == "FAIL")
+        errored = sum(1 for v in all_scores.values() if v.get("status") == "error")
+        no_run = sum(1 for v in all_scores.values() if v.get("status") == "no_run")
+        empty = sum(1 for v in all_scores.values() if v.get("status") == "empty")
+        total = len(all_scores)
+        all_passed = bool(total) and passing == total
+
         if args.json_output:
             output = {
                 "environment": config["environment"],
@@ -244,26 +305,37 @@ def main():
                 "schema": schema,
                 "threshold": sv_threshold,
                 "all_passed": all_passed,
+                "counts": {
+                    "pass": passing,
+                    "fail": failing,
+                    "error": errored,
+                    "no_run": no_run,
+                    "empty": empty,
+                    "total": total,
+                },
                 "views": all_scores,
             }
             print(json.dumps(output, indent=2, default=str))
         else:
             logger.info("\n" + "=" * 70)
-            passing = sum(1 for v in all_scores.values() if v.get("status") == "PASS")
-            failing = sum(1 for v in all_scores.values() if v.get("status") == "FAIL")
             logger.info(
-                "SUMMARY: %d PASS, %d FAIL, %d no data  (%d total)",
-                passing, failing, no_data_count, len(sv_names),
+                "SUMMARY: %d PASS, %d FAIL, %d ERROR, %d NO_RUN, %d NO_DATA  (%d total)",
+                passing, failing, errored, no_run, empty, total,
             )
-            if all_passed and no_data_count == 0:
+            if all_passed:
                 logger.info("EVAL GATE: PASSED")
             elif failing > 0:
                 logger.error("EVAL GATE: FAILED")
+            elif errored > 0:
+                logger.error("EVAL GATE: ERRORED (eval lookup failures)")
             else:
                 logger.warning("EVAL GATE: INCOMPLETE (missing eval data)")
             logger.info("=" * 70)
 
-        if failing > 0:
+        # Exit non-zero on any non-PASS outcome. Truthful is better than
+        # quiet; downstream callers can opt to treat ERROR/INCOMPLETE as
+        # advisory if they choose.
+        if not all_passed:
             sys.exit(1)
     finally:
         cur.close()
