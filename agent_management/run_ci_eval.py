@@ -35,6 +35,37 @@ logger = logging.getLogger(__name__)
 CONFIGS_DIR = eval_dir() / "configs"
 SCRIPTS_DIR = eval_dir() / "scripts"
 
+# Exit code taxonomy (must match agent_management.run_sv_eval):
+#   0 = all agents passed thresholds
+#   1 = at least one threshold failure (HARD FAIL - real signal)
+#   2 = crash / unhandled (HARD FAIL - re-run if transient)
+#   3 = platform blocker (HARD FAIL - escalate to Snowflake support)
+EXIT_PASS = 0
+EXIT_THRESHOLD_FAIL = 1
+EXIT_CRASH = 2
+EXIT_PLATFORM_BLOCKED = 3
+
+# Patterns that indicate a Snowflake-side platform regression rather than our
+# bug or a real eval failure. Mirrors agent_management.run_sv_eval._PLATFORM_BLOCKER_PATTERNS.
+_PLATFORM_BLOCKER_PATTERNS = (
+    "system_ai_obs_analyst_eval",
+    "system_ai_obs_agent_eval",
+    "semantic view optimization",
+    "agent evaluation optimization",
+    "service is currently unavailable",
+    "execute_ai_evaluation.*internal error",
+)
+
+
+def is_platform_blocker(text: str) -> bool:
+    """True if the combined stdout/stderr matches a known Snowflake regression
+    signature. Used to distinguish a fixable infrastructure bug from a genuine
+    Snowflake-side outage (the latter merits exit 3 + a support case)."""
+    if not text:
+        return False
+    haystack = text.lower()
+    return any(pat in haystack for pat in _PLATFORM_BLOCKER_PATTERNS)
+
 
 def find_eval_configs(agent: str | None) -> list[Path]:
     if agent:
@@ -196,6 +227,7 @@ def main():
 
         overall_passed = True
         had_crash = False
+        had_platform_block = False
         run_names = {}
         for agent_name, parsed, _ in prepared:
             returncode, stdout, stderr = results[agent_name]
@@ -212,16 +244,22 @@ def main():
                 for line in stderr.rstrip().split("\n"):
                     print(line, file=sys.stderr)
             if returncode != 0:
-                # Distinguish a true crash (no THRESHOLD CHECK section in stdout
-                # or a Traceback in stderr) from a threshold failure (eval ran,
-                # scored below threshold). Crashes are infrastructure bugs and
-                # must fail the job hard; threshold fails are advisory content
-                # signals.
+                # Distinguish three failure modes:
+                #   1. Platform blocker (Snowflake-side regression) -> exit 3
+                #   2. Crash (infrastructure bug, no THRESHOLD CHECK in stdout
+                #      or Traceback in stderr) -> exit 2
+                #   3. Threshold failure (eval ran, scored below) -> exit 1
+                # All three hard-fail the job; the operator decides whether
+                # to fix, re-run, or escalate.
+                combined = (stdout or "") + "\n" + (stderr or "")
                 crashed = (
                     "THRESHOLD CHECK" not in (stdout or "")
                     or "Traceback" in (stderr or "")
                 )
-                if crashed:
+                if crashed and is_platform_blocker(combined):
+                    logger.error("RESULT: %s PLATFORM BLOCKED (exit code %d) — Snowflake regression", agent_name, returncode)
+                    had_platform_block = True
+                elif crashed:
                     logger.error("RESULT: %s CRASHED (exit code %d) — infrastructure error", agent_name, returncode)
                     had_crash = True
                 else:
@@ -237,15 +275,21 @@ def main():
             logger.info("Run names written to %s", run_names_file)
 
     logger.info("\n%s", "=" * 60)
-    if had_crash:
+    # Exit code precedence: platform_blocked > crash > threshold > pass.
+    # Platform-blocked is the most informative classification when present
+    # (tells the operator to escalate vs re-run).
+    if had_platform_block:
+        logger.error("Overall: PLATFORM BLOCKED — Snowflake-side regression")
+        sys.exit(EXIT_PLATFORM_BLOCKED)
+    elif had_crash:
         logger.error("Overall: CRASH DETECTED — evaluation could not complete")
-        sys.exit(2)
+        sys.exit(EXIT_CRASH)
     elif not overall_passed:
         logger.warning("Overall: EVAL RAN, THRESHOLDS NOT MET")
-        sys.exit(1)
+        sys.exit(EXIT_THRESHOLD_FAIL)
     else:
         logger.info("Overall: ALL PASSED")
-        sys.exit(0)
+        sys.exit(EXIT_PASS)
 
 
 if __name__ == "__main__":

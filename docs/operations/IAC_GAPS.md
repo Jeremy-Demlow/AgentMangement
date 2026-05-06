@@ -88,9 +88,9 @@ bootstrap, slightly heavier but DEV sync runs rarely.
 
 ## 8. Snowflake SV Optimization object requires warm-up after DROP/CREATE
 
-**Status**: partially mitigated; blocked on Snowflake PuPr fix.
+**Status**: RESOLVED 2026-05-05 (Snowflake-side fix landed).
 
-**Gap**: `EXECUTE_AI_EVALUATION(sv_name, ...)` fails with:
+**Gap (historical)**: `EXECUTE_AI_EVALUATION(sv_name, ...)` failed with:
 
 ```
 Semantic View Optimization 'AM_SKI_RESORT_DEV.SEMANTIC.SYSTEM_AI_OBS_ANALYST_EVAL_<sv>' does not exist or not authorized.
@@ -148,6 +148,36 @@ Deploy Agents and Agent Evaluation regardless.
   of relying on the START/STATUS API response, OR
 - Wait for Snowflake to deploy the PuPr fix and revert the advisory gate
   to hard-fail.
+
+**Update 2026-05-05**: Reader rewritten in PR (fix/sv-eval-events-reader)
+to query `SNOWFLAKE.LOCAL.AI_OBSERVABILITY_EVENTS` directly instead of
+the broken `GET_ANALYST_AI_EVALUATION_DATA` TVF. This is the architecture
+the official docs describe and is robust to the broken TVF. Live probe
+against historical runs (PR-28, PR-30) returns real scores.
+
+**Resolution 2026-05-05 (later that day)**: Snowflake landed the
+companion-object fix. Live probe at 21:00 UTC against the same SVs:
+
+```
+SELECT * FROM TABLE(SNOWFLAKE.LOCAL.GET_ANALYST_AI_EVALUATION_DATA(
+  'AM_SKI_RESORT_DEV', 'SEMANTIC', 'SEM_REVENUE',
+  'SEMANTIC VIEW', 'PR-49-25399837609_sem_revenue'))
+GROUP BY METRIC_NAME
+-- METRIC_NAME      ROWS  AVG_SCORE
+-- sql_correctness  5     0.0
+```
+
+Reader returns real data. The advisory gate (`continue-on-error`) was
+removed in `refactor/eval-gates-fail-loud` along with the
+`EXIT_PLATFORM_BLOCKED=3` carve-out at the workflow level. The exit-code
+emission stays in `run_sv_eval.py` and `run_ci_eval.py` so that if
+Snowflake regresses the `SYSTEM_AI_OBS_*` provisioning again, the
+classification is still observable in the workflow Step Summary — but
+the gate hard-fails regardless. Operators escalate via Snowflake support.
+
+The `sql_correctness=0.0` for SEM_REVENUE this surfaces is genuine
+content signal (the SV definition or its verified queries need work),
+which the advisory gate had been hiding for the prior 2 days.
 
 ## 9. Agent smoke test is flaky on first deploy
 
