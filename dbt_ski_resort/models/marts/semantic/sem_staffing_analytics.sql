@@ -115,7 +115,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "hours_by_department",
       "question": "What is the total actual hours and total scheduled hours by department?",
-      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    AM_SKI_RESORT.SEMANTIC.SEM_STAFFING_ANALYTICS\n    METRICS total_actual_hours, total_scheduled_hours\n    DIMENSIONS department\n)",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    {{ target.database }}.SEMANTIC.SEM_STAFFING_ANALYTICS\n    METRICS total_actual_hours, total_scheduled_hours\n    DIMENSIONS department\n)",
       "verified_by": "Cortex Analyst",
       "verified_at": 1745200000,
       "use_as_onboarding_question": true
@@ -123,7 +123,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "worst_coverage_dept_day",
       "question": "Which department and day of week combinations have the worst average staffing coverage, and how do they rank?",
-      "sql": "SELECT * FROM SEMANTIC_VIEW(\n  AM_SKI_RESORT.SEMANTIC.SEM_STAFFING_ANALYTICS\n  METRICS avg_coverage\n  DIMENSIONS department, day_name\n) ORDER BY avg_coverage ASC NULLS LAST",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n  {{ target.database }}.SEMANTIC.SEM_STAFFING_ANALYTICS\n  METRICS avg_coverage\n  DIMENSIONS department, day_name\n) ORDER BY avg_coverage ASC NULLS LAST",
       "verified_by": "Cortex Analyst",
       "verified_at": 1744900000,
       "use_as_onboarding_question": true
@@ -131,7 +131,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "holiday_staffing_gap",
       "question": "How does average staffing coverage on holidays compare to non-holidays for each department, and what is the coverage gap?",
-      "sql": "WITH holiday_coverage AS (\n  SELECT *\n  FROM SEMANTIC_VIEW(\n    AM_SKI_RESORT.SEMANTIC.SEM_STAFFING_ANALYTICS\n    METRICS avg_coverage\n    DIMENSIONS department, is_holiday\n  )\n), holiday AS (\n  SELECT department, avg_coverage AS holiday_avg_coverage\n  FROM holiday_coverage\n  WHERE is_holiday = TRUE\n), non_holiday AS (\n  SELECT department, avg_coverage AS non_holiday_avg_coverage\n  FROM holiday_coverage\n  WHERE is_holiday = FALSE\n) SELECT COALESCE(h.department, nh.department) AS department, h.holiday_avg_coverage, nh.non_holiday_avg_coverage, h.holiday_avg_coverage - nh.non_holiday_avg_coverage AS coverage_gap FROM holiday AS h FULL OUTER JOIN non_holiday AS nh ON h.department = nh.department ORDER BY coverage_gap NULLS LAST",
+      "sql": "WITH holiday_coverage AS (\n  SELECT *\n  FROM SEMANTIC_VIEW(\n    {{ target.database }}.SEMANTIC.SEM_STAFFING_ANALYTICS\n    METRICS avg_coverage\n    DIMENSIONS department, is_holiday\n  )\n), holiday AS (\n  SELECT department, avg_coverage AS holiday_avg_coverage\n  FROM holiday_coverage\n  WHERE is_holiday = TRUE\n), non_holiday AS (\n  SELECT department, avg_coverage AS non_holiday_avg_coverage\n  FROM holiday_coverage\n  WHERE is_holiday = FALSE\n) SELECT COALESCE(h.department, nh.department) AS department, h.holiday_avg_coverage, nh.non_holiday_avg_coverage, h.holiday_avg_coverage - nh.non_holiday_avg_coverage AS coverage_gap FROM holiday AS h FULL OUTER JOIN non_holiday AS nh ON h.department = nh.department ORDER BY coverage_gap NULLS LAST",
       "verified_by": "Cortex Analyst",
       "verified_at": 1744900000,
       "use_as_onboarding_question": false
@@ -139,7 +139,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "understaffing_by_job_role",
       "question": "What is the understaffed shift count and overstaffed shift count by job role?",
-      "sql": "WITH __staffing AS (\n  SELECT job_role, staffing_key, coverage_ratio, is_understaffed\n  FROM AM_SKI_RESORT.MARTS.FACT_STAFFING\n) SELECT s.job_role, COUNT(CASE WHEN s.is_understaffed THEN 1 END) AS understaffed_shift_count, COUNT(CASE WHEN NOT s.is_understaffed AND s.coverage_ratio > 1 THEN 1 END) AS overstaffed_shift_count FROM __staffing AS s GROUP BY s.job_role ORDER BY understaffed_shift_count DESC NULLS LAST",
+      "sql": "WITH __staffing AS (\n  SELECT job_role, staffing_key, coverage_ratio, is_understaffed\n  FROM {{ target.database }}.MARTS.FACT_STAFFING\n) SELECT s.job_role, COUNT(CASE WHEN s.is_understaffed THEN 1 END) AS understaffed_shift_count, COUNT(CASE WHEN NOT s.is_understaffed AND s.coverage_ratio > 1 THEN 1 END) AS overstaffed_shift_count FROM __staffing AS s GROUP BY s.job_role ORDER BY understaffed_shift_count DESC NULLS LAST",
       "verified_by": "Cortex Analyst",
       "verified_at": 1745200000,
       "use_as_onboarding_question": false
@@ -147,7 +147,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "understaffing_trend_by_location",
       "question": "What is the month-over-month trend of understaffed shift count by location?",
-      "sql": "WITH __staffing AS (\n  SELECT date_key, location_key, is_understaffed\n  FROM AM_SKI_RESORT.MARTS.FACT_STAFFING\n), __dates AS (\n  SELECT date_key, full_date\n  FROM AM_SKI_RESORT.MARTS.DIM_DATE\n), __locations AS (\n  SELECT location_key, location_name\n  FROM AM_SKI_RESORT.MARTS.DIM_LOCATION\n), monthly_understaffed AS (\n  SELECT l.location_name,\n  DATE_TRUNC('MONTH', d.full_date) AS month,\n  COUNT(CASE WHEN s.is_understaffed THEN 1 END) AS understaffed_count\n  FROM __staffing AS s\n  LEFT OUTER JOIN __dates AS d ON s.date_key = d.date_key\n  LEFT OUTER JOIN __locations AS l ON s.location_key = l.location_key\n  GROUP BY l.location_name, DATE_TRUNC('MONTH', d.full_date)\n), mom AS (\n  SELECT curr.location_name, curr.month AS curr_month, prev.month AS prev_month,\n  curr.understaffed_count AS curr_understaffed_count,\n  prev.understaffed_count AS prev_understaffed_count,\n  curr.understaffed_count - prev.understaffed_count AS mom_chg,\n  (curr.understaffed_count - prev.understaffed_count) / NULLIF(NULLIF(prev.understaffed_count, 0), 0) AS mom_pct_chg\n  FROM monthly_understaffed AS curr\n  LEFT JOIN monthly_understaffed AS prev\n    ON curr.location_name = prev.location_name\n    AND curr.month = prev.month + INTERVAL '1 MONTH'\n) SELECT * FROM mom ORDER BY curr_month DESC NULLS LAST, location_name",
+      "sql": "WITH __staffing AS (\n  SELECT date_key, location_key, is_understaffed\n  FROM {{ target.database }}.MARTS.FACT_STAFFING\n), __dates AS (\n  SELECT date_key, full_date\n  FROM {{ target.database }}.MARTS.DIM_DATE\n), __locations AS (\n  SELECT location_key, location_name\n  FROM {{ target.database }}.MARTS.DIM_LOCATION\n), monthly_understaffed AS (\n  SELECT l.location_name,\n  DATE_TRUNC('MONTH', d.full_date) AS month,\n  COUNT(CASE WHEN s.is_understaffed THEN 1 END) AS understaffed_count\n  FROM __staffing AS s\n  LEFT OUTER JOIN __dates AS d ON s.date_key = d.date_key\n  LEFT OUTER JOIN __locations AS l ON s.location_key = l.location_key\n  GROUP BY l.location_name, DATE_TRUNC('MONTH', d.full_date)\n), mom AS (\n  SELECT curr.location_name, curr.month AS curr_month, prev.month AS prev_month,\n  curr.understaffed_count AS curr_understaffed_count,\n  prev.understaffed_count AS prev_understaffed_count,\n  curr.understaffed_count - prev.understaffed_count AS mom_chg,\n  (curr.understaffed_count - prev.understaffed_count) / NULLIF(NULLIF(prev.understaffed_count, 0), 0) AS mom_pct_chg\n  FROM monthly_understaffed AS curr\n  LEFT JOIN monthly_understaffed AS prev\n    ON curr.location_name = prev.location_name\n    AND curr.month = prev.month + INTERVAL '1 MONTH'\n) SELECT * FROM mom ORDER BY curr_month DESC NULLS LAST, location_name",
       "verified_by": "Cortex Analyst",
       "verified_at": 1744900000,
       "use_as_onboarding_question": false

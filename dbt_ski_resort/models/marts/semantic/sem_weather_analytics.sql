@@ -105,7 +105,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "snowfall_powder_by_zone",
       "question": "What is the total snowfall and powder day count by mountain zone?",
-      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    AM_SKI_RESORT.SEMANTIC.SEM_WEATHER_ANALYTICS\n    DIMENSIONS weather.mountain_zone\n    METRICS total_snowfall, powder_day_count\n)",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    {{ target.database }}.SEMANTIC.SEM_WEATHER_ANALYTICS\n    DIMENSIONS weather.mountain_zone\n    METRICS total_snowfall, powder_day_count\n)",
       "verified_by": "Cortex Analyst",
       "verified_at": 1744900000,
       "use_as_onboarding_question": true
@@ -113,7 +113,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "monthly_snowfall_depth_by_season",
       "question": "What is the monthly total snowfall and max base depth by ski season?",
-      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    AM_SKI_RESORT.SEMANTIC.SEM_WEATHER_ANALYTICS\n    METRICS total_snowfall, max_base_depth\n    DIMENSIONS dates.ski_season, DATE_TRUNC('month', dates.full_date) AS month\n) ORDER BY ski_season, month DESC NULLS LAST",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    {{ target.database }}.SEMANTIC.SEM_WEATHER_ANALYTICS\n    METRICS total_snowfall, max_base_depth\n    DIMENSIONS dates.ski_season, DATE_TRUNC('month', dates.full_date) AS month\n) ORDER BY ski_season, month DESC NULLS LAST",
       "verified_by": "Cortex Analyst",
       "verified_at": 1744900000,
       "use_as_onboarding_question": true
@@ -121,7 +121,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "avg_snowfall_by_month_condition",
       "question": "What is the average snowfall and observation count by month name and snow condition?",
-      "sql": "SELECT * FROM SEMANTIC_VIEW(\n  AM_SKI_RESORT.SEMANTIC.SEM_WEATHER_ANALYTICS\n  METRICS avg_snowfall, observation_count\n  DIMENSIONS dates.month_name, weather.snow_condition\n)",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n  {{ target.database }}.SEMANTIC.SEM_WEATHER_ANALYTICS\n  METRICS avg_snowfall, observation_count\n  DIMENSIONS dates.month_name, weather.snow_condition\n)",
       "verified_by": "Cortex Analyst",
       "verified_at": 1744900000,
       "use_as_onboarding_question": false
@@ -129,7 +129,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "powder_storm_by_season",
       "question": "What are the powder day count and storm count by ski season?",
-      "sql": "SELECT * FROM SEMANTIC_VIEW(\n  AM_SKI_RESORT.SEMANTIC.SEM_WEATHER_ANALYTICS\n  METRICS powder_day_count, storm_count\n  DIMENSIONS dates.ski_season\n)",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n  {{ target.database }}.SEMANTIC.SEM_WEATHER_ANALYTICS\n  METRICS powder_day_count, storm_count\n  DIMENSIONS dates.ski_season\n)",
       "verified_by": "Cortex Analyst",
       "verified_at": 1744900000,
       "use_as_onboarding_question": false
@@ -137,7 +137,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "temp_wind_by_zone_high_wind",
       "question": "What is the min temperature, max temperature, and max wind speed by mountain zone for days with high wind?",
-      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    AM_SKI_RESORT.SEMANTIC.SEM_WEATHER_ANALYTICS\n    METRICS min_temp, max_temp, max_wind\n    DIMENSIONS weather.mountain_zone\n    WHERE weather.wind_speed_mph >= 25\n)",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    {{ target.database }}.SEMANTIC.SEM_WEATHER_ANALYTICS\n    METRICS min_temp, max_temp, max_wind\n    DIMENSIONS weather.mountain_zone\n    WHERE weather.wind_speed_mph >= 25\n)",
       "verified_by": "Cortex Analyst",
       "verified_at": 1744900000,
       "use_as_onboarding_question": false
