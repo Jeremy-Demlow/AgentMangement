@@ -115,12 +115,21 @@ def fetch_eval_data_with_fallback(
 
 def score_results(results: list[dict]) -> dict:
     if not results:
-        return {"total": 0, "scored": 0, "sum_score": 0.0, "score": 0.0, "errors": 0, "vqrs": []}
+        return {
+            "total": 0,
+            "scored": 0,
+            "sum_score": 0.0,
+            "score": 0.0,
+            "errors": 0,
+            "flake_errors": 0,
+            "vqrs": [],
+        }
 
     total = len(results)
     sum_score = 0.0
     scored = 0
     errors = 0
+    flake_errors = 0
     vqrs = []
 
     for r in results:
@@ -143,6 +152,11 @@ def score_results(results: list[dict]) -> dict:
             scored += 1
         else:
             errors += 1
+            # Mirror run_sv_eval.compute_score()'s flake detection so the
+            # reporting and execution layers agree on what counts as a
+            # Cortex Analyst platform flake.
+            if "invocation failed" in error_text.lower():
+                flake_errors += 1
 
     return {
         "total": total,
@@ -150,6 +164,7 @@ def score_results(results: list[dict]) -> dict:
         "sum_score": round(sum_score, 2),
         "score": round(sum_score / scored, 4) if scored > 0 else 0.0,
         "errors": errors,
+        "flake_errors": flake_errors,
         "vqrs": vqrs,
     }
 
@@ -258,24 +273,54 @@ def main():
                 continue
 
             metrics = score_results(results)
-            passed = metrics["score"] >= sv_threshold
+            # Decide outcome class based on what actually came back. A SV
+            # whose VQRs all returned a Cortex Analyst "Invocation failed"
+            # platform flake is a different signal than a real threshold
+            # miss; surface it as ``platform_blocked`` so reviewers can tell
+            # them apart at a glance.
+            scored = metrics["scored"]
+            errored = metrics["errors"]
+            flake = metrics["flake_errors"]
+
+            if scored == 0 and errored > 0 and flake == errored:
+                status = "platform_blocked"
+            elif scored == 0 and errored > 0:
+                status = "error"
+            else:
+                passed = metrics["score"] >= sv_threshold
+                status = "PASS" if passed else "FAIL"
 
             all_scores[sv_name] = {
-                "status": "PASS" if passed else "FAIL",
+                "status": status,
                 "run_name": matched_run or run_name,
                 **metrics,
             }
 
             if not args.json_output:
-                flag = "PASS" if passed else "FAIL"
+                row = all_scores[sv_name]
+                status = row["status"]
                 pct = metrics["score"] * 100
+                if status == "platform_blocked":
+                    flag = "PLATFORM"
+                elif status == "error":
+                    flag = "ERROR"
+                else:
+                    flag = status
                 logger.info(
                     "\n  %-35s  %5.1f%%  (%s/%s scored)  [%s]  run=%s",
                     sv_name, pct, metrics["sum_score"], metrics["scored"], flag,
                     matched_run or run_name,
                 )
                 if metrics["errors"]:
-                    logger.info("    %d VQR(s) returned NULL score (error)", metrics["errors"])
+                    flake_note = (
+                        f" ({metrics['flake_errors']} flake)"
+                        if metrics["flake_errors"]
+                        else ""
+                    )
+                    logger.info(
+                        "    %d VQR(s) returned NULL score%s",
+                        metrics["errors"], flake_note,
+                    )
 
                 if args.detail:
                     for v in metrics["vqrs"]:
@@ -288,11 +333,14 @@ def main():
 
         # Derive truthful aggregate counts from the per-SV outcomes -- never
         # default ``all_passed`` to True. A run with zero scored views is not
-        # a pass; it is incomplete. ERROR/NO_RUN/NO_DATA are first-class
-        # outcomes and each block ``all_passed``.
+        # a pass; it is incomplete. ERROR/NO_RUN/NO_DATA/PLATFORM_BLOCKED are
+        # first-class outcomes and each block ``all_passed``.
         passing = sum(1 for v in all_scores.values() if v.get("status") == "PASS")
         failing = sum(1 for v in all_scores.values() if v.get("status") == "FAIL")
         errored = sum(1 for v in all_scores.values() if v.get("status") == "error")
+        platform = sum(
+            1 for v in all_scores.values() if v.get("status") == "platform_blocked"
+        )
         no_run = sum(1 for v in all_scores.values() if v.get("status") == "no_run")
         empty = sum(1 for v in all_scores.values() if v.get("status") == "empty")
         total = len(all_scores)
@@ -309,6 +357,7 @@ def main():
                     "pass": passing,
                     "fail": failing,
                     "error": errored,
+                    "platform_blocked": platform,
                     "no_run": no_run,
                     "empty": empty,
                     "total": total,
@@ -319,8 +368,8 @@ def main():
         else:
             logger.info("\n" + "=" * 70)
             logger.info(
-                "SUMMARY: %d PASS, %d FAIL, %d ERROR, %d NO_RUN, %d NO_DATA  (%d total)",
-                passing, failing, errored, no_run, empty, total,
+                "SUMMARY: %d PASS, %d FAIL, %d ERROR, %d PLATFORM, %d NO_RUN, %d NO_DATA  (%d total)",
+                passing, failing, errored, platform, no_run, empty, total,
             )
             if all_passed:
                 logger.info("EVAL GATE: PASSED")
@@ -328,6 +377,11 @@ def main():
                 logger.error("EVAL GATE: FAILED")
             elif errored > 0:
                 logger.error("EVAL GATE: ERRORED (eval lookup failures)")
+            elif platform > 0:
+                logger.warning(
+                    "EVAL GATE: PLATFORM BLOCKED (%d view(s) -- Cortex Analyst flake)",
+                    platform,
+                )
             else:
                 logger.warning("EVAL GATE: INCOMPLETE (missing eval data)")
             logger.info("=" * 70)

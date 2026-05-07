@@ -20,6 +20,7 @@ DEFAULT_THRESHOLD = 0.80
 PASS_STATUSES = {"PASS"}
 FAIL_STATUSES = {"FAIL"}
 ERROR_STATUSES = {"error"}
+PLATFORM_STATUSES = {"platform_blocked"}
 NO_RUN_STATUSES = {"no_run"}
 EMPTY_STATUSES = {"empty"}
 
@@ -34,6 +35,8 @@ def _row_status(entry: dict) -> str:
         return "NO RUN"
     if status == "empty":
         return "NO DATA"
+    if status == "platform_blocked":
+        return "PLATFORM"
     if status == "error":
         return "ERROR"
     return status
@@ -60,7 +63,15 @@ def _derive_all_passed(views: dict) -> bool:
 
 
 def _classify_header(views: dict, all_passed: bool) -> str:
-    """Return the header word matching the actual fleet outcome."""
+    """Return the header word matching the actual fleet outcome.
+
+    Priority (worst observed wins):
+        FAILED > ERRORED > PLATFORM_BLOCKED > INCOMPLETE > PASSED > NO DATA
+
+    PLATFORM_BLOCKED is its own bucket -- a Cortex Analyst flake should not
+    masquerade as a content failure (FAILED) but must still block PASSED so
+    a flaky run cannot silently masquerade as healthy.
+    """
     if not views:
         return "NO DATA"
     if all_passed:
@@ -70,6 +81,8 @@ def _classify_header(views: dict, all_passed: bool) -> str:
         return "FAILED"
     if any(s in ERROR_STATUSES for s in statuses):
         return "ERRORED"
+    if any(s in PLATFORM_STATUSES for s in statuses):
+        return "PLATFORM_BLOCKED"
     if any(s in NO_RUN_STATUSES | EMPTY_STATUSES for s in statuses):
         return "INCOMPLETE"
     return "ATTENTION"
@@ -125,26 +138,30 @@ def render_markdown(data: dict) -> str:
         )
 
     # Footer with distinct buckets so reviewers can tell PASS/FAIL/ERROR/
-    # NO_RUN/NO_DATA apart at a glance.
+    # PLATFORM/NO_RUN/NO_DATA apart at a glance.
     lines.append("")
     statuses = [v.get("status") for v in views.values()]
     passing = sum(1 for s in statuses if s in PASS_STATUSES)
     failing = sum(1 for s in statuses if s in FAIL_STATUSES)
     errored = sum(1 for s in statuses if s in ERROR_STATUSES)
+    platform = sum(1 for s in statuses if s in PLATFORM_STATUSES)
     no_run = sum(1 for s in statuses if s in NO_RUN_STATUSES)
     no_data = sum(1 for s in statuses if s in EMPTY_STATUSES)
     total = len(views)
     lines.append(
         f"Summary: **{passing} PASS**, **{failing} FAIL**, **{errored} ERROR**, "
-        f"**{no_run} NO RUN**, **{no_data} NO DATA**  (out of {total} semantic views)"
+        f"**{platform} PLATFORM**, **{no_run} NO RUN**, **{no_data} NO DATA**  "
+        f"(out of {total} semantic views)"
     )
     lines.append("")
     lines.append(
-        "_Header reflects worst observed outcome. Threshold-fail and lookup-error "
-        "both block PASSED. Cortex Analyst platform flakes (`Invocation failed`) "
-        "surface as ERROR rows; the structural drift gate "
-        "(`detect_sv_drift --fail-on-drift` in the dbt Quality Gate) remains the "
-        "separate blocking check on source-vs-deployed coherence._"
+        "_Header reflects worst observed outcome (FAIL > ERROR > PLATFORM > "
+        "INCOMPLETE > PASS). PLATFORM rows mean every VQR for that view hit "
+        "the Cortex Analyst `Invocation failed` flake -- a platform issue, "
+        "not a content regression -- but still blocks PASSED so it cannot be "
+        "silent. The structural drift gate "
+        "(`detect_sv_drift --fail-on-drift` in the dbt Quality Gate) remains "
+        "the separate blocking check on source-vs-deployed coherence._"
     )
     return "\n".join(lines) + "\n"
 
