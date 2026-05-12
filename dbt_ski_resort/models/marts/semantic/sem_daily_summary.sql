@@ -160,7 +160,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "visits_by_day_of_week",
       "question": "What is the total visits and unique visitors by day of week?",
-      "sql": "WITH __fact_pass_usage AS (\n  SELECT customer_key, date_key, usage_key\n  FROM AM_SKI_RESORT.MARTS.FACT_PASS_USAGE\n), __dim_date AS (\n  SELECT date_key, day_name\n  FROM AM_SKI_RESORT.MARTS.DIM_DATE\n) SELECT d.day_name, COUNT(pu.usage_key) AS total_visits, COUNT(DISTINCT pu.customer_key) AS unique_visitors FROM __fact_pass_usage AS pu LEFT OUTER JOIN __dim_date AS d ON pu.date_key = d.date_key GROUP BY d.day_name ORDER BY total_visits DESC NULLS LAST",
+      "sql": "WITH __fact_pass_usage AS (\n  SELECT customer_key, date_key, usage_key\n  FROM {{ target.database }}.MARTS.FACT_PASS_USAGE\n), __dim_date AS (\n  SELECT date_key, day_name\n  FROM {{ target.database }}.MARTS.DIM_DATE\n) SELECT d.day_name, COUNT(pu.usage_key) AS total_visits, COUNT(DISTINCT pu.customer_key) AS unique_visitors FROM __fact_pass_usage AS pu LEFT OUTER JOIN __dim_date AS d ON pu.date_key = d.date_key GROUP BY d.day_name ORDER BY total_visits DESC NULLS LAST",
       "verified_by": "Cortex Analyst",
       "verified_at": 1745200000,
       "use_as_onboarding_question": true
@@ -168,7 +168,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "season_visits_per_guest",
       "question": "What is the total visits and unique visitors per ski season, and what is the visits per guest ratio for each season?",
-      "sql": "WITH __fact_pass_usage AS (\n  SELECT customer_key, date_key, usage_key\n  FROM AM_SKI_RESORT.MARTS.FACT_PASS_USAGE\n), __dim_date AS (\n  SELECT date_key, ski_season\n  FROM AM_SKI_RESORT.MARTS.DIM_DATE\n) SELECT d.ski_season, COUNT(pu.usage_key) AS total_visits, COUNT(DISTINCT pu.customer_key) AS unique_visitors, IFF(COUNT(DISTINCT pu.customer_key) = 0 AND NOT COUNT(pu.usage_key) IS NULL, 0,\n  COUNT(pu.usage_key) / NULLIF(COUNT(DISTINCT pu.customer_key), 0)) AS visits_per_guest\nFROM __fact_pass_usage AS pu LEFT OUTER JOIN __dim_date AS d ON pu.date_key = d.date_key GROUP BY d.ski_season ORDER BY d.ski_season DESC NULLS LAST",
+      "sql": "WITH __fact_pass_usage AS (\n  SELECT customer_key, date_key, usage_key\n  FROM {{ target.database }}.MARTS.FACT_PASS_USAGE\n), __dim_date AS (\n  SELECT date_key, ski_season\n  FROM {{ target.database }}.MARTS.DIM_DATE\n) SELECT d.ski_season, COUNT(pu.usage_key) AS total_visits, COUNT(DISTINCT pu.customer_key) AS unique_visitors, IFF(COUNT(DISTINCT pu.customer_key) = 0 AND NOT COUNT(pu.usage_key) IS NULL, 0,\n  COUNT(pu.usage_key) / NULLIF(COUNT(DISTINCT pu.customer_key), 0)) AS visits_per_guest\nFROM __fact_pass_usage AS pu LEFT OUTER JOIN __dim_date AS d ON pu.date_key = d.date_key GROUP BY d.ski_season ORDER BY d.ski_season DESC NULLS LAST",
       "verified_by": "Cortex Analyst",
       "verified_at": 1744900000,
       "use_as_onboarding_question": true
@@ -176,7 +176,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "visits_by_snow_condition",
       "question": "What is the total visits and average hours per visit by snow condition?",
-      "sql": "WITH __fact_pass_usage AS (\n  SELECT customer_key, date_key, usage_key, hours_on_mountain\n  FROM AM_SKI_RESORT.MARTS.FACT_PASS_USAGE\n), __dim_date AS (\n  SELECT date_key, snow_condition\n  FROM AM_SKI_RESORT.MARTS.DIM_DATE\n) SELECT d.snow_condition, COUNT(pu.usage_key) AS total_visits, IFF(COUNT(pu.usage_key) = 0 AND NOT SUM(pu.hours_on_mountain) IS NULL, 0,\n  SUM(pu.hours_on_mountain) / NULLIF(COUNT(pu.usage_key), 0)) AS avg_hours_per_visit\nFROM __fact_pass_usage AS pu LEFT OUTER JOIN __dim_date AS d ON pu.date_key = d.date_key GROUP BY d.snow_condition ORDER BY total_visits DESC NULLS LAST",
+      "sql": "WITH __fact_pass_usage AS (\n  SELECT customer_key, date_key, usage_key, hours_on_mountain\n  FROM {{ target.database }}.MARTS.FACT_PASS_USAGE\n), __dim_date AS (\n  SELECT date_key, snow_condition\n  FROM {{ target.database }}.MARTS.DIM_DATE\n) SELECT d.snow_condition, COUNT(pu.usage_key) AS total_visits, IFF(COUNT(pu.usage_key) = 0 AND NOT SUM(pu.hours_on_mountain) IS NULL, 0,\n  SUM(pu.hours_on_mountain) / NULLIF(COUNT(pu.usage_key), 0)) AS avg_hours_per_visit\nFROM __fact_pass_usage AS pu LEFT OUTER JOIN __dim_date AS d ON pu.date_key = d.date_key GROUP BY d.snow_condition ORDER BY total_visits DESC NULLS LAST",
       "verified_by": "Cortex Analyst",
       "verified_at": 1745200000,
       "use_as_onboarding_question": false
@@ -184,7 +184,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "weekend_weekday_by_season",
       "question": "What are the total weekend visits and total weekday visits by ski season?",
-      "sql": "WITH __fact_pass_usage AS (\n  SELECT customer_key, date_key, usage_key\n  FROM AM_SKI_RESORT.MARTS.FACT_PASS_USAGE\n), __dim_date AS (\n  SELECT date_key, is_weekend, ski_season\n  FROM AM_SKI_RESORT.MARTS.DIM_DATE\n) SELECT d.ski_season, COUNT(CASE WHEN d.is_weekend THEN 1 END) AS weekend_visits, COUNT(CASE WHEN NOT d.is_weekend THEN 1 END) AS weekday_visits FROM __fact_pass_usage AS pu LEFT OUTER JOIN __dim_date AS d ON pu.date_key = d.date_key GROUP BY d.ski_season ORDER BY d.ski_season DESC NULLS LAST",
+      "sql": "WITH __fact_pass_usage AS (\n  SELECT customer_key, date_key, usage_key\n  FROM {{ target.database }}.MARTS.FACT_PASS_USAGE\n), __dim_date AS (\n  SELECT date_key, is_weekend, ski_season\n  FROM {{ target.database }}.MARTS.DIM_DATE\n) SELECT d.ski_season, COUNT(CASE WHEN d.is_weekend THEN 1 END) AS weekend_visits, COUNT(CASE WHEN NOT d.is_weekend THEN 1 END) AS weekday_visits FROM __fact_pass_usage AS pu LEFT OUTER JOIN __dim_date AS d ON pu.date_key = d.date_key GROUP BY d.ski_season ORDER BY d.ski_season DESC NULLS LAST",
       "verified_by": "Cortex Analyst",
       "verified_at": 1745200000,
       "use_as_onboarding_question": false
@@ -192,7 +192,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "avg_rides_by_season",
       "question": "What is the average lift rides per visit and average hours per visit by ski season?",
-      "sql": "SELECT * FROM SEMANTIC_VIEW(\n  AM_SKI_RESORT.SEMANTIC.SEM_DAILY_SUMMARY\n  METRICS avg_rides_per_visit, avg_hours_per_visit\n  DIMENSIONS ski_season\n) ORDER BY ski_season DESC NULLS LAST",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n  {{ target.database }}.SEMANTIC.SEM_DAILY_SUMMARY\n  METRICS avg_rides_per_visit, avg_hours_per_visit\n  DIMENSIONS ski_season\n) ORDER BY ski_season DESC NULLS LAST",
       "verified_by": "Cortex Analyst",
       "verified_at": 1745200000,
       "use_as_onboarding_question": false

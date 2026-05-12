@@ -64,7 +64,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "feedback_by_category",
       "question": "What is the total feedback count and average rating by feedback category?",
-      "sql": "WITH __fact_feedback AS (\n  SELECT\n    category,\n    feedback_id,\n    rating\n  FROM AM_SKI_RESORT.MARTS.FACT_FEEDBACK\n) SELECT\n  category,\n  COUNT(feedback_id) AS total_feedback,\n  AVG(rating) AS average_rating\nFROM __fact_feedback GROUP BY\n  category\nORDER BY\n  total_feedback DESC NULLS LAST",
+      "sql": "WITH __fact_feedback AS (\n  SELECT\n    category,\n    feedback_id,\n    rating\n  FROM {{ target.database }}.MARTS.FACT_FEEDBACK\n) SELECT\n  category,\n  COUNT(feedback_id) AS total_feedback,\n  AVG(rating) AS average_rating\nFROM __fact_feedback GROUP BY\n  category\nORDER BY\n  total_feedback DESC NULLS LAST",
       "verified_by": "Cortex Analyst",
       "verified_at": 1744900000,
       "use_as_onboarding_question": true
@@ -72,7 +72,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "nps_by_segment",
       "question": "What is the average NPS score and positive feedback count by customer segment?",
-      "sql": "SELECT * FROM SEMANTIC_VIEW(\n  AM_SKI_RESORT.SEMANTIC.SEM_CUSTOMER_SATISFACTION\n  DIMENSIONS customer_segment\n  METRICS average_nps, positive_feedback_count\n)",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n  {{ target.database }}.SEMANTIC.SEM_CUSTOMER_SATISFACTION\n  DIMENSIONS customer_segment\n  METRICS average_nps, positive_feedback_count\n)",
       "verified_by": "Cortex Analyst",
       "verified_at": 1744900000,
       "use_as_onboarding_question": true
@@ -80,7 +80,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "monthly_feedback_trend",
       "question": "What is the monthly total feedback count and average rating by month?",
-      "sql": "WITH __fact_feedback AS (\n  SELECT\n    feedback_date,\n    feedback_id,\n    rating\n  FROM AM_SKI_RESORT.MARTS.FACT_FEEDBACK\n) SELECT\n  DATE_TRUNC('MONTH', feedback_date) AS month,\n  COUNT(feedback_id) AS total_feedback,\n  AVG(rating) AS average_rating\nFROM __fact_feedback GROUP BY\n  DATE_TRUNC('MONTH', feedback_date)\nORDER BY\n  month DESC NULLS LAST",
+      "sql": "WITH __fact_feedback AS (\n  SELECT\n    feedback_date,\n    feedback_id,\n    rating\n  FROM {{ target.database }}.MARTS.FACT_FEEDBACK\n) SELECT\n  DATE_TRUNC('MONTH', feedback_date) AS month,\n  COUNT(feedback_id) AS total_feedback,\n  AVG(rating) AS average_rating\nFROM __fact_feedback GROUP BY\n  DATE_TRUNC('MONTH', feedback_date)\nORDER BY\n  month DESC NULLS LAST",
       "verified_by": "Cortex Analyst",
       "verified_at": 1744900000,
       "use_as_onboarding_question": false
@@ -88,7 +88,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "unresolved_negative_by_type",
       "question": "What is the negative feedback count and total feedback by feedback type for unresolved feedback only?",
-      "sql": "WITH __fact_feedback AS (\n  SELECT\n    feedback_type,\n    resolved,\n    sentiment,\n    feedback_id\n  FROM AM_SKI_RESORT.MARTS.FACT_FEEDBACK\n) SELECT\n  feedback_type,\n  COUNT(CASE WHEN sentiment = 'Negative' THEN 1 END) AS negative_feedback_count,\n  COUNT(feedback_id) AS total_feedback\nFROM __fact_feedback WHERE\n  resolved = FALSE\nGROUP BY\n  feedback_type\nORDER BY\n  total_feedback DESC NULLS LAST",
+      "sql": "WITH __fact_feedback AS (\n  SELECT\n    feedback_type,\n    resolved,\n    sentiment,\n    feedback_id\n  FROM {{ target.database }}.MARTS.FACT_FEEDBACK\n) SELECT\n  feedback_type,\n  COUNT(CASE WHEN sentiment = 'Negative' THEN 1 END) AS negative_feedback_count,\n  COUNT(feedback_id) AS total_feedback\nFROM __fact_feedback WHERE\n  resolved = FALSE\nGROUP BY\n  feedback_type\nORDER BY\n  total_feedback DESC NULLS LAST",
       "verified_by": "Cortex Analyst",
       "verified_at": 1744900000,
       "use_as_onboarding_question": false
@@ -96,7 +96,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "rating_nps_by_sentiment_category",
       "question": "What is the average rating and average NPS by sentiment and category?",
-      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    AM_SKI_RESORT.SEMANTIC.SEM_CUSTOMER_SATISFACTION\n    DIMENSIONS sentiment, category\n    METRICS average_rating, average_nps\n)",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    {{ target.database }}.SEMANTIC.SEM_CUSTOMER_SATISFACTION\n    DIMENSIONS sentiment, category\n    METRICS average_rating, average_nps\n)",
       "verified_by": "Cortex Analyst",
       "verified_at": 1744900000,
       "use_as_onboarding_question": false

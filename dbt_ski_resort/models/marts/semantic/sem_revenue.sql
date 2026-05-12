@@ -203,7 +203,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "ticket_revenue_by_category",
       "question": "What is the total ticket sales revenue by ticket category?",
-      "sql": "SELECT * FROM SEMANTIC_VIEW(\n  AM_SKI_RESORT.SEMANTIC.SEM_REVENUE\n  METRICS ticket_revenue\n  DIMENSIONS ticket_category\n) ORDER BY ticket_revenue DESC NULLS LAST",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n  {{ target.database }}.SEMANTIC.SEM_REVENUE\n  METRICS ticket_revenue\n  DIMENSIONS ticket_category\n) ORDER BY ticket_revenue DESC NULLS LAST",
       "verified_by": "Cortex Analyst",
       "verified_at": 1745200000,
       "use_as_onboarding_question": true
@@ -211,7 +211,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "rental_revenue_by_product",
       "question": "What is the total equipment rental revenue by product category?",
-      "sql": "WITH __fact_rentals AS (\n  SELECT product_key, rental_amount\n  FROM AM_SKI_RESORT.MARTS.FACT_RENTALS\n), __dim_product AS (\n  SELECT product_category, product_key\n  FROM AM_SKI_RESORT.MARTS.DIM_PRODUCT\n) SELECT dp.product_category, SUM(fr.rental_amount) AS total_rental_revenue FROM __fact_rentals AS fr LEFT OUTER JOIN __dim_product AS dp ON fr.product_key = dp.product_key GROUP BY dp.product_category ORDER BY total_rental_revenue DESC NULLS LAST",
+      "sql": "WITH __fact_rentals AS (\n  SELECT product_key, rental_amount\n  FROM {{ target.database }}.MARTS.FACT_RENTALS\n), __dim_product AS (\n  SELECT product_category, product_key\n  FROM {{ target.database }}.MARTS.DIM_PRODUCT\n) SELECT dp.product_category, SUM(fr.rental_amount) AS total_rental_revenue FROM __fact_rentals AS fr LEFT OUTER JOIN __dim_product AS dp ON fr.product_key = dp.product_key GROUP BY dp.product_category ORDER BY total_rental_revenue DESC NULLS LAST",
       "verified_by": "Cortex Analyst",
       "verified_at": 1745200000,
       "use_as_onboarding_question": true
@@ -219,7 +219,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "fnb_revenue_by_location",
       "question": "What is the total food and beverage revenue by location name?",
-      "sql": "SELECT * FROM SEMANTIC_VIEW(\n  AM_SKI_RESORT.SEMANTIC.SEM_REVENUE\n  METRICS fnb_revenue\n  DIMENSIONS location_name\n) ORDER BY fnb_revenue DESC NULLS LAST",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n  {{ target.database }}.SEMANTIC.SEM_REVENUE\n  METRICS fnb_revenue\n  DIMENSIONS location_name\n) ORDER BY fnb_revenue DESC NULLS LAST",
       "verified_by": "Cortex Analyst",
       "verified_at": 1745200000,
       "use_as_onboarding_question": false
@@ -227,7 +227,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "rental_revenue_by_season",
       "question": "What is the rental revenue and rental markup dollars by ski season?",
-      "sql": "SELECT * FROM SEMANTIC_VIEW(\n  AM_SKI_RESORT.SEMANTIC.SEM_REVENUE\n  METRICS rental_revenue, rental_markup_dollars\n  DIMENSIONS ski_season\n) ORDER BY ski_season DESC NULLS LAST",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n  {{ target.database }}.SEMANTIC.SEM_REVENUE\n  METRICS rental_revenue, rental_markup_dollars\n  DIMENSIONS ski_season\n) ORDER BY ski_season DESC NULLS LAST",
       "verified_by": "Cortex Analyst",
       "verified_at": 1745200000,
       "use_as_onboarding_question": false
@@ -235,7 +235,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "advance_purchase_by_passholder",
       "question": "How does the advance purchase rate and average ticket price differ between pass holders and non-pass holders by ticket category?",
-      "sql": "SELECT * FROM SEMANTIC_VIEW(\n  AM_SKI_RESORT.SEMANTIC.SEM_REVENUE\n  METRICS advance_sales_share_pct, average_ticket_price\n  DIMENSIONS is_pass_holder, ticket_category\n) ORDER BY ticket_category NULLS LAST, is_pass_holder NULLS LAST",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n  {{ target.database }}.SEMANTIC.SEM_REVENUE\n  METRICS advance_sales_share_pct, average_ticket_price\n  DIMENSIONS is_pass_holder, ticket_category\n) ORDER BY ticket_category NULLS LAST, is_pass_holder NULLS LAST",
       "verified_by": "Cortex Analyst",
       "verified_at": 1744900000,
       "use_as_onboarding_question": false
