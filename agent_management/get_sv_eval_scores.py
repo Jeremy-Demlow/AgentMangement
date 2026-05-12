@@ -56,6 +56,46 @@ from agent_management.utils.snowflake_client import connect
 logger = logging.getLogger(__name__)
 
 
+# Cortex Analyst platform error signatures. Each entry is a substring or
+# Snowflake error code that, when present in a VQR's ERROR text, indicates
+# a Snowflake-side platform issue rather than a content regression.
+# Add to this list as new platform issues are observed in the wild and
+# document them in docs/operations/IAC_GAPS.md so we can revisit when the
+# platform fix lands.
+PLATFORM_ERROR_SIGNATURES: tuple[str, ...] = (
+    "invocation failed",   # Cortex Analyst flake -- VQR submission stage
+    "392700",              # Cortex Analyst engine error -- diagnosed direct
+                           #   execution of gold SQL works; only fails when
+                           #   submitted via EXECUTE AI EVALUATION
+)
+
+
+def is_platform_error(error_text: str | None) -> bool:
+    """True when the VQR error matches a documented Cortex Analyst platform
+    issue. Use to distinguish "the platform broke" from "the gold/Analyst
+    SQL produced wrong rows" so reporting can stay honest.
+    """
+    if not error_text:
+        return False
+    needle = error_text.lower()
+    return any(sig.lower() in needle for sig in PLATFORM_ERROR_SIGNATURES)
+
+
+def extract_platform_error_code(error_text: str | None) -> str | None:
+    """Return the matching platform signature for surfacing in the comment.
+
+    Used by the renderer to show "3 (392700)" on PLATFORM rows so reviewers
+    can tell which platform issue is biting at a glance.
+    """
+    if not error_text:
+        return None
+    needle = error_text.lower()
+    for sig in PLATFORM_ERROR_SIGNATURES:
+        if sig.lower() in needle:
+            return sig
+    return None
+
+
 def fetch_eval_data(
     cur, database: str, schema: str, sv_name: str, run_name: str
 ) -> list[dict]:
@@ -144,6 +184,7 @@ def score_results(results: list[dict]) -> dict:
             "duration_ms": duration,
             "has_error": bool(error_text),
             "error_preview": error_text[:200] if error_text else "",
+            "platform_error_code": extract_platform_error_code(error_text),
         }
         vqrs.append(vqr)
 
@@ -154,8 +195,9 @@ def score_results(results: list[dict]) -> dict:
             errors += 1
             # Mirror run_sv_eval.compute_score()'s flake detection so the
             # reporting and execution layers agree on what counts as a
-            # Cortex Analyst platform flake.
-            if "invocation failed" in error_text.lower():
+            # Cortex Analyst platform flake. Now sourced from a shared
+            # signature list so adding a new known issue is one line.
+            if is_platform_error(error_text):
                 flake_errors += 1
 
     return {
@@ -274,16 +316,26 @@ def main():
 
             metrics = score_results(results)
             # Decide outcome class based on what actually came back. A SV
-            # whose VQRs all returned a Cortex Analyst "Invocation failed"
-            # platform flake is a different signal than a real threshold
-            # miss; surface it as ``platform_blocked`` so reviewers can tell
-            # them apart at a glance.
+            # whose VQRs all returned a Cortex Analyst platform error
+            # (Invocation failed, error code 392700, etc.) is a different
+            # signal than a real threshold miss; surface it as
+            # ``platform_blocked`` so reviewers can tell them apart at a
+            # glance.
             scored = metrics["scored"]
             errored = metrics["errors"]
             flake = metrics["flake_errors"]
 
             if scored == 0 and errored > 0 and flake == errored:
                 status = "platform_blocked"
+                # Surface the error code(s) we observed for visibility in
+                # the PR comment renderer.
+                platform_codes = sorted({
+                    v["platform_error_code"]
+                    for v in metrics["vqrs"]
+                    if v.get("platform_error_code")
+                })
+                if platform_codes:
+                    metrics["platform_error_codes"] = platform_codes
             elif scored == 0 and errored > 0:
                 status = "error"
             else:

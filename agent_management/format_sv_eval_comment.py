@@ -129,12 +129,20 @@ def render_markdown(data: dict) -> str:
         score_str = f"{score * 100:.1f}%" if isinstance(score, (int, float)) else "—"
         scored = v.get("scored", "—")
         errors = v.get("errors", 0) or 0
+        # Surface the platform error code(s) for PLATFORM rows so reviewers
+        # can tell at a glance which Snowflake platform issue is biting,
+        # rather than just seeing an opaque "PLATFORM" label.
+        codes = v.get("platform_error_codes") or []
+        if v.get("status") == "platform_blocked" and codes:
+            errors_str = f"{errors} ({', '.join(str(c) for c in codes)})"
+        else:
+            errors_str = str(errors)
         run = v.get("run_name", "—")
         # Truncate long run names
         if isinstance(run, str) and len(run) > 40:
             run = run[:37] + "…"
         lines.append(
-            f"| `{sv_name}` | {status} | {score_str} | {scored} | {errors} | `{run}` |"
+            f"| `{sv_name}` | {status} | {score_str} | {scored} | {errors_str} | `{run}` |"
         )
 
     # Footer with distinct buckets so reviewers can tell PASS/FAIL/ERROR/

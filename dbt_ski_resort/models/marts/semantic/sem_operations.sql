@@ -244,7 +244,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "maintenance_cost_by_lift",
       "question": "What is the total maintenance cost and maintenance event count by lift name?",
-      "sql": "WITH __fact_lift_maintenance AS (\n  SELECT lift_key, maintenance_key, total_cost\n  FROM AM_SKI_RESORT.MARTS.FACT_LIFT_MAINTENANCE\n), __dim_lift AS (\n  SELECT lift_key, lift_name\n  FROM AM_SKI_RESORT.MARTS.DIM_LIFT\n) SELECT l.lift_name, COUNT(m.maintenance_key) AS total_maintenance_events, SUM(m.total_cost) AS total_maintenance_cost FROM __fact_lift_maintenance AS m LEFT OUTER JOIN __dim_lift AS l ON m.lift_key = l.lift_key GROUP BY l.lift_name ORDER BY total_maintenance_cost DESC NULLS LAST",
+      "sql": "WITH __fact_lift_maintenance AS (\n  SELECT lift_key, maintenance_key, total_cost\n  FROM {{ target.database }}.MARTS.FACT_LIFT_MAINTENANCE\n), __dim_lift AS (\n  SELECT lift_key, lift_name\n  FROM {{ target.database }}.MARTS.DIM_LIFT\n) SELECT l.lift_name, COUNT(m.maintenance_key) AS total_maintenance_events, SUM(m.total_cost) AS total_maintenance_cost FROM __fact_lift_maintenance AS m LEFT OUTER JOIN __dim_lift AS l ON m.lift_key = l.lift_key GROUP BY l.lift_name ORDER BY total_maintenance_cost DESC NULLS LAST",
       "verified_by": "Cortex Analyst",
       "verified_at": 1745200000,
       "use_as_onboarding_question": true
@@ -252,7 +252,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "scans_wait_by_terrain",
       "question": "What is the average wait time minutes and total scans by terrain type?",
-      "sql": "SELECT * FROM SEMANTIC_VIEW(\n  AM_SKI_RESORT.SEMANTIC.SEM_OPERATIONS\n  METRICS avg_wait_minutes, total_scans\n  DIMENSIONS terrain_type\n)",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n  {{ target.database }}.SEMANTIC.SEM_OPERATIONS\n  METRICS avg_wait_minutes, total_scans\n  DIMENSIONS terrain_type\n)",
       "verified_by": "Cortex Analyst",
       "verified_at": 1745200000,
       "use_as_onboarding_question": true
@@ -260,7 +260,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "scans_wait_by_lift",
       "question": "What is the total lift scans and average wait time minutes by lift name?",
-      "sql": "SELECT * FROM SEMANTIC_VIEW(\n  AM_SKI_RESORT.SEMANTIC.SEM_OPERATIONS\n  METRICS total_scans, avg_wait_minutes\n  DIMENSIONS lift_name\n)",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n  {{ target.database }}.SEMANTIC.SEM_OPERATIONS\n  METRICS total_scans, avg_wait_minutes\n  DIMENSIONS lift_name\n)",
       "verified_by": "Cortex Analyst",
       "verified_at": 1745200000,
       "use_as_onboarding_question": false
@@ -268,7 +268,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "grooming_effectiveness_by_type",
       "question": "Which trails have the best grooming condition improvement rate, and what grooming types are most effective?",
-      "sql": "WITH __fact_grooming AS (\n  SELECT condition_improved, grooming_key, grooming_type, trail_name\n  FROM AM_SKI_RESORT.MARTS.FACT_GROOMING\n) SELECT g.trail_name, g.grooming_type, COUNT(g.grooming_key) AS total_runs, COUNT(CASE WHEN g.condition_improved THEN 1 END) AS improved_runs, COUNT(CASE WHEN g.condition_improved THEN 1 END) * 100.0 / NULLIF(NULLIF(COUNT(g.grooming_key), 0), 0) AS improvement_rate_pct FROM __fact_grooming AS g GROUP BY g.trail_name, g.grooming_type ORDER BY improvement_rate_pct DESC NULLS LAST, total_runs DESC NULLS LAST",
+      "sql": "WITH __fact_grooming AS (\n  SELECT condition_improved, grooming_key, grooming_type, trail_name\n  FROM {{ target.database }}.MARTS.FACT_GROOMING\n) SELECT g.trail_name, g.grooming_type, COUNT(g.grooming_key) AS total_runs, COUNT(CASE WHEN g.condition_improved THEN 1 END) AS improved_runs, COUNT(CASE WHEN g.condition_improved THEN 1 END) * 100.0 / NULLIF(NULLIF(COUNT(g.grooming_key), 0), 0) AS improvement_rate_pct FROM __fact_grooming AS g GROUP BY g.trail_name, g.grooming_type ORDER BY improvement_rate_pct DESC NULLS LAST, total_runs DESC NULLS LAST",
       "verified_by": "Cortex Analyst",
       "verified_at": 1744900000,
       "use_as_onboarding_question": false
