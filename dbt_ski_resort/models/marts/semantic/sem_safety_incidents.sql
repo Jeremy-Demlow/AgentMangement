@@ -77,7 +77,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "incidents_severity_by_type",
       "question": "What are the total incidents and average severity by incident type?",
-      "sql": "SELECT * FROM SEMANTIC_VIEW(\n  AM_SKI_RESORT.SEMANTIC.SEM_SAFETY_INCIDENTS\n  DIMENSIONS incident_type\n  METRICS total_incidents, average_severity\n)",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n  {{ target.database }}.SEMANTIC.SEM_SAFETY_INCIDENTS\n  DIMENSIONS incident_type\n  METRICS total_incidents, average_severity\n)",
       "verified_by": "Cortex Analyst",
       "verified_at": 1744900000,
       "use_as_onboarding_question": true
@@ -85,7 +85,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "critical_by_trail",
       "question": "What is the total incidents and critical incidents count by trail name for trails with at least one critical incident?",
-      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    AM_SKI_RESORT.SEMANTIC.SEM_SAFETY_INCIDENTS\n    METRICS total_incidents, critical_incidents\n    DIMENSIONS trail_name\n    WHERE trail_name IS NOT NULL\n) WHERE critical_incidents >= 1 ORDER BY critical_incidents DESC NULLS LAST",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    {{ target.database }}.SEMANTIC.SEM_SAFETY_INCIDENTS\n    METRICS total_incidents, critical_incidents\n    DIMENSIONS trail_name\n    WHERE trail_name IS NOT NULL\n) WHERE critical_incidents >= 1 ORDER BY critical_incidents DESC NULLS LAST",
       "verified_by": "Cortex Analyst",
       "verified_at": 1744900000,
       "use_as_onboarding_question": true
@@ -93,7 +93,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "severity_by_skill_level",
       "question": "What is the average severity and total incidents by customer skill level and severity level?",
-      "sql": "SELECT * FROM SEMANTIC_VIEW(\n  AM_SKI_RESORT.SEMANTIC.SEM_SAFETY_INCIDENTS\n  METRICS average_severity, total_incidents\n  DIMENSIONS customer_skill_level, severity\n)",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n  {{ target.database }}.SEMANTIC.SEM_SAFETY_INCIDENTS\n  METRICS average_severity, total_incidents\n  DIMENSIONS customer_skill_level, severity\n)",
       "verified_by": "Cortex Analyst",
       "verified_at": 1744900000,
       "use_as_onboarding_question": false
@@ -101,7 +101,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "transport_incidents_by_segment",
       "question": "What is the total incidents and critical incidents count by customer segment where transport was required?",
-      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    AM_SKI_RESORT.SEMANTIC.SEM_SAFETY_INCIDENTS\n    DIMENSIONS fact_incidents.customer_segment\n    METRICS total_incidents, critical_incidents\n    WHERE fact_incidents.transport_required = TRUE\n)",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    {{ target.database }}.SEMANTIC.SEM_SAFETY_INCIDENTS\n    DIMENSIONS fact_incidents.customer_segment\n    METRICS total_incidents, critical_incidents\n    WHERE fact_incidents.transport_required = TRUE\n)",
       "verified_by": "Cortex Analyst",
       "verified_at": 1744900000,
       "use_as_onboarding_question": false

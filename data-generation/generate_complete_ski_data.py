@@ -190,6 +190,7 @@ TRAIL_NAMES = ['Summit Run', 'Eagles Nest', 'Blue Bird', 'Family Way', 'Black Di
 
 # Feedback categories
 FEEDBACK_CATEGORIES = ['Lifts', 'Food_Service', 'Staff', 'Facilities', 'Value', 'Snow_Conditions', 'Parking', 'Rentals', 'Lessons']
+FEEDBACK_SUBCATEGORIES = ['speed', 'cleanliness', 'staff', 'value', 'quality']
 FEEDBACK_TYPES = ['NPS_Survey', 'Post_Visit_Survey', 'Online_Review', 'Complaint', 'Suggestion', 'Compliment']
 
 # Marketing campaign enhancements
@@ -1083,7 +1084,7 @@ def generate_customer_feedback(customers_df, daily_modifiers):
                 'likelihood_to_return': min(5, max(1, int(nps / 2) + rng.integers(-1, 2))),
                 'likelihood_to_recommend': min(5, max(1, int(nps / 2))),
                 'category': rng.choice(FEEDBACK_CATEGORIES),
-                'subcategory': None,
+                'subcategory': rng.choice(FEEDBACK_SUBCATEGORIES),
                 'sentiment': sentiment,
                 'sentiment_score': float(round((nps - 5) / 5, 2)),
                 'feedback_text': f"{'Great' if sentiment == 'Positive' else ('Poor' if sentiment == 'Negative' else 'Average')} experience" if rng.random() < 0.3 else '',

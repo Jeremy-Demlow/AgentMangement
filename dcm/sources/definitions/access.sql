@@ -27,12 +27,31 @@ GRANT USAGE ON WAREHOUSE {{wh_name}} TO ROLE {{wh_role}};
 GRANT EXECUTE TASK ON ACCOUNT TO ROLE {{deploy_role}};
 GRANT USAGE ON DATABASE {{db}} TO DATABASE ROLE {{db}}.ANALYST;
 
--- Cortex Analyst Evaluations (SV Eval Gate) requires this account-level
--- privilege to read the AI OBS events table. Without it, EXECUTE_AI_EVALUATION
--- fails with "Semantic View Optimization does not exist or not authorized".
--- Ref: Snowflake bug notice — fix rolling out, but this grant is needed for
--- reliable evals. See docs/operations/IAC_GAPS.md #8.
+-- Cortex Analyst Evaluations (SV Eval Gate) requires the full set of
+-- privileges documented at
+--   https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-analyst/evaluation
+-- Without EVERY one of these, EXECUTE_AI_EVALUATION on a semantic view
+-- fails with "Semantic View Optimization SYSTEM_AI_OBS_ANALYST_EVAL_<sv>
+-- does not exist or not authorized" because the companion optimization
+-- object can't be provisioned. See docs/operations/IAC_GAPS.md #8.
+--
+-- Required per the doc:
+--   1. CORTEX_USER database role
+--   2. AI_OBSERVABILITY_EVENTS_LOOKUP application role
+--   3. EXECUTE TASK on account
+--   4. CREATE TASK on the schema containing the semantic view
+--   5. CREATE DATASET on the schema containing the semantic view
+--   6. SELECT and MONITOR on the semantic view(s)
+--   7. READ UNREDACTED AI OBSERVABILITY EVENTS TABLE (account-level)
 GRANT READ UNREDACTED AI OBSERVABILITY EVENTS TABLE ON ACCOUNT TO ROLE {{deploy_role}};
+GRANT DATABASE ROLE SNOWFLAKE.CORTEX_USER TO ROLE {{deploy_role}};
+GRANT APPLICATION ROLE SNOWFLAKE.AI_OBSERVABILITY_EVENTS_LOOKUP TO ROLE {{deploy_role}};
+GRANT CREATE TASK ON SCHEMA {{db}}.SEMANTIC{{ semantic_schema_suffix }} TO ROLE {{deploy_role}};
+GRANT CREATE DATASET ON SCHEMA {{db}}.SEMANTIC{{ semantic_schema_suffix }} TO ROLE {{deploy_role}};
+GRANT SELECT ON ALL SEMANTIC VIEWS IN SCHEMA {{db}}.SEMANTIC{{ semantic_schema_suffix }} TO ROLE {{deploy_role}};
+GRANT MONITOR ON ALL SEMANTIC VIEWS IN SCHEMA {{db}}.SEMANTIC{{ semantic_schema_suffix }} TO ROLE {{deploy_role}};
+GRANT SELECT ON FUTURE SEMANTIC VIEWS IN SCHEMA {{db}}.SEMANTIC{{ semantic_schema_suffix }} TO ROLE {{deploy_role}};
+GRANT MONITOR ON FUTURE SEMANTIC VIEWS IN SCHEMA {{db}}.SEMANTIC{{ semantic_schema_suffix }} TO ROLE {{deploy_role}};
 
 {{ schema_read_grants(db, 'RAW', 'ANALYST') }}
 {{ schema_read_grants(db, 'STAGING', 'ANALYST') }}

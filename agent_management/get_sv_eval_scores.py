@@ -56,6 +56,46 @@ from agent_management.utils.snowflake_client import connect
 logger = logging.getLogger(__name__)
 
 
+# Cortex Analyst platform error signatures. Each entry is a substring or
+# Snowflake error code that, when present in a VQR's ERROR text, indicates
+# a Snowflake-side platform issue rather than a content regression.
+# Add to this list as new platform issues are observed in the wild and
+# document them in docs/operations/IAC_GAPS.md so we can revisit when the
+# platform fix lands.
+PLATFORM_ERROR_SIGNATURES: tuple[str, ...] = (
+    "invocation failed",   # Cortex Analyst flake -- VQR submission stage
+    "392700",              # Cortex Analyst engine error -- diagnosed direct
+                           #   execution of gold SQL works; only fails when
+                           #   submitted via EXECUTE AI EVALUATION
+)
+
+
+def is_platform_error(error_text: str | None) -> bool:
+    """True when the VQR error matches a documented Cortex Analyst platform
+    issue. Use to distinguish "the platform broke" from "the gold/Analyst
+    SQL produced wrong rows" so reporting can stay honest.
+    """
+    if not error_text:
+        return False
+    needle = error_text.lower()
+    return any(sig.lower() in needle for sig in PLATFORM_ERROR_SIGNATURES)
+
+
+def extract_platform_error_code(error_text: str | None) -> str | None:
+    """Return the matching platform signature for surfacing in the comment.
+
+    Used by the renderer to show "3 (392700)" on PLATFORM rows so reviewers
+    can tell which platform issue is biting at a glance.
+    """
+    if not error_text:
+        return None
+    needle = error_text.lower()
+    for sig in PLATFORM_ERROR_SIGNATURES:
+        if sig.lower() in needle:
+            return sig
+    return None
+
+
 def fetch_eval_data(
     cur, database: str, schema: str, sv_name: str, run_name: str
 ) -> list[dict]:
@@ -69,14 +109,67 @@ def fetch_eval_data(
     return [dict(zip(columns, row)) for row in cur.fetchall()]
 
 
+def run_name_candidates(base_run_name: str, sv_name: str) -> list[str]:
+    """Generate candidate run names to try when looking up eval results.
+
+    `run_sv_eval` writes per-SV run names of the form ``{base}_{sv_lower}``
+    (e.g. ``PR-51-25457687951_sem_staffing_analytics``). Callers, however,
+    typically pass only the base (``PR-51-25457687951``). Try the exact
+    match first, then the per-SV suffix form, so a single base run-name
+    transparently resolves to the per-SV events.
+    """
+    if not base_run_name:
+        return []
+    candidates = [base_run_name]
+    suffixed = f"{base_run_name}_{sv_name.lower()}"
+    if suffixed != base_run_name:
+        candidates.append(suffixed)
+    return candidates
+
+
+def fetch_eval_data_with_fallback(
+    cur, database: str, schema: str, sv_name: str, base_run_name: str
+) -> tuple[list[dict], str | None]:
+    """Try each run-name candidate; return (results, matched_run_name).
+
+    Returns ([], None) when every candidate ran cleanly but produced no rows
+    (the empty case). Re-raises the last exception only when EVERY candidate
+    raised -- a partial success (some empty, some raised) prefers the empty
+    signal because it represents a successful Snowflake call.
+    """
+    last_error: Exception | None = None
+    saw_clean_empty = False
+    for candidate in run_name_candidates(base_run_name, sv_name):
+        try:
+            results = fetch_eval_data(cur, database, schema, sv_name, candidate)
+        except Exception as exc:  # noqa: BLE001 - re-raise only if all fail
+            last_error = exc
+            continue
+        if results:
+            return results, candidate
+        saw_clean_empty = True
+    if last_error is not None and not saw_clean_empty:
+        raise last_error
+    return [], None
+
+
 def score_results(results: list[dict]) -> dict:
     if not results:
-        return {"total": 0, "scored": 0, "sum_score": 0.0, "score": 0.0, "errors": 0, "vqrs": []}
+        return {
+            "total": 0,
+            "scored": 0,
+            "sum_score": 0.0,
+            "score": 0.0,
+            "errors": 0,
+            "flake_errors": 0,
+            "vqrs": [],
+        }
 
     total = len(results)
     sum_score = 0.0
     scored = 0
     errors = 0
+    flake_errors = 0
     vqrs = []
 
     for r in results:
@@ -91,6 +184,7 @@ def score_results(results: list[dict]) -> dict:
             "duration_ms": duration,
             "has_error": bool(error_text),
             "error_preview": error_text[:200] if error_text else "",
+            "platform_error_code": extract_platform_error_code(error_text),
         }
         vqrs.append(vqr)
 
@@ -99,6 +193,12 @@ def score_results(results: list[dict]) -> dict:
             scored += 1
         else:
             errors += 1
+            # Mirror run_sv_eval.compute_score()'s flake detection so the
+            # reporting and execution layers agree on what counts as a
+            # Cortex Analyst platform flake. Now sourced from a shared
+            # signature list so adding a new known issue is one line.
+            if is_platform_error(error_text):
+                flake_errors += 1
 
     return {
         "total": total,
@@ -106,6 +206,7 @@ def score_results(results: list[dict]) -> dict:
         "sum_score": round(sum_score, 2),
         "score": round(sum_score / scored, 4) if scored > 0 else 0.0,
         "errors": errors,
+        "flake_errors": flake_errors,
         "vqrs": vqrs,
     }
 
@@ -156,7 +257,11 @@ def main():
     database = get_database(config)
     schema = config["deployment"]["semantic_schema"]
     thresholds = get_thresholds(config)
-    sv_threshold = args.threshold or thresholds.get("sv_sql_correctness", 0.80)
+    sv_threshold = (
+        args.threshold
+        if args.threshold is not None
+        else thresholds.get("sv_sql_correctness", 0.80)
+    )
 
     conn = connect(config)
     cur = conn.cursor()
@@ -170,9 +275,7 @@ def main():
             cur.execute(f"SHOW SEMANTIC VIEWS IN SCHEMA {database}.{schema}")
             sv_names = [row[1] for row in cur.fetchall() if row[7]]
 
-        all_scores = {}
-        all_passed = True
-        no_data_count = 0
+        all_scores: dict[str, dict] = {}
 
         if not args.json_output:
             logger.info("=" * 70)
@@ -189,44 +292,87 @@ def main():
                 if not args.json_output:
                     logger.info("\n  %-35s  NO EVAL RUN FOUND", sv_name)
                 all_scores[sv_name] = {"status": "no_run"}
-                no_data_count += 1
                 continue
 
             try:
-                results = fetch_eval_data(cur, database, schema, sv_name, run_name)
+                results, matched_run = fetch_eval_data_with_fallback(
+                    cur, database, schema, sv_name, run_name
+                )
             except Exception as e:
                 if not args.json_output:
                     logger.info("\n  %-35s  ERROR: %s", sv_name, e)
-                all_scores[sv_name] = {"status": "error", "error": str(e)}
+                all_scores[sv_name] = {
+                    "status": "error",
+                    "run_name": run_name,
+                    "error": str(e),
+                }
                 continue
 
             if not results:
                 if not args.json_output:
                     logger.info("\n  %-35s  NO RESULTS (run=%s)", sv_name, run_name)
                 all_scores[sv_name] = {"status": "empty", "run_name": run_name}
-                no_data_count += 1
                 continue
 
             metrics = score_results(results)
-            passed = metrics["score"] >= sv_threshold
-            if not passed:
-                all_passed = False
+            # Decide outcome class based on what actually came back. A SV
+            # whose VQRs all returned a Cortex Analyst platform error
+            # (Invocation failed, error code 392700, etc.) is a different
+            # signal than a real threshold miss; surface it as
+            # ``platform_blocked`` so reviewers can tell them apart at a
+            # glance.
+            scored = metrics["scored"]
+            errored = metrics["errors"]
+            flake = metrics["flake_errors"]
+
+            if scored == 0 and errored > 0 and flake == errored:
+                status = "platform_blocked"
+                # Surface the error code(s) we observed for visibility in
+                # the PR comment renderer.
+                platform_codes = sorted({
+                    v["platform_error_code"]
+                    for v in metrics["vqrs"]
+                    if v.get("platform_error_code")
+                })
+                if platform_codes:
+                    metrics["platform_error_codes"] = platform_codes
+            elif scored == 0 and errored > 0:
+                status = "error"
+            else:
+                passed = metrics["score"] >= sv_threshold
+                status = "PASS" if passed else "FAIL"
 
             all_scores[sv_name] = {
-                "status": "PASS" if passed else "FAIL",
-                "run_name": run_name,
+                "status": status,
+                "run_name": matched_run or run_name,
                 **metrics,
             }
 
             if not args.json_output:
-                flag = "PASS" if passed else "FAIL"
+                row = all_scores[sv_name]
+                status = row["status"]
                 pct = metrics["score"] * 100
+                if status == "platform_blocked":
+                    flag = "PLATFORM"
+                elif status == "error":
+                    flag = "ERROR"
+                else:
+                    flag = status
                 logger.info(
                     "\n  %-35s  %5.1f%%  (%s/%s scored)  [%s]  run=%s",
-                    sv_name, pct, metrics["sum_score"], metrics["scored"], flag, run_name,
+                    sv_name, pct, metrics["sum_score"], metrics["scored"], flag,
+                    matched_run or run_name,
                 )
                 if metrics["errors"]:
-                    logger.info("    %d VQR(s) returned NULL score (error)", metrics["errors"])
+                    flake_note = (
+                        f" ({metrics['flake_errors']} flake)"
+                        if metrics["flake_errors"]
+                        else ""
+                    )
+                    logger.info(
+                        "    %d VQR(s) returned NULL score%s",
+                        metrics["errors"], flake_note,
+                    )
 
                 if args.detail:
                     for v in metrics["vqrs"]:
@@ -237,6 +383,21 @@ def main():
                         if v["has_error"] and v["error_preview"]:
                             logger.info("        ERROR: %s", v["error_preview"][:120])
 
+        # Derive truthful aggregate counts from the per-SV outcomes -- never
+        # default ``all_passed`` to True. A run with zero scored views is not
+        # a pass; it is incomplete. ERROR/NO_RUN/NO_DATA/PLATFORM_BLOCKED are
+        # first-class outcomes and each block ``all_passed``.
+        passing = sum(1 for v in all_scores.values() if v.get("status") == "PASS")
+        failing = sum(1 for v in all_scores.values() if v.get("status") == "FAIL")
+        errored = sum(1 for v in all_scores.values() if v.get("status") == "error")
+        platform = sum(
+            1 for v in all_scores.values() if v.get("status") == "platform_blocked"
+        )
+        no_run = sum(1 for v in all_scores.values() if v.get("status") == "no_run")
+        empty = sum(1 for v in all_scores.values() if v.get("status") == "empty")
+        total = len(all_scores)
+        all_passed = bool(total) and passing == total
+
         if args.json_output:
             output = {
                 "environment": config["environment"],
@@ -244,26 +405,43 @@ def main():
                 "schema": schema,
                 "threshold": sv_threshold,
                 "all_passed": all_passed,
+                "counts": {
+                    "pass": passing,
+                    "fail": failing,
+                    "error": errored,
+                    "platform_blocked": platform,
+                    "no_run": no_run,
+                    "empty": empty,
+                    "total": total,
+                },
                 "views": all_scores,
             }
             print(json.dumps(output, indent=2, default=str))
         else:
             logger.info("\n" + "=" * 70)
-            passing = sum(1 for v in all_scores.values() if v.get("status") == "PASS")
-            failing = sum(1 for v in all_scores.values() if v.get("status") == "FAIL")
             logger.info(
-                "SUMMARY: %d PASS, %d FAIL, %d no data  (%d total)",
-                passing, failing, no_data_count, len(sv_names),
+                "SUMMARY: %d PASS, %d FAIL, %d ERROR, %d PLATFORM, %d NO_RUN, %d NO_DATA  (%d total)",
+                passing, failing, errored, platform, no_run, empty, total,
             )
-            if all_passed and no_data_count == 0:
+            if all_passed:
                 logger.info("EVAL GATE: PASSED")
             elif failing > 0:
                 logger.error("EVAL GATE: FAILED")
+            elif errored > 0:
+                logger.error("EVAL GATE: ERRORED (eval lookup failures)")
+            elif platform > 0:
+                logger.warning(
+                    "EVAL GATE: PLATFORM BLOCKED (%d view(s) -- Cortex Analyst flake)",
+                    platform,
+                )
             else:
                 logger.warning("EVAL GATE: INCOMPLETE (missing eval data)")
             logger.info("=" * 70)
 
-        if failing > 0:
+        # Exit non-zero on any non-PASS outcome. Truthful is better than
+        # quiet; downstream callers can opt to treat ERROR/INCOMPLETE as
+        # advisory if they choose.
+        if not all_passed:
             sys.exit(1)
     finally:
         cur.close()

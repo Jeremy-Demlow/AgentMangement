@@ -384,6 +384,21 @@ def show_results(cursor, config: dict, run_name: str, category: str = None):
 
 
 def poll_until_done(cursor, run_name: str, stage: str, filename: str, poll_interval: int = POLL_INTERVAL_SECONDS) -> str:
+    # Snowflake reports a sequence of statuses for Cortex Agent evals:
+    #   CREATED -> INVOCATION_IN_PROGRESS -> INVOCATION_COMPLETED ->
+    #   (metric computation, async) -> COMPLETED
+    # Substring-matching "COMPLETED" inside "INVOCATION_COMPLETED" exits the
+    # loop one phase too early - the LLM judge has not written metric_name
+    # yet, so fetch_results() returns rows with NULL metrics and the eval
+    # looks "malformed". Use exact-match against the documented terminal
+    # tokens; everything else is transient and we keep polling.
+    TERMINAL_OK = {"COMPLETED", "SUCCEEDED", "DONE"}
+    TERMINAL_FAIL = {
+        "FAILED", "ERROR", "CANCELLED",
+        # Real terminal failure modes from EXECUTE_AI_EVALUATION; keep so we
+        # bail fast on a genuine error instead of polling for 30 minutes.
+        "INVOCATION_FAILED", "INVOCATION_ERROR",
+    }
     for attempt in range(1, MAX_POLL_ATTEMPTS + 1):
         cursor.execute(f"""
             CALL EXECUTE_AI_EVALUATION(
@@ -404,9 +419,9 @@ def poll_until_done(cursor, run_name: str, stage: str, filename: str, poll_inter
 
             print(f"  [{attempt:02d}] Status: {status_str}")
 
-            if any(term in status_str for term in ("COMPLETED", "SUCCEEDED", "DONE")):
+            if status_str in TERMINAL_OK:
                 return "COMPLETED"
-            if any(term in status_str for term in ("FAILED", "ERROR", "CANCELLED")):
+            if status_str in TERMINAL_FAIL:
                 return f"FAILED: {status_str}"
 
         time.sleep(poll_interval)
@@ -414,15 +429,42 @@ def poll_until_done(cursor, run_name: str, stage: str, filename: str, poll_inter
     return "TIMEOUT"
 
 
-def fetch_results(cursor, agent: dict, run_name: str) -> list[dict]:
-    cursor.execute(f"""
-        SELECT * FROM TABLE(SNOWFLAKE.LOCAL.GET_AI_EVALUATION_DATA(
-            '{agent["database"]}', '{agent["schema"]}', '{agent["name"]}',
-            'CORTEX AGENT', '{run_name}'
-        ))
-    """)
-    columns = [d[0].lower() for d in cursor.description]
-    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+def fetch_results(cursor, agent: dict, run_name: str,
+                  retry_on_empty: int = 2, retry_sleep: int = 30) -> list[dict]:
+    """Fetch eval results, retrying briefly if metrics are missing.
+
+    Even when STATUS=COMPLETED, GET_AI_EVALUATION_DATA can briefly trail
+    by a few seconds before metric_name is populated on every row. A naive
+    single fetch occasionally returns rows-with-no-metrics on slow accounts,
+    poisoning the threshold check. Retry up to retry_on_empty times if we
+    see rows but no metric_name set anywhere - that's the only failure
+    mode we want to retry; a real empty result (truly 0 rows) bails out
+    immediately so we surface the genuine error.
+    """
+    last_rows: list[dict] = []
+    for attempt in range(retry_on_empty + 1):
+        cursor.execute(f"""
+            SELECT * FROM TABLE(SNOWFLAKE.LOCAL.GET_AI_EVALUATION_DATA(
+                '{agent["database"]}', '{agent["schema"]}', '{agent["name"]}',
+                'CORTEX AGENT', '{run_name}'
+            ))
+        """)
+        columns = [d[0].lower() for d in cursor.description]
+        last_rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        # If any row has a non-NULL metric_name we have real data.
+        if last_rows and any(r.get("metric_name") for r in last_rows):
+            return last_rows
+        # No rows at all - genuine empty, no point retrying.
+        if not last_rows:
+            return last_rows
+        # Rows present but every metric_name is NULL - metric scoring lagging.
+        if attempt < retry_on_empty:
+            print(
+                f"  [retry {attempt + 1}/{retry_on_empty}] {len(last_rows)} rows "
+                f"returned but no metric_name yet; sleeping {retry_sleep}s..."
+            )
+            time.sleep(retry_sleep)
+    return last_rows
 
 
 def fetch_errors(cursor, agent: dict, run_name: str) -> list[dict]:

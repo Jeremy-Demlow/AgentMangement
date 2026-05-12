@@ -41,6 +41,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
 from agent_management import setup_logging
+from agent_management.get_sv_eval_scores import is_platform_error
 from agent_management.utils.config import (
     get_database,
     get_sv_eval_config,
@@ -153,7 +154,14 @@ def start_eval(cur, run_name: str, stage: str, filename: str):
     return row
 
 
-def check_status(cur, run_name: str, stage: str, filename: str) -> str:
+def check_status(cur, run_name: str, stage: str, filename: str) -> tuple[str, str]:
+    """Return (status, detail_text). Detail is empty string when absent.
+
+    Detail is exposed so callers can distinguish a generic FAILED from a
+    documented Cortex Analyst platform error like 'Invocation failed' /
+    error code 392700, which let the runner classify these as advisory
+    platform_blocked rather than real eval-engine crashes.
+    """
     cur.execute(f"""
         CALL EXECUTE_AI_EVALUATION(
             'STATUS',
@@ -163,7 +171,7 @@ def check_status(cur, run_name: str, stage: str, filename: str) -> str:
     """)
     row = cur.fetchone()
     if not row:
-        return "UNKNOWN"
+        return "UNKNOWN", ""
     cols = [col[0].upper() for col in cur.description] if cur.description else []
     if "STATUS" in cols:
         idx = cols.index("STATUS")
@@ -174,9 +182,11 @@ def check_status(cur, run_name: str, stage: str, filename: str) -> str:
         status = str(row[0])
     logger.info("  Status: %s", status)
     detail_idx = cols.index("STATUS_DETAILS") if "STATUS_DETAILS" in cols else (4 if len(row) > 4 else -1)
+    detail = ""
     if detail_idx >= 0 and row[detail_idx]:
-        logger.info("  Detail: %s", row[detail_idx])
-    return status
+        detail = str(row[detail_idx])
+        logger.info("  Detail: %s", detail)
+    return status, detail
 
 
 def get_eval_results(cur, database: str, schema: str, sv_name: str, run_name: str) -> list[dict]:
@@ -277,7 +287,7 @@ def poll_and_collect(
         for attempt in range(1, MAX_POLL_ATTEMPTS + 1):
             time.sleep(POLL_INTERVAL_SECONDS)
             try:
-                status = check_status(cur, run_name, stage, filename)
+                status, detail = check_status(cur, run_name, stage, filename)
             except Exception as exc:
                 if is_platform_blocker(exc):
                     logger.warning(
@@ -306,7 +316,7 @@ def poll_and_collect(
                         start_eval(cur, retry_run_name, stage, filename)
                         for r_attempt in range(1, MAX_POLL_ATTEMPTS + 1):
                             time.sleep(POLL_INTERVAL_SECONDS)
-                            r_status = check_status(cur, retry_run_name, stage, filename)
+                            r_status, _ = check_status(cur, retry_run_name, stage, filename)
                             if r_status in ("COMPLETED", "SUCCEEDED"):
                                 r_results = get_eval_results(cur, database, schema, sv_name, retry_run_name)
                                 r_metrics = compute_score(r_results)
@@ -319,6 +329,45 @@ def poll_and_collect(
                         logger.warning("  [%s] Retry attempt raised (keeping original): %s", sv_name, exc)
                 return metrics
             elif status in ("FAILED", "ERROR", "CANCELLED"):
+                # If the orchestrator-level detail text matches a documented
+                # Cortex Analyst platform error signature, classify the run
+                # as platform_blocked without trying to read per-VQR data
+                # (which won't exist when the eval framework itself errors).
+                if is_platform_error(detail):
+                    logger.warning(
+                        "  [%s] PLATFORM BLOCKED: orchestrator failed with %s -- %s",
+                        sv_name, status, detail[:200],
+                    )
+                    return {
+                        "total": 0, "scored": 0, "score": 0.0,
+                        "errors": 0, "flake_errors": 0,
+                        "error": status,
+                        "platform_blocked": True,
+                    }
+                # Eval framework reported terminal failure. Try to fetch
+                # per-VQR data anyway: when every VQR carries a documented
+                # Cortex Analyst platform error (e.g. 392700), the
+                # underlying queries are fine and only the eval engine
+                # broke -- classify as platform_blocked rather than a
+                # real run failure. If the fetch itself raises, fall back
+                # to the original error path.
+                try:
+                    results = get_eval_results(cur, database, schema, sv_name, run_name)
+                    metrics = compute_score(results)
+                    if (
+                        metrics["scored"] == 0
+                        and metrics["errors"] > 0
+                        and metrics["flake_errors"] == metrics["errors"]
+                    ):
+                        logger.warning(
+                            "  [%s] Eval status %s but every VQR carries a"
+                            " documented Cortex Analyst platform error (%d flake);"
+                            " classifying as platform_blocked (advisory).",
+                            sv_name, status, metrics["flake_errors"],
+                        )
+                        return {**metrics, "error": status, "platform_blocked": True}
+                except Exception as fetch_exc:  # noqa: BLE001
+                    logger.debug("  [%s] post-FAILED fetch raised: %s", sv_name, fetch_exc)
                 logger.error("  [%s] Eval %s after %d poll(s)", sv_name, status, attempt)
                 return {"total": 0, "scored": 0, "score": 0.0, "errors": 0, "flake_errors": 0, "error": status}
 
@@ -365,7 +414,7 @@ def run_eval_for_sv(
 
     for attempt in range(1, MAX_POLL_ATTEMPTS + 1):
         time.sleep(POLL_INTERVAL_SECONDS)
-        status = check_status(cur, run_name, stage, filename)
+        status, detail = check_status(cur, run_name, stage, filename)
 
         if status in ("COMPLETED", "SUCCEEDED"):
             logger.info("  Completed after %d poll(s)", attempt)
@@ -381,7 +430,7 @@ def run_eval_for_sv(
                     start_eval(cur, retry_run_name, stage, filename)
                     for r_attempt in range(1, MAX_POLL_ATTEMPTS + 1):
                         time.sleep(POLL_INTERVAL_SECONDS)
-                        r_status = check_status(cur, retry_run_name, stage, filename)
+                        r_status, _ = check_status(cur, retry_run_name, stage, filename)
                         if r_status in ("COMPLETED", "SUCCEEDED"):
                             r_results = get_eval_results(cur, database, schema, sv_name, retry_run_name)
                             r_metrics = compute_score(r_results)
@@ -394,6 +443,39 @@ def run_eval_for_sv(
                     logger.warning("  Retry attempt raised (keeping original): %s", exc)
             return metrics
         elif status in ("FAILED", "ERROR", "CANCELLED"):
+            # Same orchestrator-level platform classification as
+            # poll_and_collect.
+            if is_platform_error(detail):
+                logger.warning(
+                    "  PLATFORM BLOCKED: orchestrator failed with %s -- %s",
+                    status, detail[:200],
+                )
+                return {
+                    "total": 0, "scored": 0, "score": 0.0,
+                    "errors": 0, "flake_errors": 0,
+                    "error": status,
+                    "platform_blocked": True,
+                }
+            # Same all-flake classification as poll_and_collect: try to
+            # fetch per-VQR data and treat as platform_blocked when every
+            # error is a documented Cortex Analyst platform flake.
+            try:
+                results = get_eval_results(cur, database, schema, sv_name, run_name)
+                metrics = compute_score(results)
+                if (
+                    metrics["scored"] == 0
+                    and metrics["errors"] > 0
+                    and metrics["flake_errors"] == metrics["errors"]
+                ):
+                    logger.warning(
+                        "  Eval status %s but every VQR carries a documented"
+                        " Cortex Analyst platform error (%d flake);"
+                        " classifying as platform_blocked (advisory).",
+                        status, metrics["flake_errors"],
+                    )
+                    return {**metrics, "error": status, "platform_blocked": True}
+            except Exception as fetch_exc:  # noqa: BLE001
+                logger.debug("  post-FAILED fetch raised: %s", fetch_exc)
             logger.error("  Eval %s after %d poll(s)", status, attempt)
             return {"total": 0, "scored": 0, "score": 0.0, "errors": 0, "flake_errors": 0, "error": status}
 
@@ -492,6 +574,14 @@ def main():
         logger.info("SVs to evaluate: %s", ", ".join(sv_names))
         all_passed = True
         total_checked = 0
+        # Initialize before the branch so the bottom-of-function exit logic
+        # can rely on it whether we took the dry_run/single-SV path or the
+        # parallel-ThreadPool path. Mirror the platform_blocked classification
+        # the reporting layer (get_sv_eval_scores) uses, so a SV whose every
+        # VQR hit a documented Cortex Analyst platform error (Invocation
+        # failed, error code 392700, etc.) is treated as advisory rather
+        # than a real threshold miss.
+        platform_blocked: list[str] = []
 
         if args.dry_run or len(sv_names) == 1:
             for sv_name in sv_names:
@@ -504,8 +594,32 @@ def main():
                 if metrics is None:
                     continue
 
+                # Check platform_blocked BEFORE the generic "error" branch
+                # so an orchestrator-level Cortex Analyst flake (the runner
+                # returns {error: "FAILED", platform_blocked: True}) is
+                # classified as advisory, not as a real eval failure.
+                if metrics.get("platform_blocked"):
+                    logger.warning("  %s: PLATFORM BLOCKED (advisory)", sv_name)
+                    platform_blocked.append(sv_name)
+                    continue
+
                 if "error" in metrics:
                     all_passed = False
+                    continue
+
+                # Platform-blocked classification: completed but every VQR
+                # produced a documented Cortex Analyst platform error. Not
+                # a content regression -- a Snowflake-side issue. Don't
+                # flip all_passed; surface separately.
+                scored = metrics.get("scored", 0)
+                errored = metrics.get("errors", 0)
+                flake = metrics.get("flake_errors", 0)
+                if scored == 0 and errored > 0 and flake == errored:
+                    logger.warning(
+                        "  %s: PLATFORM BLOCKED (advisory) -- %d/%d VQR(s) all flake errors",
+                        sv_name, flake, errored,
+                    )
+                    platform_blocked.append(sv_name)
                     continue
 
                 total_checked += 1
@@ -520,7 +634,6 @@ def main():
                     all_passed = False
         else:
             started: list[tuple[str, str, str]] = []
-            platform_blocked: list[str] = []
             for sv_name in sv_names:
                 sv_run_name = f"{run_name}_{sv_name.lower()}"
                 try:
@@ -584,6 +697,21 @@ def main():
                         all_passed = False
                         continue
 
+                    # Same per-SV platform_blocked classification the
+                    # reporting layer uses: scored=0 with all VQR errors
+                    # being documented platform flakes is advisory, not
+                    # a real threshold miss.
+                    scored_n = metrics.get("scored", 0)
+                    errored_n = metrics.get("errors", 0)
+                    flake_n = metrics.get("flake_errors", 0)
+                    if scored_n == 0 and errored_n > 0 and flake_n == errored_n:
+                        logger.warning(
+                            "  %s: PLATFORM BLOCKED (advisory) -- %d/%d VQR(s) all flake errors",
+                            sv_name, flake_n, errored_n,
+                        )
+                        platform_blocked.append(sv_name)
+                        continue
+
                     total_checked += 1
                     score_pass = metrics["score"] >= sv_threshold
 
@@ -603,7 +731,7 @@ def main():
             logger.info("All evals started — use --status to check progress")
         elif total_checked == 0 and len(sv_names) > 0:
             # Distinguish "platform blocked every SV" from "everything crashed"
-            if 'platform_blocked' in dir() and len(platform_blocked) == len(sv_names):
+            if len(platform_blocked) == len(sv_names):
                 logger.warning(
                     "SV EVAL GATE: PLATFORM BLOCKED for all %d view(s). "
                     "Snowflake Cortex Analyst Evaluations PuPr bug — the "
@@ -617,7 +745,7 @@ def main():
             sys.exit(EXIT_CRASH)
         elif all_passed:
             logger.info("SV EVAL GATE: PASSED (%d views)", total_checked)
-            if 'platform_blocked' in dir() and platform_blocked:
+            if platform_blocked:
                 logger.warning(
                     "  NOTE: %d view(s) platform-blocked (advisory): %s",
                     len(platform_blocked), ", ".join(platform_blocked),

@@ -104,7 +104,7 @@ jobs:
       - name: Install dbt
         run: |
           pip install --upgrade pip
-          pip install dbt-snowflake
+          pip install 'dbt-snowflake==1.11.4'
 
       - name: Setup Snowflake
         uses: ./.github/actions/snowflake-setup
@@ -265,10 +265,27 @@ jobs:
 
       - name: Run SV evaluations
         id: sv_eval
-        continue-on-error: true
         env:
           SV_RUN_NAME: "PR-${{ github.event.pull_request.number }}-${{ github.run_id }}"
-        run: python -m agent_management.run_sv_eval --env dev --run-name "$SV_RUN_NAME"
+        # Exit-code taxonomy from agent_management.run_sv_eval (kept in sync
+        # with deploy-dev.yml so workflows and Python share semantics):
+        #   0 = passed
+        #   1 = threshold failure (truthful fail; non-blocking on dev via
+        #       job-level continue-on-error, blocking on main)
+        #   2 = crash / unhandled (always fails)
+        #   3 = platform blocker (Cortex Analyst PuPr) -- advisory, exits 0
+        run: |
+          set +e
+          python -m agent_management.run_sv_eval --env dev --run-name "$SV_RUN_NAME"
+          code=$?
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          case "$code" in
+            0) echo "status=passed"           >> "$GITHUB_OUTPUT"; exit 0 ;;
+            1) echo "status=threshold_fail"   >> "$GITHUB_OUTPUT"; exit 1 ;;
+            2) echo "status=crash"            >> "$GITHUB_OUTPUT"; exit 2 ;;
+            3) echo "status=platform_blocked" >> "$GITHUB_OUTPUT"; exit 0 ;;
+            *) echo "status=unknown"          >> "$GITHUB_OUTPUT"; exit "$code" ;;
+          esac
 
       - name: Collect SV eval scores (JSON)
         if: always()
@@ -347,20 +364,36 @@ jobs:
       - name: SV Eval Summary
         if: always()
         run: |
-          if [ "${{ steps.sv_eval.outcome }}" = "success" ]; then
-            echo "### ✅ SV Evaluation Gate: PASSED" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "### ⚠️ SV Evaluation Gate: FAILED (advisory — does not block merge)" >> $GITHUB_STEP_SUMMARY
-            echo "One or more semantic views scored below threshold or hit a platform flake (SEM_SAFETY_INCIDENTS 'Invocation failed' is a known Cortex Analyst issue)." >> $GITHUB_STEP_SUMMARY
-            echo "The structural drift gate (detect_sv_drift --fail-on-drift in dbt Quality Gate) is the blocking check." >> $GITHUB_STEP_SUMMARY
-          fi
+          # Truthful per-status summary so reviewers know exactly what happened.
+          # Job-level continue-on-error: ${{ github.base_ref == 'dev' }} keeps
+          # threshold-fail non-blocking on dev PRs, but the job conclusion now
+          # reflects reality (red = failed, even when allowed).
+          case "${{ steps.sv_eval.outputs.status }}" in
+            passed)
+              echo "### SV Evaluation Gate: PASSED" >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            threshold_fail)
+              echo "### SV Evaluation Gate: FAILED (threshold)" >> "$GITHUB_STEP_SUMMARY"
+              echo "One or more semantic views scored below the configured sql_correctness threshold." >> "$GITHUB_STEP_SUMMARY"
+              echo "This is a non-blocking allowed failure on dev PRs and a blocking failure on main PRs." >> "$GITHUB_STEP_SUMMARY"
+              echo "Inspect the per-SV PR comment for which views regressed." >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            platform_blocked)
+              echo "### SV Evaluation Gate: PLATFORM BLOCKED" >> "$GITHUB_STEP_SUMMARY"
+              echo "Snowflake Cortex Analyst Evaluations PuPr issue (SYSTEM_AI_OBS_ANALYST_EVAL_* missing)." >> "$GITHUB_STEP_SUMMARY"
+              echo "Pipeline continuing. See docs/operations/IAC_GAPS.md #8." >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            crash|unknown|*)
+              echo "### SV Evaluation Gate: CRASHED (code=${{ steps.sv_eval.outputs.code }})" >> "$GITHUB_STEP_SUMMARY"
+              echo "Unhandled exit from run_sv_eval. Investigate logs before merging." >> "$GITHUB_STEP_SUMMARY"
+              ;;
+          esac
 
-      # SV Evaluation is advisory: Cortex Analyst evals are probabilistic and
-      # occasionally hit platform-level "Invocation failed" errors on individual
-      # views (SEM_SAFETY_INCIDENTS in particular). The blocking structural
-      # gate is `detect_sv_drift --fail-on-drift` in the dbt-quality-gate job;
-      # this job only reports scores. To re-enable a hard gate once the
-      # platform flakiness is resolved, restore `exit 1` on non-success below.
+      # SV Evaluation truthfulness (Phase 1): the step's exit code now flows
+      # through to the job conclusion. Job-level
+      # `continue-on-error: ${{ github.base_ref == 'dev' }}` is the only
+      # mechanism that allows this to be non-blocking, and only on dev PRs.
+      # No more step-level swallowing.
 
       - name: Cleanup
         if: always()

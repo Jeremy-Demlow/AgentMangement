@@ -203,13 +203,20 @@ jobs:
         id: plan
         run: |
           TODAY=$(date +%Y-%m-%d)
-          LAST_DATE="${{ steps.check_data.outputs.last_date }}"
+          # snow sql --format json may return DATE as 'YYYY-MM-DDT00:00:00';
+          # strip any time portion so strptime('%Y-%m-%d') succeeds.
+          LAST_DATE_RAW="${{ steps.check_data.outputs.last_date }}"
+          LAST_DATE="${LAST_DATE_RAW%%T*}"
+
+          # Fail fast if upstream returns something we can't parse.
+          python3 -c "from datetime import datetime; datetime.strptime('$LAST_DATE', '%Y-%m-%d')" \
+            || { echo "::error::LAST_DATE='$LAST_DATE_RAW' did not normalize to YYYY-MM-DD"; exit 1; }
 
           REBUILD_FROM="${{ github.event.inputs.rebuild_from_date }}"
           MANUAL_DAYS="${{ github.event.inputs.days }}"
 
           if [ -n "$REBUILD_FROM" ]; then
-            START_DATE="$REBUILD_FROM"
+            START_DATE="${REBUILD_FROM%%T*}"
             DAYS=$(python3 -c "from datetime import datetime; start = datetime.strptime('$START_DATE', '%Y-%m-%d'); today = datetime.strptime('$TODAY', '%Y-%m-%d'); print(max((today - start).days + 1, 0))")
             echo "Manual rebuild from $START_DATE ($DAYS days)"
           elif [ -n "$MANUAL_DAYS" ]; then
@@ -238,6 +245,70 @@ jobs:
           echo "   Start date: $START_DATE"
           echo "   Days to generate: $DAYS"
           echo "   End date: $TODAY"
+
+      # ─── Reconcile RAW Schema Drift ─────────────────────────────────────
+      # Snowflake's write_pandas(auto_create_table=True) infers column types
+      # from the FIRST sample. CUSTOMER_FEEDBACK was bootstrapped with
+      # SUBCATEGORY=NULL so the inferred type became NUMBER(38,0). The daily
+      # incremental generator emits string subcategories (speed, value, ...)
+      # which fails to cast. Idempotently widen the column to VARCHAR so
+      # appends succeed. Safe to run on every refresh - the IS NOT NULL guard
+      # short-circuits when the column type is already correct.
+      - name: Reconcile RAW Schema Drift
+        if: steps.plan.outputs.skip_generation != 'true'
+        env:
+          PROD_DB: ${{ steps.config.outputs.prod_database }}
+          RAW_SCHEMA: ${{ steps.config.outputs.raw_schema }}
+          SNOWFLAKE_CONNECTIONS_DEFAULT_DATABASE: ${{ steps.config.outputs.prod_database }}
+          SNOWFLAKE_CONNECTIONS_DEFAULT_WAREHOUSE: ${{ steps.config.outputs.warehouse }}
+          SNOWFLAKE_CONNECTIONS_DEFAULT_ROLE: ${{ steps.config.outputs.role }}
+        run: |
+          DB="${PROD_DB}"
+          SCHEMA="${RAW_SCHEMA}"
+
+          CURRENT_TYPE=$(snow sql --format json -q "
+            SELECT DATA_TYPE FROM ${DB}.INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = '${SCHEMA}'
+              AND TABLE_NAME = 'CUSTOMER_FEEDBACK'
+              AND COLUMN_NAME = 'SUBCATEGORY'
+          " | python3 -c "import json,sys; rows=json.load(sys.stdin); print(rows[0]['DATA_TYPE'] if rows else 'MISSING')")
+
+          echo "CUSTOMER_FEEDBACK.SUBCATEGORY current type: $CURRENT_TYPE"
+
+          if [ "$CURRENT_TYPE" = "NUMBER" ]; then
+            echo "Repairing SUBCATEGORY column (NUMBER -> VARCHAR(50))"
+            echo "Safe: existing rows all have NULL subcategory; this is a one-shot."
+            snow sql -q "
+              ALTER TABLE ${DB}.${SCHEMA}.CUSTOMER_FEEDBACK
+                DROP COLUMN SUBCATEGORY;
+              ALTER TABLE ${DB}.${SCHEMA}.CUSTOMER_FEEDBACK
+                ADD COLUMN SUBCATEGORY VARCHAR(50);
+            "
+          else
+            echo "RAW.CUSTOMER_FEEDBACK.SUBCATEGORY already correct ($CURRENT_TYPE)"
+          fi
+
+          # Always check MARTS independently - the previous run may have fixed
+          # RAW but left MARTS.FACT_FEEDBACK with the inherited NUMBER column.
+          # dbt's incremental will fail with 'cannot change column from
+          # NUMBER(38,0) to VARCHAR' on the next run because Snowflake
+          # disallows cross-family ALTER. Drop the downstream table so dbt
+          # rebuilds it from the now-correct RAW source.
+          MARTS_TYPE=$(snow sql --format json -q "
+            SELECT DATA_TYPE FROM ${DB}.INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = 'MARTS'
+              AND TABLE_NAME = 'FACT_FEEDBACK'
+              AND COLUMN_NAME = 'SUBCATEGORY'
+          " | python3 -c "import json,sys; rows=json.load(sys.stdin); print(rows[0]['DATA_TYPE'] if rows else 'MISSING')")
+
+          echo "MARTS.FACT_FEEDBACK.SUBCATEGORY current type: $MARTS_TYPE"
+
+          if [ "$MARTS_TYPE" = "NUMBER" ]; then
+            echo "Dropping MARTS.FACT_FEEDBACK so dbt rebuilds with VARCHAR SUBCATEGORY"
+            snow sql -q "DROP TABLE IF EXISTS ${DB}.MARTS.FACT_FEEDBACK"
+          else
+            echo "MARTS.FACT_FEEDBACK already correct or absent"
+          fi
 
       # ─── Clear Raw Data (Optional - for corruption recovery) ────────────
       - name: Clear Raw Data (if requested)
@@ -306,7 +377,7 @@ jobs:
 
       # ─── DBT Setup & Run ────────────────────────────────────────────────
       - name: Install DBT
-        run: pip install dbt-snowflake
+        run: pip install 'dbt-snowflake==1.11.4'
 
       - name: Configure DBT Profile
         run: echo "Using project profiles.yml with env vars"

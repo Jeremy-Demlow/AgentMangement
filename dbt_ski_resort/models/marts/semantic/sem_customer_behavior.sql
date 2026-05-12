@@ -126,7 +126,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "visits_by_segment",
       "question": "What are the total visits and unique customers by customer segment?",
-      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    AM_SKI_RESORT.SEMANTIC.SEM_CUSTOMER_BEHAVIOR\n    DIMENSIONS dim_customer.customer_segment\n    METRICS total_visits, unique_customers\n)",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    {{ target.database }}.SEMANTIC.SEM_CUSTOMER_BEHAVIOR\n    DIMENSIONS dim_customer.customer_segment\n    METRICS total_visits, unique_customers\n)",
       "verified_by": "Cortex Analyst",
       "verified_at": 1744900000,
       "use_as_onboarding_question": true
@@ -134,7 +134,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "weekend_hours_by_season_pass",
       "question": "What is the weekend share percentage and average hours per visit by ski season and pass type?",
-      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    AM_SKI_RESORT.SEMANTIC.SEM_CUSTOMER_BEHAVIOR\n    DIMENSIONS dim_date.ski_season, dim_customer.pass_type\n    METRICS weekend_share_pct, average_hours_per_visit\n) ORDER BY ski_season DESC NULLS LAST, pass_type NULLS LAST",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    {{ target.database }}.SEMANTIC.SEM_CUSTOMER_BEHAVIOR\n    DIMENSIONS dim_date.ski_season, dim_customer.pass_type\n    METRICS weekend_share_pct, average_hours_per_visit\n) ORDER BY ski_season DESC NULLS LAST, pass_type NULLS LAST",
       "verified_by": "Cortex Analyst",
       "verified_at": 1744900000,
       "use_as_onboarding_question": true
@@ -142,7 +142,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "retention_by_season",
       "question": "What are the total visits, pass holder visits, and pass retention percentage by ski season?",
-      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    AM_SKI_RESORT.SEMANTIC.SEM_CUSTOMER_BEHAVIOR\n    DIMENSIONS ski_season\n    METRICS total_visits, pass_holder_visits, pass_retention_pct\n) ORDER BY ski_season DESC NULLS LAST",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    {{ target.database }}.SEMANTIC.SEM_CUSTOMER_BEHAVIOR\n    DIMENSIONS ski_season\n    METRICS total_visits, pass_holder_visits, pass_retention_pct\n) ORDER BY ski_season DESC NULLS LAST",
       "verified_by": "Cortex Analyst",
       "verified_at": 1744900000,
       "use_as_onboarding_question": false
@@ -150,7 +150,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "engagement_by_age_passholder",
       "question": "What are the visits per customer and average lift rides per visit by age group and pass holder status?",
-      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    AM_SKI_RESORT.SEMANTIC.SEM_CUSTOMER_BEHAVIOR\n    METRICS visits_per_customer, average_lift_rides_per_visit\n    DIMENSIONS dim_customer.age_group, dim_customer.is_pass_holder\n)",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    {{ target.database }}.SEMANTIC.SEM_CUSTOMER_BEHAVIOR\n    METRICS visits_per_customer, average_lift_rides_per_visit\n    DIMENSIONS dim_customer.age_group, dim_customer.is_pass_holder\n)",
       "verified_by": "Cortex Analyst",
       "verified_at": 1744900000,
       "use_as_onboarding_question": false
@@ -158,7 +158,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "passholder_visits_by_state",
       "question": "What is the total visits and weekend visits by state for pass holders only?",
-      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    AM_SKI_RESORT.SEMANTIC.SEM_CUSTOMER_BEHAVIOR\n    METRICS total_visits, weekend_visits\n    DIMENSIONS dim_customer.state\n    WHERE dim_customer.is_pass_holder = TRUE\n)",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    {{ target.database }}.SEMANTIC.SEM_CUSTOMER_BEHAVIOR\n    METRICS total_visits, weekend_visits\n    DIMENSIONS dim_customer.state\n    WHERE dim_customer.is_pass_holder = TRUE\n)",
       "verified_by": "Cortex Analyst",
       "verified_at": 1744900000,
       "use_as_onboarding_question": false

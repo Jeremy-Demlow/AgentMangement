@@ -139,7 +139,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "visits_holders_by_pass_type",
       "question": "What are the pass holder visits and active pass holders by pass type?",
-      "sql": "SELECT * FROM SEMANTIC_VIEW(\n  AM_SKI_RESORT.SEMANTIC.SEM_PASSHOLDER_ANALYTICS\n  METRICS pass_holder_visits, active_pass_holders\n  DIMENSIONS dim_customer.pass_type\n)",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n  {{ target.database }}.SEMANTIC.SEM_PASSHOLDER_ANALYTICS\n  METRICS pass_holder_visits, active_pass_holders\n  DIMENSIONS dim_customer.pass_type\n)",
       "verified_by": "Cortex Analyst",
       "verified_at": 1744900000,
       "use_as_onboarding_question": true
@@ -147,7 +147,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "revenue_price_by_season",
       "question": "What is the pass revenue total and average pass price by ski season?",
-      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    AM_SKI_RESORT.SEMANTIC.SEM_PASSHOLDER_ANALYTICS\n    DIMENSIONS dim_date.ski_season\n    METRICS pass_revenue_total, average_pass_price\n) ORDER BY ski_season DESC NULLS LAST",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    {{ target.database }}.SEMANTIC.SEM_PASSHOLDER_ANALYTICS\n    DIMENSIONS dim_date.ski_season\n    METRICS pass_revenue_total, average_pass_price\n) ORDER BY ski_season DESC NULLS LAST",
       "verified_by": "Cortex Analyst",
       "verified_at": 1744900000,
       "use_as_onboarding_question": true
@@ -155,7 +155,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "usage_session_by_segment",
       "question": "What is the pass usage per holder and average pass session hours by customer segment?",
-      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    AM_SKI_RESORT.SEMANTIC.SEM_PASSHOLDER_ANALYTICS\n    METRICS pass_usage_per_holder, average_pass_session_hours\n    DIMENSIONS dim_customer.customer_segment\n    WHERE dim_customer.is_pass_holder = TRUE\n)",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    {{ target.database }}.SEMANTIC.SEM_PASSHOLDER_ANALYTICS\n    METRICS pass_usage_per_holder, average_pass_session_hours\n    DIMENSIONS dim_customer.customer_segment\n    WHERE dim_customer.is_pass_holder = TRUE\n)",
       "verified_by": "Cortex Analyst",
       "verified_at": 1744900000,
       "use_as_onboarding_question": false
@@ -163,7 +163,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "advance_share_revenue_by_category",
       "question": "What is the advance pass share percentage and pass revenue total by ticket category?",
-      "sql": "SELECT * FROM SEMANTIC_VIEW(\n  AM_SKI_RESORT.SEMANTIC.SEM_PASSHOLDER_ANALYTICS\n  DIMENSIONS ticket_category\n  METRICS advance_pass_share_pct, pass_revenue_total\n)",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n  {{ target.database }}.SEMANTIC.SEM_PASSHOLDER_ANALYTICS\n  DIMENSIONS ticket_category\n  METRICS advance_pass_share_pct, pass_revenue_total\n)",
       "verified_by": "Cortex Analyst",
       "verified_at": 1744900000,
       "use_as_onboarding_question": false
@@ -171,7 +171,7 @@ WITH EXTENSION (CA = $$
     {
       "name": "active_holders_rides_by_state",
       "question": "What are the active pass holders and pass lift rides total by state?",
-      "sql": "SELECT * FROM SEMANTIC_VIEW(\n  AM_SKI_RESORT.SEMANTIC.SEM_PASSHOLDER_ANALYTICS\n  METRICS active_pass_holders, pass_lift_rides_total\n  DIMENSIONS dim_customer.state\n)",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n  {{ target.database }}.SEMANTIC.SEM_PASSHOLDER_ANALYTICS\n  METRICS active_pass_holders, pass_lift_rides_total\n  DIMENSIONS dim_customer.state\n)",
       "verified_by": "Cortex Analyst",
       "verified_at": 1744900000,
       "use_as_onboarding_question": false
