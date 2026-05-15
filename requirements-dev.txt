@@ -7,4 +7,10 @@ pyarrow
 numpy
 toml
 pydantic
-dbt-snowflake==1.11.4
+# dbt-snowflake intentionally NOT listed here.
+# Workflows install it separately with a pinned version
+# (`pip install 'dbt-snowflake==1.11.4'`). Including it in
+# requirements-dev.txt caused pip resolver conflicts in environments
+# with snowflake-cli + snowflake-connector pinned versions, breaking
+# the daily refresh workflow. Local devs: install dbt-snowflake
+# separately if needed.
