@@ -30,6 +30,15 @@ rng = get_rng()
 
 # =============================================================================
 # IDEMPOTENCY CHECK
+#
+# History: previously check_any_data_exists() short-circuited as soon as ONE
+# of WEATHER/PASS_USAGE/LIFT_SCANS had the date. WEATHER is generated year-
+# round (off-season too); PASS_USAGE/LIFT_SCANS only during ski season. So
+# once weather was written for a date, ALL OTHER table writes for that date
+# were silently skipped -- which is how CUSTOMER_FEEDBACK lost the entire
+# 2025-2026 season after the SUBCATEGORY-NUMBER bug killed feedback writes
+# specifically. Per-table presence + per-table generation gates fix that:
+# the generator can self-heal a single missing table without needing --force.
 # =============================================================================
 def check_date_exists(conn, table_name, date_column, date_value):
     """Check if data for a specific date already exists in a table."""
@@ -42,20 +51,52 @@ def check_date_exists(conn, table_name, date_column, date_value):
     return result['CNT'].iloc[0] > 0
 
 
-def check_any_data_exists(conn, date):
-    """Check if any data exists for the given date."""
+# Per-table date-column registry. Keys are presence-check tags used by the
+# main loop; values are (snowflake_table, sql_expression_for_date_match).
+# Add an entry here when adding a new generated table so the idempotency map
+# stays in lockstep with what we write.
+IDEMPOTENCY_TABLES = {
+    "WEATHER_CONDITIONS":  ("WEATHER_CONDITIONS",  "WEATHER_DATE"),
+    "STAFFING_SCHEDULE":   ("STAFFING_SCHEDULE",   "SCHEDULE_DATE"),
+    "LIFT_MAINTENANCE":    ("LIFT_MAINTENANCE",    "MAINTENANCE_DATE"),
+    "GROOMING_LOGS":       ("GROOMING_LOGS",       "GROOMING_DATE::DATE"),
+    "LIFT_SCANS":          ("LIFT_SCANS",          "SCAN_TIMESTAMP::DATE"),
+    "PASS_USAGE":          ("PASS_USAGE",          "VISIT_DATE"),
+    "TICKET_SALES":        ("TICKET_SALES",        "PURCHASE_TIMESTAMP::DATE"),
+    "FOOD_BEVERAGE":       ("FOOD_BEVERAGE",       "TRANSACTION_TIMESTAMP::DATE"),
+    "RENTALS":             ("RENTALS",             "RENTAL_TIMESTAMP::DATE"),
+    "SKI_LESSONS":         ("SKI_LESSONS",         "LESSON_DATE"),
+    "INCIDENTS":           ("INCIDENTS",           "INCIDENT_DATE"),
+    "CUSTOMER_FEEDBACK":   ("CUSTOMER_FEEDBACK",   "FEEDBACK_DATE::DATE"),
+    "PARKING_OCCUPANCY":   ("PARKING_OCCUPANCY",   "RECORD_DATE::DATE"),
+}
+
+
+def present_for_date(conn, date) -> dict[str, bool]:
+    """Return {table_tag: bool} indicating which tables already have data for
+    this date. Use to drive per-table generation gates so a single missing
+    table can be backfilled without re-writing tables that already have rows.
+
+    Failures are treated as 'present' to avoid duplicate writes when a
+    transient error blocks the check; --force still overrides everything.
+    """
     date_str = date.strftime('%Y-%m-%d')
+    out: dict[str, bool] = {}
+    for tag, (table, col) in IDEMPOTENCY_TABLES.items():
+        try:
+            out[tag] = check_date_exists(conn, table, col, date_str)
+        except Exception as exc:  # noqa: BLE001 - conservative on transient
+            logger.debug("presence-check failed for %s/%s: %s; assuming present", table, col, exc)
+            out[tag] = True
+    return out
 
-    checks = [
-        ('WEATHER_CONDITIONS', 'WEATHER_DATE'),
-        ('PASS_USAGE', 'VISIT_DATE'),
-        ('LIFT_SCANS', "SCAN_TIMESTAMP::DATE"),
-    ]
 
-    for table, col in checks:
-        if check_date_exists(conn, table, col, date_str):
-            return True
-    return False
+def check_any_data_exists(conn, date):
+    """Backwards-compatible coarse check: True iff every checked table has
+    data for the date. Retained for callers that still want the old
+    'fully covered' question; new logic should prefer present_for_date().
+    """
+    return all(present_for_date(conn, date).values())
 
 
 # =============================================================================
@@ -391,27 +432,204 @@ def generate_incidents(date, n_visitors, daily_mod, customers_df):
 
 
 def generate_customer_feedback(date, n_visitors, daily_mod, customers_df):
-    """Generate customer feedback/surveys."""
+    """Generate customer feedback/surveys with realistic per-day distribution.
+
+    Produces ~5% of daily visitors as feedback. Score distribution is
+    correlated with weather + season conditions (powder days lift scores;
+    storm warnings depress them). Text is sampled from category x sentiment
+    banks below so feedback looks like real customer comments rather than
+    placeholder strings -- demos can search/aggregate on FEEDBACK_TEXT.
+
+    Schema preserved from prior version; only content quality changed.
+    """
     created_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     date_str = date.strftime('%Y-%m-%d')
 
     n_feedback = max(0, int(rng.poisson(n_visitors * 0.05)))
+    if n_feedback == 0:
+        return pd.DataFrame()
+
+    # Category-aware subcategories so SUBCATEGORY analytics are coherent.
+    # Mapping CATEGORY -> list[SUBCATEGORY] so a row like
+    # CATEGORY='lift_operations' gets a lift-relevant subcategory.
+    subcategories_by_category = {
+        'lift_operations':    ['lift_lines', 'lift_speed', 'lift_reliability', 'staff_friendliness'],
+        'food_service':       ['food_quality', 'food_value', 'service_speed', 'menu_variety'],
+        'rental_shop':        ['equipment_quality', 'fitting_accuracy', 'wait_time', 'staff_knowledge'],
+        'ski_school':         ['instructor_quality', 'lesson_pace', 'group_size', 'value_for_money'],
+        'facilities':         ['cleanliness', 'parking', 'signage', 'restroom_availability'],
+        'overall_experience': ['snow_quality', 'crowd_levels', 'overall_value', 'would_return'],
+    }
+
+    # Curated text banks: keyed by (category, sentiment_bucket).
+    # sentiment_bucket: 'pos' (satisfaction>=4), 'neu' (3-4), 'neg' (<3).
+    text_banks = {
+        ('lift_operations', 'pos'): [
+            "Lift lines moved fast even on a busy Saturday. Staff was efficient.",
+            "The new high-speed quad is a game changer. Hardly any wait.",
+            "Lift ops crew was friendly and kept things moving. Great experience.",
+            "Loved how quickly they reopened the lifts after the wind hold.",
+            "No-wait gondola access for pass holders is fantastic.",
+        ],
+        ('lift_operations', 'neu'): [
+            "Lift lines were OK -- about 10 minutes most of the day.",
+            "One lift was on slow speed which slowed things down a bit.",
+            "Service was fine but nothing special. Average wait times.",
+        ],
+        ('lift_operations', 'neg'): [
+            "Lift line at the main quad was 25+ minutes mid-morning. Too long.",
+            "Two lifts were down for half the day with no clear announcement.",
+            "Lift ops seemed understaffed; hard to find someone to ask about a stuck chair.",
+            "Wind hold was understandable but communication was poor.",
+        ],
+        ('food_service', 'pos'): [
+            "Food at the lodge was hot, fresh, and quick. Better than expected.",
+            "The chili and cornbread combo was perfect after a cold morning.",
+            "Loved the new ramen station -- worth every penny.",
+            "Friendly staff at the cafeteria, great breakfast burrito.",
+        ],
+        ('food_service', 'neu'): [
+            "Food was OK. Standard mountain fare for standard mountain prices.",
+            "Burger was decent but $19 felt steep. Coffee was good though.",
+        ],
+        ('food_service', 'neg'): [
+            "Food prices are out of control. $25 for a burger and fries.",
+            "Long line at the lodge cafeteria; ran out of pizza by 1pm.",
+            "Cold fries, lukewarm coffee. Not great for the price.",
+            "The vegan options are very limited and overpriced.",
+        ],
+        ('rental_shop', 'pos'): [
+            "Rental shop got me set up in 10 minutes. Skis were freshly waxed.",
+            "Helpful boot fitter got my fit dialed on the first try.",
+            "Snowboard rental was quality gear, not beat up at all.",
+        ],
+        ('rental_shop', 'neu'): [
+            "Rental process was fine. Standard wait, standard equipment.",
+            "Boots were OK -- not the most comfortable but worked for the day.",
+        ],
+        ('rental_shop', 'neg'): [
+            "Waited 45 minutes for rentals on a Saturday. Need more staff.",
+            "Skis they gave me were dull and the boots were too big.",
+            "Rental return line was a mess. No one directing traffic.",
+        ],
+        ('ski_school', 'pos'): [
+            "Our instructor for the kids was amazing. Patient and fun.",
+            "Group lesson was excellent. Real progress in 2 hours.",
+            "First time on skis and the instructor made it easy and safe.",
+            "Private lesson worth every dollar -- huge improvement in technique.",
+        ],
+        ('ski_school', 'neu'): [
+            "Lesson was OK. Group was a bit large but the instructor managed.",
+            "Decent intro lesson but felt rushed at the end.",
+        ],
+        ('ski_school', 'neg'): [
+            "Group lesson had 9 kids of mixed ability -- way too big.",
+            "Instructor was fine but $130 for an hour seems steep.",
+            "Lesson started 15 minutes late which ate into our time on snow.",
+        ],
+        ('facilities', 'pos'): [
+            "Lodge was clean and warm. Bathrooms well stocked all day.",
+            "Plenty of parking even on a Saturday morning. Easy in and out.",
+            "Signage at trail intersections was clear and helpful.",
+        ],
+        ('facilities', 'neu'): [
+            "Bathrooms were busy but clean enough. Could use more stalls.",
+            "Parking lot was full by 9:30 -- arrive early.",
+        ],
+        ('facilities', 'neg'): [
+            "Bathrooms were filthy by midday. Out of paper towels.",
+            "Parking shuttle was unreliable and freezing waiting for it.",
+            "Trail map signage is confusing -- got lost twice.",
+        ],
+        ('overall_experience', 'pos'): [
+            "Best ski day of the season. Powder, blue skies, no lines.",
+            "Will absolutely be back. Top to bottom an amazing day.",
+            "Powder day lived up to the hype. Bluebird and bottomless.",
+            "Family had a great time. Kids want to come back next weekend.",
+        ],
+        ('overall_experience', 'neu'): [
+            "Decent day on the mountain. Snow was OK, lifts were OK.",
+            "Good day but nothing memorable. Average all around.",
+        ],
+        ('overall_experience', 'neg'): [
+            "Crowded, expensive, and the snow was icy. Not worth $180 a ticket.",
+            "Tough day -- visibility was bad and lifts were down.",
+            "Felt nickel-and-dimed all day. Won't return at these prices.",
+        ],
+    }
+
+    response_templates = [
+        "Thanks for the detailed feedback -- we're sharing this with the team.",
+        "We appreciate you taking the time. We're working on this for next season.",
+        "Sorry to hear that. We'd love to make it right -- email guestservices@ for a follow-up.",
+        "Thank you! Glad you had a great day. See you next time.",
+        "Noted and forwarded to the lift ops team.",
+        "Apologies for the experience. A guest services rep will reach out.",
+    ]
+
+    visitor_ids = customers_df['CUSTOMER_ID'].values
+    storm = bool(daily_mod.get('storm_warning', False))
+    powder = bool(daily_mod.get('is_powder_day', False))
 
     records = []
     for i in range(n_feedback):
+        # Score distribution shaped by conditions.
         base_rating = 4.0
-        if daily_mod['is_powder_day']:
-            base_rating += 0.3
-        if daily_mod['storm_warning']:
-            base_rating -= 0.5
+        if powder:
+            base_rating += 0.4
+        if storm:
+            base_rating -= 0.6
 
         nps = int(min(10, max(0, rng.normal(base_rating * 2, 1.5))))
         satisfaction = round(min(5.0, max(1.0, rng.normal(base_rating, 0.7))), 1)
-        sentiment = 'positive' if satisfaction >= 4 else ('negative' if satisfaction < 3 else 'neutral')
+
+        if satisfaction >= 4:
+            sentiment, bucket = 'positive', 'pos'
+        elif satisfaction < 3:
+            sentiment, bucket = 'negative', 'neg'
+        else:
+            sentiment, bucket = 'neutral', 'neu'
+
+        category = rng.choice(list(subcategories_by_category.keys()))
+        subcategory = rng.choice(subcategories_by_category[category])
+
+        # ~70% of feedback has text (was ~30%); when present, sampled from
+        # the curated bank for this (category, sentiment) so the comment
+        # actually looks plausible.
+        if rng.random() < 0.7:
+            bank = text_banks.get((category, bucket)) or text_banks[(category, 'neu')]
+            feedback_text = str(rng.choice(bank))
+        else:
+            feedback_text = None
+
+        # Response cadence: negatives get faster + more frequent responses.
+        if sentiment == 'negative':
+            response_prob, resolution_prob = 0.60, 0.55
+            response_offset_h = float(rng.uniform(2, 24))
+        elif sentiment == 'positive':
+            response_prob, resolution_prob = 0.20, 0.85
+            response_offset_h = float(rng.uniform(12, 72))
+        else:
+            response_prob, resolution_prob = 0.30, 0.70
+            response_offset_h = float(rng.uniform(8, 48))
+
+        has_response = rng.random() < response_prob
+        response_text = str(rng.choice(response_templates)) if has_response else None
+        response_date = (
+            (date + timedelta(hours=response_offset_h)).strftime('%Y-%m-%d %H:%M:%S')
+            if has_response else None
+        )
+        responded_by = f'STAFF{int(rng.integers(1, 50)):03d}' if has_response else None
+
+        resolved = bool(rng.random() < resolution_prob)
+        resolution_date = (
+            (date + timedelta(hours=response_offset_h + rng.uniform(1, 168))).strftime('%Y-%m-%d %H:%M:%S')
+            if resolved else None
+        )
 
         records.append({
             'FEEDBACK_ID': f'FDBK{date.strftime("%Y%m%d")}{i:04d}',
-            'CUSTOMER_ID': rng.choice(customers_df['CUSTOMER_ID'].values),
+            'CUSTOMER_ID': rng.choice(visitor_ids),
             'FEEDBACK_DATE': date_str,
             'FEEDBACK_TYPE': rng.choice(['survey', 'comment_card', 'email', 'app']),
             'SURVEY_ID': f'SURV{int(rng.integers(1, 100)):03d}',
@@ -419,21 +637,20 @@ def generate_customer_feedback(date, n_visitors, daily_mod, customers_df):
             'SATISFACTION_SCORE': satisfaction,
             'LIKELIHOOD_TO_RETURN': int(min(10, max(0, nps + int(rng.integers(-1, 2))))),
             'LIKELIHOOD_TO_RECOMMEND': nps,
-            'CATEGORY': rng.choice(['lift_operations', 'food_service', 'rental_shop',
-                                    'ski_school', 'facilities', 'overall_experience']),
-            'SUBCATEGORY': rng.choice(['speed', 'cleanliness', 'staff', 'value', 'quality']),
+            'CATEGORY': category,
+            'SUBCATEGORY': subcategory,
             'SENTIMENT': sentiment,
             'SENTIMENT_SCORE': round(satisfaction / 5.0, 2),
-            'FEEDBACK_TEXT': f'Sample feedback for {date_str}' if rng.random() < 0.3 else None,
-            'RESPONSE_TEXT': 'Thank you for your feedback!' if rng.random() < 0.2 else None,
-            'RESPONSE_DATE': date_str if rng.random() < 0.2 else None,
-            'RESPONDED_BY': f'STAFF{int(rng.integers(1, 50)):03d}' if rng.random() < 0.2 else None,
-            'RESOLVED': rng.random() < 0.9,
-            'RESOLUTION_DATE': date_str if rng.random() < 0.8 else None,
-            'ESCALATED': satisfaction < 2.5,
+            'FEEDBACK_TEXT': feedback_text,
+            'RESPONSE_TEXT': response_text,
+            'RESPONSE_DATE': response_date,
+            'RESPONDED_BY': responded_by,
+            'RESOLVED': resolved,
+            'RESOLUTION_DATE': resolution_date,
+            'ESCALATED': bool(satisfaction < 2.5),
             'SOURCE': rng.choice(['email', 'app', 'kiosk', 'web']),
             'VISIT_DATE': date_str,
-            'CREATED_AT': created_at
+            'CREATED_AT': created_at,
         })
 
     return pd.DataFrame(records)
@@ -610,59 +827,112 @@ def main():
     all_parking, all_maintenance, all_grooming = [], [], []
 
     skipped_dates = []
+    fully_skipped = []
 
     for day_offset in range(args.days):
         current_date = start_date + timedelta(days=day_offset)
         date_str = current_date.strftime('%Y-%m-%d')
 
-        # === IDEMPOTENCY CHECK ===
-        if not args.force and check_any_data_exists(conn, current_date):
-            logger.warning(f"⚠️  Data for {date_str} already exists, skipping (use --force to override)")
-            skipped_dates.append(date_str)
+        # === Per-table idempotency ===
+        # Skip only the tables that already have rows for this date; let the
+        # rest fill in. --force overrides everything (treats every table as
+        # absent so it gets re-generated).
+        if args.force:
+            present = {tag: False for tag in IDEMPOTENCY_TABLES}
+        else:
+            present = present_for_date(conn, current_date)
+        if all(present.values()):
+            fully_skipped.append(date_str)
             continue
+        missing = [t for t, p in present.items() if not p]
+        if len(missing) < len(IDEMPOTENCY_TABLES):
+            logger.info(
+                "  %s: backfilling %d missing table(s): %s",
+                date_str, len(missing), ", ".join(sorted(missing)),
+            )
+        skipped_dates.append((date_str, missing))
 
         daily_mod = get_daily_modifier(current_date, rng)
 
-        # Generate weather and staffing (always)
-        all_weather.append(generate_weather(current_date, daily_mod))
-        all_staffing.append(generate_staffing(current_date, daily_mod))
+        # Year-round generation -- skip if already present for this date.
+        if not present["WEATHER_CONDITIONS"]:
+            all_weather.append(generate_weather(current_date, daily_mod))
+        if not present["STAFFING_SCHEDULE"]:
+            all_staffing.append(generate_staffing(current_date, daily_mod))
 
-        # Generate lift maintenance and grooming (always during season)
+        # Ski-season-only generation -- gated by season AND per-table presence.
         if daily_mod['season_mult'] > 0:
-            all_maintenance.append(generate_lift_maintenance(current_date, daily_mod))
-            all_grooming.append(generate_grooming_logs(current_date, daily_mod))
+            if not present["LIFT_MAINTENANCE"]:
+                all_maintenance.append(generate_lift_maintenance(current_date, daily_mod))
+            if not present["GROOMING_LOGS"]:
+                all_grooming.append(generate_grooming_logs(current_date, daily_mod))
 
-        # Generate visitor-based data (only ski season)
-        if daily_mod['season_mult'] > 0:
-            result = generate_day_transactions(current_date, customers_df, daily_mod)
-            if result[0] is not None:
-                n_visitors = len(result[1])
+            # Transactional bundle: only call generate_day_transactions if any
+            # of its outputs are missing. Generating partially is wasteful but
+            # safer than leaving holes; the writes below are individually gated.
+            transactional_missing = any(
+                not present[t] for t in (
+                    "LIFT_SCANS", "PASS_USAGE", "TICKET_SALES",
+                    "FOOD_BEVERAGE", "RENTALS",
+                )
+            )
+            extras_missing = any(
+                not present[t] for t in (
+                    "SKI_LESSONS", "INCIDENTS", "CUSTOMER_FEEDBACK",
+                    "PARKING_OCCUPANCY",
+                )
+            )
+            if transactional_missing or extras_missing:
+                result = generate_day_transactions(current_date, customers_df, daily_mod)
+                if result[0] is not None:
+                    n_visitors = len(result[1])
+                    if not present["LIFT_SCANS"]:
+                        all_scans.append(result[0])
+                    if not present["PASS_USAGE"]:
+                        all_usage.append(result[1])
+                    if not present["TICKET_SALES"] and not result[2].empty:
+                        all_sales.append(result[2])
+                    if not present["FOOD_BEVERAGE"]:
+                        all_fb.append(result[3])
+                    if not present["RENTALS"] and not result[4].empty:
+                        all_rentals.append(result[4])
 
-                all_scans.append(result[0])
-                all_usage.append(result[1])
-                if not result[2].empty:
-                    all_sales.append(result[2])
-                all_fb.append(result[3])
-                if not result[4].empty:
-                    all_rentals.append(result[4])
+                    if not present["SKI_LESSONS"]:
+                        all_lessons.append(generate_ski_lessons(current_date, n_visitors, daily_mod, customers_df))
+                    if not present["INCIDENTS"]:
+                        all_incidents.append(generate_incidents(current_date, n_visitors, daily_mod, customers_df))
+                    if not present["CUSTOMER_FEEDBACK"]:
+                        all_feedback.append(generate_customer_feedback(current_date, n_visitors, daily_mod, customers_df))
+                    if not present["PARKING_OCCUPANCY"]:
+                        all_parking.append(generate_parking_occupancy(current_date, n_visitors, daily_mod))
 
-                # Generate additional daily data
-                all_lessons.append(generate_ski_lessons(current_date, n_visitors, daily_mod, customers_df))
-                all_incidents.append(generate_incidents(current_date, n_visitors, daily_mod, customers_df))
-                all_feedback.append(generate_customer_feedback(current_date, n_visitors, daily_mod, customers_df))
-                all_parking.append(generate_parking_occupancy(current_date, n_visitors, daily_mod))
+    if fully_skipped:
+        logger.info(
+            "\n⏭️  Skipped %d date(s) with full coverage: %s",
+            len(fully_skipped),
+            ", ".join(fully_skipped[:5]) + ("..." if len(fully_skipped) > 5 else ""),
+        )
 
-    if skipped_dates:
-        logger.info(f"\n⏭️  Skipped {len(skipped_dates)} date(s) with existing data: {', '.join(skipped_dates)}")
-
-    if not all_weather:
-        logger.info("\n✅ No new data to generate (all dates already exist)")
+    # If absolutely nothing was collected for any table, exit early. This
+    # is the per-table-aware version of the old `if not all_weather` check
+    # -- with per-table idempotency, weather may already be present while
+    # other tables (e.g. CUSTOMER_FEEDBACK after the SUBCATEGORY bug)
+    # are still missing for the same dates.
+    all_collections = (
+        all_weather, all_staffing, all_scans, all_usage, all_sales,
+        all_fb, all_rentals, all_lessons, all_incidents, all_feedback,
+        all_parking, all_maintenance, all_grooming,
+    )
+    if not any(all_collections):
+        logger.info("\n✅ No new data to generate (every requested table already has rows for these dates)")
         conn.close()
         return
 
-    # Combine DataFrames
-    weather_df = pd.concat(all_weather, ignore_index=True)
-    staffing_df = pd.concat(all_staffing, ignore_index=True)
+    # Combine DataFrames -- only when their list has entries. The original
+    # code unconditionally concat()'d weather/staffing which crashes on
+    # an empty list when the per-table idempotency leaves them untouched.
+    weather_df = pd.concat(all_weather, ignore_index=True) if all_weather else pd.DataFrame()
+    staffing_df = pd.concat(all_staffing, ignore_index=True) if all_staffing else pd.DataFrame()
 
     logger.info(f"\n📊 Generated Data (Original Tables):")
     logger.info(f"  Weather:       {len(weather_df):,}")
@@ -670,9 +940,9 @@ def main():
 
     if all_scans:
         scans_df = pd.concat(all_scans, ignore_index=True)
-        usage_df = pd.concat(all_usage, ignore_index=True)
+        usage_df = pd.concat(all_usage, ignore_index=True) if all_usage else pd.DataFrame()
         sales_df = pd.concat(all_sales, ignore_index=True) if all_sales else pd.DataFrame()
-        fb_df = pd.concat(all_fb, ignore_index=True)
+        fb_df = pd.concat(all_fb, ignore_index=True) if all_fb else pd.DataFrame()
         rentals_df = pd.concat(all_rentals, ignore_index=True) if all_rentals else pd.DataFrame()
 
         logger.info(f"  Lift scans:    {len(scans_df):,}")
@@ -680,6 +950,12 @@ def main():
         logger.info(f"  Ticket sales:  {len(sales_df):,}")
         logger.info(f"  F&B trans:     {len(fb_df):,}")
         logger.info(f"  Rentals:       {len(rentals_df):,}")
+    else:
+        scans_df = pd.DataFrame()
+        usage_df = pd.DataFrame()
+        sales_df = pd.DataFrame()
+        fb_df = pd.DataFrame()
+        rentals_df = pd.DataFrame()
 
     logger.info(f"\n📊 Generated Data (New Tables):")
 
@@ -699,18 +975,24 @@ def main():
 
     logger.info("\n📤 Loading to Snowflake...")
 
-    # Load all tables (append mode)
-    conn.session.write_pandas(weather_df, table_name="WEATHER_CONDITIONS", auto_create_table=False, overwrite=False)
-    conn.session.write_pandas(staffing_df, table_name="STAFFING_SCHEDULE", auto_create_table=False, overwrite=False)
+    # Per-table writes -- only call write_pandas when the corresponding
+    # DataFrame has rows. Avoids writing an empty DataFrame which fails
+    # on auto_create_table=False.
+    if not weather_df.empty:
+        conn.session.write_pandas(weather_df, table_name="WEATHER_CONDITIONS", auto_create_table=False, overwrite=False)
+    if not staffing_df.empty:
+        conn.session.write_pandas(staffing_df, table_name="STAFFING_SCHEDULE", auto_create_table=False, overwrite=False)
 
-    if all_scans:
+    if not scans_df.empty:
         conn.session.write_pandas(scans_df, table_name="LIFT_SCANS", auto_create_table=False, overwrite=False)
+    if not usage_df.empty:
         conn.session.write_pandas(usage_df, table_name="PASS_USAGE", auto_create_table=False, overwrite=False)
-        if not sales_df.empty:
-            conn.session.write_pandas(sales_df, table_name="TICKET_SALES", auto_create_table=False, overwrite=False)
+    if not sales_df.empty:
+        conn.session.write_pandas(sales_df, table_name="TICKET_SALES", auto_create_table=False, overwrite=False)
+    if not fb_df.empty:
         conn.session.write_pandas(fb_df, table_name="FOOD_BEVERAGE", auto_create_table=False, overwrite=False)
-        if not rentals_df.empty:
-            conn.session.write_pandas(rentals_df, table_name="RENTALS", auto_create_table=False, overwrite=False)
+    if not rentals_df.empty:
+        conn.session.write_pandas(rentals_df, table_name="RENTALS", auto_create_table=False, overwrite=False)
 
     # Load NEW tables
     if not lessons_df.empty:
