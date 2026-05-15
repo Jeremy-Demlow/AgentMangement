@@ -198,6 +198,36 @@ jobs:
           echo ""
           echo "All tables synced successfully"
 
+      - name: Reconcile target MARTS.FACT_FEEDBACK schema drift
+        # When PROD's RAW.CUSTOMER_FEEDBACK gets reconciled (NUMBER -> VARCHAR
+        # SUBCATEGORY) by the daily refresh, the new RAW data is then synced
+        # to DEV/QA. But the target env's MARTS.FACT_FEEDBACK was built from
+        # the old NUMBER schema and dbt incremental will fail with 'cannot
+        # change column from NUMBER(38,0) to VARCHAR' on the next run because
+        # Snowflake disallows cross-family ALTER. Drop the downstream table
+        # in the TARGET env so dbt rebuilds it from the now-correct RAW.
+        env:
+          TARGET_DB: ${{ steps.config.outputs.target_database }}
+          SNOWFLAKE_CONNECTIONS_DEFAULT_DATABASE: ${{ steps.config.outputs.target_database }}
+          SNOWFLAKE_CONNECTIONS_DEFAULT_WAREHOUSE: ${{ steps.config.outputs.target_warehouse }}
+          SNOWFLAKE_CONNECTIONS_DEFAULT_ROLE: ${{ steps.config.outputs.target_role }}
+        run: |
+          MARTS_TYPE=$(snow sql --format json -q "
+            SELECT DATA_TYPE FROM ${TARGET_DB}.INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = 'MARTS'
+              AND TABLE_NAME = 'FACT_FEEDBACK'
+              AND COLUMN_NAME = 'SUBCATEGORY'
+          " | python3 -c "import json,sys; rows=json.load(sys.stdin); print(rows[0]['DATA_TYPE'] if rows else 'MISSING')")
+
+          echo "${TARGET_DB}.MARTS.FACT_FEEDBACK.SUBCATEGORY current type: $MARTS_TYPE"
+
+          if [ "$MARTS_TYPE" = "NUMBER" ]; then
+            echo "Dropping ${TARGET_DB}.MARTS.FACT_FEEDBACK so dbt rebuilds with VARCHAR SUBCATEGORY"
+            snow sql -q "DROP TABLE IF EXISTS ${TARGET_DB}.MARTS.FACT_FEEDBACK"
+          else
+            echo "${TARGET_DB}.MARTS.FACT_FEEDBACK already correct or absent"
+          fi
+
       - name: Run dbt to rebuild downstream
         working-directory: dbt_ski_resort
         env:
