@@ -51,13 +51,26 @@ def test_seed_module_exposes_subcategories():
 
 
 def test_daily_incremental_subcategories_are_strings():
-    """Daily generator already emits strings - this guards against future regression."""
+    """Daily generator emits strings - guards against future regression.
+
+    The daily generator now uses a category-aware subcategory map (so
+    a 'lift_operations' row gets 'lift_lines' rather than a generic
+    'speed'). This test pins string-typed subcategories without coupling
+    to specific values.
+    """
     daily_src = DAILY_PATH.read_text()
-    # The line of interest: 'SUBCATEGORY': rng.choice([...]) with string literals.
-    assert "'SUBCATEGORY'" in daily_src
-    assert "rng.choice(['speed'" in daily_src or '"speed"' in daily_src, (
-        "Daily generator must emit string SUBCATEGORY values"
+    assert "'SUBCATEGORY': subcategory" in daily_src, (
+        "Daily generator must emit a SUBCATEGORY field"
     )
+    assert "subcategories_by_category" in daily_src, (
+        "Daily generator must use the category-aware subcategory map "
+        "(replaces the prior flat string list)"
+    )
+    # Spot-check a few category-appropriate subcategories.
+    for needle in ("'lift_lines'", "'food_quality'", "'instructor_quality'", "'snow_quality'"):
+        assert needle in daily_src, (
+            f"Expected category-aware subcategory token {needle} in daily source"
+        )
 
 
 def test_seed_subcategory_field_is_not_none():

@@ -143,13 +143,19 @@ jobs:
           DB="${PROD_DB}"
           SCHEMA="${RAW_SCHEMA}"
 
+          # Use WEATHER_CONDITIONS as the freshness signal: it's generated
+          # year-round (off-season too), so it gives us an accurate "latest
+          # generated date" even when transactional tables are bounded by
+          # ski-season month gating. Previously we read MAX(VISIT_DATE) from
+          # PASS_USAGE which is ski-season-only, so during the May-Oct hole
+          # the auto-detect would think we were caught up at end-of-season.
           snow sql -q "
             SELECT
-              MIN(VISIT_DATE) as first_date,
-              MAX(VISIT_DATE) as last_date,
-              COUNT(DISTINCT VISIT_DATE) as total_days,
+              MIN(WEATHER_DATE) as first_date,
+              MAX(WEATHER_DATE) as last_date,
+              COUNT(DISTINCT WEATHER_DATE) as total_days,
               COUNT(*) as total_records
-            FROM ${DB}.${SCHEMA}.PASS_USAGE
+            FROM ${DB}.${SCHEMA}.WEATHER_CONDITIONS
           " --format json > /tmp/data_stats.json
 
           FIRST_DATE=$(python3 -c "import json; data=json.load(open('/tmp/data_stats.json')); print(data[0]['FIRST_DATE'] if data and data[0]['FIRST_DATE'] else '2025-12-01')")
@@ -164,20 +170,20 @@ jobs:
           echo "   Total records: $TOTAL_RECORDS"
 
           echo ""
-          echo "Checking for data gaps..."
+          echo "Checking for data gaps in WEATHER_CONDITIONS (year-round signal)..."
           snow sql -q "
             WITH date_range AS (
               SELECT DATEADD(day, SEQ4(), '$FIRST_DATE'::DATE) as expected_date
-              FROM TABLE(GENERATOR(ROWCOUNT => 365))
+              FROM TABLE(GENERATOR(ROWCOUNT => 1500))
               WHERE expected_date <= '$LAST_DATE'::DATE
             ),
             actual_dates AS (
-              SELECT DISTINCT VISIT_DATE FROM ${DB}.${SCHEMA}.PASS_USAGE
+              SELECT DISTINCT WEATHER_DATE::DATE AS dt FROM ${DB}.${SCHEMA}.WEATHER_CONDITIONS
             )
             SELECT expected_date as missing_date
             FROM date_range
-            LEFT JOIN actual_dates ON date_range.expected_date = actual_dates.VISIT_DATE
-            WHERE actual_dates.VISIT_DATE IS NULL
+            LEFT JOIN actual_dates ON date_range.expected_date = actual_dates.dt
+            WHERE actual_dates.dt IS NULL
             ORDER BY expected_date
             LIMIT 10
           " --format json > /tmp/gaps.json

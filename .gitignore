@@ -70,6 +70,10 @@ AgentMangementThread*.md
 /scratch/
 /.coco/
 /.cortex-code/
+
+# REQ-014 — embedded Cortex Code chat (work-in-progress, local only)
+/cortex-code-agent/
+/streamlit/
 # Internal planning docs (top-level only — do NOT match dbt_ski_resort/models/)
 # NOTE: docs/operations/ and docs/semantic-views/ are PUBLISHED runbooks that
 # SHOULD be committed. Only keep docs/diagrams/, docs/medium-*, etc. local.
