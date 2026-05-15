@@ -7,4 +7,4 @@ pyarrow
 numpy
 toml
 pydantic
-dbt-snowflake
+dbt-snowflake==1.11.4
