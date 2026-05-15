@@ -228,6 +228,45 @@ jobs:
             echo "${TARGET_DB}.MARTS.FACT_FEEDBACK already correct or absent"
           fi
 
+          for TBL_PAIR in "GROOMING_LOGS:FACT_GROOMING" "LIFT_MAINTENANCE:FACT_LIFT_MAINTENANCE"; do
+            RAW_TBL="${TBL_PAIR%%:*}"
+            MARTS_TBL="${TBL_PAIR##*:}"
+
+            RAW_NOTES_TYPE=$(snow sql --format json -q "
+              SELECT DATA_TYPE FROM ${TARGET_DB}.INFORMATION_SCHEMA.COLUMNS
+              WHERE TABLE_SCHEMA = 'RAW'
+                AND TABLE_NAME = '${RAW_TBL}'
+                AND COLUMN_NAME = 'NOTES'
+            " | python3 -c "import json,sys; rows=json.load(sys.stdin); print(rows[0]['DATA_TYPE'] if rows else 'MISSING')")
+
+            echo "${TARGET_DB}.RAW.${RAW_TBL}.NOTES current type: $RAW_NOTES_TYPE"
+
+            if [ "$RAW_NOTES_TYPE" = "NUMBER" ]; then
+              echo "Repairing ${RAW_TBL}.NOTES (NUMBER -> VARCHAR(500))"
+              snow sql -q "
+                ALTER TABLE ${TARGET_DB}.RAW.${RAW_TBL} DROP COLUMN NOTES;
+                ALTER TABLE ${TARGET_DB}.RAW.${RAW_TBL} ADD COLUMN NOTES VARCHAR(500);
+              "
+            fi
+
+            MARTS_NOTES_TYPE=$(snow sql --format json -q "
+              SELECT DATA_TYPE FROM ${TARGET_DB}.INFORMATION_SCHEMA.COLUMNS
+              WHERE TABLE_SCHEMA = 'MARTS'
+                AND TABLE_NAME = '${MARTS_TBL}'
+                AND COLUMN_NAME = 'NOTES'
+            " | python3 -c "import json,sys; rows=json.load(sys.stdin); print(rows[0]['DATA_TYPE'] if rows else 'MISSING')")
+
+            echo "${TARGET_DB}.MARTS.${MARTS_TBL}.NOTES current type: $MARTS_NOTES_TYPE"
+
+            if [ "$MARTS_NOTES_TYPE" = "NUMBER" ]; then
+              echo "Repairing MARTS.${MARTS_TBL}.NOTES (NUMBER -> VARCHAR(500))"
+              snow sql -q "
+                ALTER TABLE ${TARGET_DB}.MARTS.${MARTS_TBL} DROP COLUMN NOTES;
+                ALTER TABLE ${TARGET_DB}.MARTS.${MARTS_TBL} ADD COLUMN NOTES VARCHAR(500);
+              "
+            fi
+          done
+
       - name: Run dbt to rebuild downstream
         working-directory: dbt_ski_resort
         env:
