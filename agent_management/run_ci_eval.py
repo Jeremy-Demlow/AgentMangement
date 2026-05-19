@@ -130,6 +130,30 @@ def extract_run_name(stdout: str) -> str | None:
     return m.group(1) if m else None
 
 
+def classify_eval_outcome(returncode: int, stdout: str, stderr: str) -> str:
+    """Classify a single agent eval subprocess result.
+
+    Returns one of:
+      - "passed"          : returncode == 0
+      - "threshold_fail"  : eval ran end-to-end and scored below threshold
+      - "crashed"         : infrastructure error (eval did not reach the
+                            THRESHOLD CHECK section or stderr contains a
+                            Python Traceback)
+
+    Pulled out as a pure function so the classification logic is unit-testable
+    without spinning up Snowflake / running a real eval. Threshold-fail and
+    crash exit the job differently in CI: crash hard-fails (exit 2), threshold
+    fail is advisory on dev (exit 1).
+    """
+    if returncode == 0:
+        return "passed"
+    crashed = (
+        "THRESHOLD CHECK" not in (stdout or "")
+        or "Traceback" in (stderr or "")
+    )
+    return "crashed" if crashed else "threshold_fail"
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run agent evaluation in CI")
     parser.add_argument("--env", "-e", required=True, help="Environment (dev, qa, prod)")
@@ -212,16 +236,8 @@ def main():
                 for line in stderr.rstrip().split("\n"):
                     print(line, file=sys.stderr)
             if returncode != 0:
-                # Distinguish a true crash (no THRESHOLD CHECK section in stdout
-                # or a Traceback in stderr) from a threshold failure (eval ran,
-                # scored below threshold). Crashes are infrastructure bugs and
-                # must fail the job hard; threshold fails are advisory content
-                # signals.
-                crashed = (
-                    "THRESHOLD CHECK" not in (stdout or "")
-                    or "Traceback" in (stderr or "")
-                )
-                if crashed:
+                outcome = classify_eval_outcome(returncode, stdout, stderr)
+                if outcome == "crashed":
                     logger.error("RESULT: %s CRASHED (exit code %d) — infrastructure error", agent_name, returncode)
                     had_crash = True
                 else:
