@@ -32,8 +32,8 @@ deploy-dev.yml):
 Pipeline is considered healthy when every one of the following is true on
 a fresh `push` to `dev`:
 
-1. [`/.github/workflows/dcm-deploy.yml`](/Users/jdemlow/github/AgentMangement/.github/workflows/dcm-deploy.yml) succeeds on push-to-main
-   (bug fixed — uses `snow dcm create/plan/deploy` directly with
+1. [`/.github/workflows/dcm-deploy.yml`](/Users/jdemlow/github/AgentMangement/.github/workflows/dcm-deploy.yml) succeeds on push to `dev` or `main`
+   (uses `snow dcm create/plan/deploy` directly with
    `SNOWFLAKE_CONNECTIONS_DEFAULT_*` env vars and our shared
    [`snowflake-setup`](/Users/jdemlow/github/AgentMangement/.github/actions/snowflake-setup/action.yml) composite).
 2. [`/.github/workflows/deploy-dev.yml`](/Users/jdemlow/github/AgentMangement/.github/workflows/deploy-dev.yml) reaches Agent Evaluation with:
