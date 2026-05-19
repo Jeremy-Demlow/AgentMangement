@@ -98,18 +98,24 @@ def test_list_versions_skips_live_draft_by_default():
     assert [v.name for v in versions] == ["VERSION$1"]
 
 
-def test_get_aliases_reads_from_show_versions():
+def test_get_aliases_reads_from_describe_agent_json():
+    """get_aliases() reads alias dict from DESCRIBE AGENT 'aliases' JSON column.
+
+    Regression: SHOW VERSIONS alias column is unreliable (often empty even when
+    aliases exist). DESCRIBE AGENT exposes the canonical alias->version map as
+    a JSON object on the 'aliases' column.
+    """
     cur = FakeCursor()
     cur.set_result(
-        description=[("created_on",), ("name",), ("alias",), ("spec_file_path",),
-                     ("is_default",), ("comment",), ("profile",)],
-        rows=[
-            ("2026-01-02", "VERSION$2", None, "p", True, "", ""),
-            ("2026-01-01", "VERSION$1", "LATEST", "p", False, "", ""),
-        ],
+        description=[("name",), ("aliases",)],
+        rows=[("AGENT", '{"DEFAULT": "VERSION$2", "LATEST": "VERSION$1", "LAST": "VERSION$2"}')],
     )
     conn = FakeConn(cur)
-    assert versioning.get_aliases(conn, "DB.SCH.AGENT") == {"LATEST": "VERSION$1"}
+    assert versioning.get_aliases(conn, "DB.SCH.AGENT") == {
+        "DEFAULT": "VERSION$2",
+        "LATEST": "VERSION$1",
+        "LAST": "VERSION$2",
+    }
 
 
 def test_has_live_draft_true_when_empty_name_row_present():
@@ -221,20 +227,13 @@ def test_commit_version_first_deploy_without_seed():
 
 
 def test_promote_alias_no_op_when_target_already_correct():
+    """promote_alias is a no-op when from_alias and to_alias point at the same version."""
     cur = FakeCursor()
     cur.set_result(
-        description=[("created_on",), ("name",), ("alias",), ("spec_file_path",),
-                     ("is_default",), ("comment",), ("profile",)],
-        rows=[
-            ("2026-01-01", "VERSION$5", "PRODUCTION", "p", True, "", ""),
-        ],
+        description=[("name",), ("aliases",)],
+        rows=[("AGENT", '{"DEFAULT": "VERSION$5", "VALIDATED": "VERSION$5", "PRODUCTION": "VERSION$5"}')],
     )
     conn = FakeConn(cur)
-    # Need both validated and production on same version; craft two-row result.
-    cur._rows = [
-        ("2026-01-01", "VERSION$5", "PRODUCTION", "p", True, "", ""),
-        ("2026-01-01", "VERSION$5", "VALIDATED", "p", True, "", ""),
-    ]
     result = versioning.promote_alias(
         conn, "DB.SCH.AGENT", from_alias="validated", to_alias="production",
     )
@@ -246,9 +245,8 @@ def test_promote_alias_no_op_when_target_already_correct():
 def test_promote_alias_missing_source_raises():
     cur = FakeCursor()
     cur.set_result(
-        description=[("created_on",), ("name",), ("alias",), ("spec_file_path",),
-                     ("is_default",), ("comment",), ("profile",)],
-        rows=[("2026-01-01", "VERSION$1", "PRODUCTION", "p", True, "", "")],
+        description=[("name",), ("aliases",)],
+        rows=[("AGENT", '{"DEFAULT": "VERSION$1", "PRODUCTION": "VERSION$1"}')],
     )
     conn = FakeConn(cur)
     with pytest.raises(RuntimeError, match="not set"):

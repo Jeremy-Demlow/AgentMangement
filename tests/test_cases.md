@@ -15,9 +15,9 @@ All test cases, linked to requirements. Each requirement must have at least one 
 | Test ID | Description | Type | Steps | Expected Result | Actual Result | Status | Date |
 |---------|-------------|------|-------|-----------------|---------------|--------|------|
 | TC-001  | Config loader parses dev.env.yml | Automated | `pytest tests/test_smoke.py::TestConfigLoader::test_config_loads[dev]` | Config dict with database, schema, warehouse, role fields | SKI_RESORT_DEV_DB loaded, schemas end in .SEMANTIC/.AGENTS | Pass | 2026-04-02 |
-| TC-002  | Config loader parses qa.env.yml | Automated | `pytest tests/test_smoke.py::TestConfigLoader::test_config_loads[qa]` | Config dict with QA-specific values | SKI_RESORT_QA_DB loaded | Pass | 2026-04-02 |
-| TC-003  | Config loader parses prod.env.yml | Automated | `pytest tests/test_smoke.py::TestConfigLoader::test_config_loads[prod]` | Config dict with prod-specific values | SKI_RESORT_DB loaded | Pass | 2026-04-02 |
-| TC-004  | SNOWFLAKE_ENV override | Automated | `pytest tests/test_smoke.py::TestConfigLoader::test_snowflake_env_override` | Returns QA config | SKI_RESORT_QA_DB returned when SNOWFLAKE_ENV=qa | Pass | 2026-04-02 |
+| TC-002  | Config loader handles unknown env | Automated | `pytest tests/test_smoke.py` (loader raises FileNotFoundError on unknown env) | Clear error, not silent fallback | Pass | 2026-04-02 |
+| TC-003  | Config loader parses prod.env.yml | Automated | `pytest tests/test_smoke.py::TestConfigLoader::test_config_loads[prod]` | Config dict with prod-specific values | AM_SKI_RESORT loaded | Pass | 2026-04-02 |
+| TC-004  | SNOWFLAKE_ENV override | Automated | `pytest tests/test_smoke.py::TestConfigLoader::test_snowflake_env_override` | Returns prod config | AM_SKI_RESORT returned when SNOWFLAKE_ENV=prod | Pass | 2026-04-02 |
 | TC-005  | Jinja2 renderer substitutes placeholders | Automated | `pytest tests/test_templates.py -v` (39 parametrized tests) | All `{{ env.* }}` replaced with env-specific values | All 39 template tests pass: 2 agents × 3 envs + 11 SVs × 3 envs, no `{{ env.` or `SADM_SKI_RESORT_DB` in output | Pass | 2026-04-02 |
 | TC-006  | Jinja2 renderer handles missing placeholders | Automated | `pytest tests/test_smoke.py::TestRenderTemplate::test_strict_undefined_raises` | Raises clear error, does not silently produce empty string | UndefinedError raised for unknown variable | Pass | 2026-04-02 |
 
@@ -81,13 +81,13 @@ All test cases, linked to requirements. Each requirement must have at least one 
 |---------|-------------|------|-------|-----------------|---------------|--------|------|
 | TC-031  | validate-pr.yml syntax valid | Automated | `actionlint .github/workflows/validate-pr.yml` | No errors | actionlint not installed; YAML parses correctly, all steps verified via local simulation | Blocked | 2026-04-02 |
 | TC-032  | deploy-dev.yml syntax valid | Automated | `actionlint .github/workflows/deploy-dev.yml` | No errors | actionlint not installed; YAML parses correctly, all 5 jobs simulated locally end-to-end | Blocked | 2026-04-02 |
-| TC-033  | promote-qa.yml syntax valid | Automated | `actionlint .github/workflows/promote-qa.yml` | No errors | actionlint not installed; YAML parses correctly | Blocked | 2026-04-02 |
-| TC-034  | promote-prod.yml syntax valid | Automated | `actionlint .github/workflows/promote-prod.yml` | No errors | actionlint not installed; YAML parses correctly, auto-rollback job logic verified | Blocked | 2026-04-02 |
+| TC-033  | deploy-prod-validated.yml syntax valid | Automated | `actionlint .github/workflows/deploy-prod-validated.yml` | No errors | actionlint not installed; YAML parses correctly | Blocked | 2026-04-02 |
+| TC-034  | promote-validated-to-production.yml syntax valid | Automated | `actionlint .github/workflows/promote-validated-to-production.yml` | No errors | actionlint not installed; YAML parses correctly, alias-flip + post-promote eval logic verified | Blocked | 2026-04-02 |
 | TC-035  | rollback.yml syntax valid | Automated | `actionlint .github/workflows/rollback.yml` | No errors | actionlint not installed; YAML parses correctly | Blocked | 2026-04-02 |
-| TC-036  | PR validation triggers on PR | Manual | Create PR with changed agent spec | validate-pr workflow runs | Requires pushing to GitHub | Not Run | |
-| TC-037  | Dev deploy triggers on merge | Manual | Merge PR to main | deploy-dev workflow runs | Requires pushing to GitHub | Not Run | |
-| TC-038  | QA promotion blocks on eval fail | Manual | Trigger promote-qa with known-bad agent | Workflow fails at eval gate step | Requires pushing to GitHub | Not Run | |
-| TC-039  | Prod auto-rollback on eval fail | Manual | Trigger promote-prod with known-bad agent | Eval fails, rollback step executes | Requires pushing to GitHub | Not Run | |
+| TC-036  | PR validation triggers on PR | Manual | Create PR with changed agent spec | validate-pr workflow runs | Verified end-to-end on PR #57/#58 | Pass | 2026-05-19 |
+| TC-037  | Dev deploy triggers on merge to dev | Manual | Merge PR to dev | deploy-dev workflow runs | Verified post-fast-forward to dev (run 26117474809) | Pass | 2026-05-19 |
+| TC-038  | PROD validated deploy triggers on merge to main | Manual | Merge PR to main | deploy-prod-validated runs (PROD approval, alias=validated) | Verified on PR #53 / merge to main | Pass | 2026-05-19 |
+| TC-039  | promote-validated-to-production flips production alias | Manual | Manual dispatch promote workflow with reviewer approval | `production` alias points at the version under `validated` | Verified during promotion runs | Pass | 2026-05-19 |
 
 ---
 

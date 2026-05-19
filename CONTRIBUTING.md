@@ -88,7 +88,7 @@ Push your branch and open a PR to `dev` (for development iteration) or `main` (f
 | Job | What it does |
 |-----|-------------|
 | `lint-and-unit` | Runs pytest smoke tests |
-| `validate-specs` | Validates YAML specs for all three environments |
+| `validate-specs` | Validates YAML specs for both environments (dev, prod) |
 | `dbt-quality-gate` | Parses the dbt project |
 | `validate-snowflake` | Dry-run deploys against DEV (no actual changes) |
 
@@ -103,39 +103,73 @@ Merging to `dev` triggers **Deploy Dev**:
 4. Deploys agents (ALTER preserves eval history)
 5. Runs evaluations (advisory — failures don't block)
 
-### 6. Merge dev to main → Promote to QA
+### 6. Merge dev to main → Deploy PROD `validated`
 
-When DEV looks good, open a PR from `dev` to `main` and merge. Then trigger **Promote to QA** manually from the Actions tab. This runs pre-flight checks, snapshots, deploys, and runs evaluations. QA eval failures are hard failures.
+When DEV looks good, open a PR from `dev` to `main` and merge. The merge automatically runs **deploy-prod-validated.yml**, which requires a single approval on the `PROD` GitHub environment, then snapshots, deploys SVs and agents (alias=`validated`), and runs smoke + eval against the validated alias. Threshold failures on the post-deploy eval are advisory: the deploy still completes, but the alias does not move to `production` until you manually promote.
 
-### 7. Promote to Production
+### 7. Promote validated → production
 
-Trigger **Promote to Production** manually. Requires reviewer approval (the `PROD` environment has a protection rule). If post-deploy evals fail, auto-rollback kicks in.
+Trigger **promote-validated-to-production.yml** manually. It requires a second reviewer approval (the `production-promote` GitHub environment) and flips the `production` alias to the version currently held by `validated`. A post-promote smoke + eval runs as a safety check; if it regresses, trigger **rollback.yml** to reassign the `production` alias back to a prior version.
 
 ## CI/CD Pipeline Architecture
 
 ```
-PR opened (to dev or main)  →  validate-pr.yml      (dry-run only, no side effects)
-Merge to dev               →  deploy-dev.yml       (real deploy, evals advisory)
-Manual dispatch            →  promote-qa.yml       (real deploy, evals required)
-Manual dispatch            →  promote-prod.yml     (approval gate, auto-rollback on failure)
-Manual dispatch   →  rollback.yml         (any env, from snapshot)
-Scheduled daily   →  daily_data_refresh   (PROD data pipeline + env sync)
-Manual dispatch   →  sync_env_data.yml    (copy RAW data from PROD to DEV/QA)
-Manual dispatch   →  dcm-deploy.yml       (infrastructure changes)
+PR opened (to dev or main)  →  validate-pr.yml                       (dry-run + evals; blocking on main)
+Merge to dev                →  deploy-dev.yml                        (real deploy, alias=latest, evals advisory)
+Merge to main               →  deploy-prod-validated.yml             (PROD approval, alias=validated, eval advisory)
+Manual dispatch             →  promote-validated-to-production.yml   (production-promote approval, alias flip + smoke + eval)
+Manual dispatch             →  rollback.yml                          (alias reassignment)
+Scheduled daily             →  daily_data_refresh.yml                (PROD data pipeline + DEV sync)
+Manual dispatch             →  sync_env_data.yml                     (copy RAW data from PROD to DEV)
+PR / push (dev or main)     →  dcm-deploy.yml                        (infra plan/deploy, paths: dcm/**)
 ```
+
+There is intentionally no QA environment. Pre-production internal validation runs against the `validated` alias on the same PROD agent that will eventually receive customer traffic via the `production` alias.
+
+### Workflow contract
+
+`validate-pr.yml` only triggers when a PR changes paths in its `paths:` filter. The current set is:
+
+```
+agents/specs/**
+semantic-views/definitions/**
+agent_management/**
+agent-evaluation/**
+environments/**
+tests/**
+dbt_ski_resort/**
+```
+
+Practical consequences:
+
+- A PR that only changes `README.md`, `CONTRIBUTING.md`, or `.github/workflows/**` will NOT run `validate-pr.yml` and will NOT post eval comments. This is intentional — there is nothing to evaluate. The `Cursor Bugbot` advisory check still runs on any PR.
+- Eval comments (per-SV summary, agent eval summary) only appear when `validate-pr.yml` runs. If you want eval signal on a docs-only PR, include a code-path change (for example, a test) so the workflow is triggered.
+
+`dcm-deploy.yml` triggers on PR or push to `dev` or `main` when files under `dcm/**` change. Schema/role/grant changes propagate to DEV at merge to `dev`; PROD DCM deploy still requires manual dispatch.
+
+### Eval semantics by stage
+
+| Stage | Eval behavior | What "advisory" means |
+|-------|---------------|-----------------------|
+| PR to `dev` | `continue-on-error: true` on dev base ref | Threshold fail logs red but does not block merge. |
+| PR to `main` | Blocking on main base ref | Threshold fail blocks merge. |
+| `deploy-dev.yml` | Advisory | Alias `latest` updates regardless of eval score. |
+| `deploy-prod-validated.yml` | Advisory threshold; crash hard-fails | Alias `validated` already moved to the new version when the eval runs. The operator decides whether to promote. |
+| `promote-validated-to-production.yml` | Advisory threshold; crash hard-fails | Alias `production` has already flipped when the eval runs. If it regresses, trigger `rollback.yml` to reassign `production` back to a prior version. |
+
+Crash exit codes (taxonomy in `agent_management/run_sv_eval.py`) always hard-fail. Threshold-only failures are advisory because the alias-based deploy is reversible: rolling back is a single `ALTER AGENT ... MODIFY VERSION ... SET ALIAS ...` away.
 
 ## Environment Mapping
 
 | Input value | GitHub Environment | Snowflake Database | Snowflake Role |
 |-------------|-------------------|-------------------|----------------|
 | `dev` | `DEV` | `AM_SKI_RESORT_DEV` | `AM_DEPLOY_ROLE_DEV` |
-| `qa` | `QA` | `AM_SKI_RESORT_QA` | `AM_DEPLOY_ROLE_QA` |
-| `prod` | `PROD` (with approval) | `AM_SKI_RESORT` | `AM_DEPLOY_ROLE` |
+| `prod` | `PROD` (single approval) + `production-promote` (second approval for alias flip) | `AM_SKI_RESORT` | `AM_DEPLOY_ROLE` |
 
 ## Secrets & Variables Architecture
 
 - **Repo-level secrets**: `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, `SNOWFLAKE_PRIVATE_KEY`
-- **Environment-level variables** (per DEV/QA/PROD): `SNOWFLAKE_WAREHOUSE`, `SNOWFLAKE_ROLE`, `SNOWFLAKE_DATABASE`
+- **Environment-level variables** (per DEV/PROD): `SNOWFLAKE_WAREHOUSE`, `SNOWFLAKE_ROLE`, `SNOWFLAKE_DATABASE`
 
 > **Why variables, not secrets?** GitHub Actions masks any value stored as a secret wherever it
 > appears in log output. Database names, roles, and warehouses are not sensitive, and masking
@@ -146,7 +180,7 @@ Every job that connects to Snowflake declares `environment:` to pull the correct
 
 ## Data Pipeline & Environment Sync
 
-Data generation runs only in **PROD** (`daily_data_refresh.yml`). DEV and QA receive data via **sync**, not independent generation — this ensures all environments test against the same dataset.
+Data generation runs only in **PROD** (`daily_data_refresh.yml`). DEV receives data via **sync**, not independent generation — this ensures both environments test against the same dataset.
 
 **Flow:**
 
@@ -154,12 +188,12 @@ Data generation runs only in **PROD** (`daily_data_refresh.yml`). DEV and QA rec
 daily_data_refresh.yml (PROD)
   └── generate_daily_increment.py → AM_SKI_RESORT.RAW.*
   └── dbt run → STAGING + MARTS in PROD
-  └── sync_env_data.yml (DEV, QA)
+  └── sync_env_data.yml (DEV)
         ├── TRUNCATE + INSERT RAW tables from PROD
         └── dbt run → rebuild STAGING + MARTS
 ```
 
-**Manual sync**: Run `sync_env_data.yml` with `target_envs: dev,qa` to copy current PROD data.
+**Manual sync**: Run `sync_env_data.yml` with `target_envs: dev` to copy current PROD data.
 
 **Adding new RAW tables**: Add the table name to `raw_tables` in `project.yml`. The sync workflow reads this list. Also ensure the table DDL exists in all environments (create via DCM or manual `CREATE TABLE ... LIKE`).
 
@@ -169,9 +203,11 @@ daily_data_refresh.yml (PROD)
 
 | Environment | Eval behavior | On failure |
 |-------------|--------------|------------|
-| DEV | `continue-on-error: true` | Advisory — logged, not blocking |
-| QA | Hard failure | Deploy blocked |
-| PROD | Hard failure | Auto-rollback from snapshot |
+| PR to `dev` | Advisory (`continue-on-error` true on dev base ref) | Logged; can merge |
+| PR to `main` | Blocking SV + agent eval | Merge blocked |
+| `deploy-dev.yml` (post-merge to dev) | Advisory | Logged; deploy still updates `latest` |
+| `deploy-prod-validated.yml` (post-merge to main) | Advisory threshold; crash hard-fails | Operator decides whether to promote |
+| `promote-validated-to-production.yml` | Advisory threshold; crash hard-fails | Trigger `rollback.yml` if regressed |
 
 All evals go through `python -m agent_management.run_ci_eval --env <env>` which handles agent name suffix resolution.
 
@@ -189,7 +225,6 @@ eval:
 | Environment | answer_correctness | logical_consistency |
 |-------------|-------------------|-------------------|
 | DEV | 0.60 | 0.60 |
-| QA | 0.70 | 0.70 |
 | PROD | 0.80 | 0.80 |
 
 The eval config templates in `agent-evaluation/configs/` use `{{ eval.thresholds.answer_correctness }}` Jinja2 placeholders. These are resolved at two points:
@@ -206,8 +241,7 @@ Single-account mode uses suffixes:
 | Environment | Agent name |
 |-------------|-----------|
 | DEV | `RESORT_EXECUTIVE_DEV` |
-| QA | `RESORT_EXECUTIVE_QA` |
-| PROD | `RESORT_EXECUTIVE` (no suffix) |
+| PROD | `RESORT_EXECUTIVE` (no suffix; aliases `validated` and `production` distinguish pre/customer traffic) |
 
 ## Rollback
 
@@ -225,4 +259,4 @@ python -m agent_management.rollback --env dev --timestamp 20260409_120000 --targ
 - **Multi-account deployment**: Separate Snowflake accounts per environment (cross-account mode in `project.yml`)
 - **Feature branch environments**: Ephemeral Snowflake databases per PR branch (individual developer iteration)
 - **Evaluation dashboard**: Streamlit app for historical eval trend analysis
-- **Approval workflows**: Slack/Teams integration for QA→PROD promotion gates
+- **Approval workflows**: Slack/Teams integration for the validated→production promotion gate
