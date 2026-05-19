@@ -14,8 +14,8 @@ install-dev:  ## Install with dev extras
 lint:  ## Run ruff linter
 	$(PYTHON) -m ruff check agent_management/ tests/
 
-test:  ## Run test suite
-	$(PYTHON) -m pytest tests/ -v
+test:  ## Run test suite (uv-managed environment)
+	uv run python -m pytest tests/ -q
 
 # ─── Validation ────────────────────────────────────────────────
 .PHONY: validate render-eval

@@ -14,7 +14,7 @@ RAW data (12 tables)
         → Automated Evaluations (answer_correctness, logical_consistency)
 ```
 
-The framework manages the full lifecycle across three environments (DEV, QA, PROD), each in its own Snowflake database. Infrastructure is provisioned by DCM. Data flows from PROD (source of truth) to DEV/QA via zero-copy clones.
+The framework manages the full lifecycle across two environments (DEV, PROD), each in its own Snowflake database. PROD additionally carries a `validated` alias for pre-production internal validation before customer traffic is routed via the `production` alias. Infrastructure is provisioned by DCM. Data flows from PROD (source of truth) to DEV via zero-copy clones.
 
 ## Architecture at a Glance
 
@@ -26,7 +26,6 @@ The framework manages the full lifecycle across three environments (DEV, QA, PRO
 │       │                                                         │
 │  environments/                                                  │
 │    dev.env.yml ── Database, role, warehouse, agent name_suffix  │
-│    qa.env.yml                                                   │
 │    prod.env.yml                                                 │
 │       │                                                         │
 │  ┌────┴──────────────────────────────────────────────────┐      │
@@ -43,20 +42,19 @@ The framework manages the full lifecycle across three environments (DEV, QA, PRO
 ┌─────────────────────────────────────────────────────────────────┐
 │  Snowflake (single account, 3 databases)                        │
 │                                                                 │
-│  AM_SKI_RESORT_DEV          AM_SKI_RESORT_QA                    │
-│    RAW (cloned from PROD)     RAW (cloned from PROD)            │
-│    STAGING                    STAGING                            │
-│    MARTS                      MARTS                             │
-│    SEMANTIC (11 SVs)          SEMANTIC (11 SVs)                 │
-│    AGENTS                     AGENTS                            │
-│      RESORT_EXECUTIVE_DEV       RESORT_EXECUTIVE_QA             │
-│      SKI_OPS_ASSISTANT_DEV      SKI_OPS_ASSISTANT_QA            │
+│  AM_SKI_RESORT_DEV (developer iteration)                        │
+│    RAW (cloned from PROD)                                       │
+│    STAGING / MARTS                                              │
+│    SEMANTIC (11 SVs)                                            │
+│    AGENTS                                                       │
+│      RESORT_EXECUTIVE_DEV   alias: latest                       │
+│      SKI_OPS_ASSISTANT_DEV  alias: latest                       │
 │                                                                 │
-│  AM_SKI_RESORT (source of truth)                                │
+│  AM_SKI_RESORT (source of truth + customer traffic)             │
 │    RAW (real data)                                              │
 │    STAGING / MARTS / SEMANTIC / AGENTS / DBT_TEST__AUDIT        │
-│      RESORT_EXECUTIVE           (no suffix — canonical)         │
-│      SKI_OPS_ASSISTANT                                          │
+│      RESORT_EXECUTIVE   aliases: validated, production          │
+│      SKI_OPS_ASSISTANT  aliases: validated, production          │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -132,7 +130,6 @@ pip install -e ".[dev,crypto]"
 vim ~/.snowflake/connections.toml   # Add [myconnection] with account, user, private_key_path
 vim project.yml                     # Set account, schemas, deployment mode
 vim environments/dev.env.yml        # Set database, role, warehouse, thresholds
-vim environments/qa.env.yml
 vim environments/prod.env.yml
 ```
 
@@ -158,9 +155,9 @@ python generate_complete_ski_data.py                    # Full 4-year history �
 python generate_daily_increment.py --env dev --days 30  # Or: daily incremental
 ```
 
-Or sync PROD RAW → DEV/QA (zero-copy):
+Or sync PROD RAW → DEV (zero-copy):
 ```bash
-# GitHub Actions → sync_env_data.yml with target_envs: dev,qa
+# GitHub Actions → sync_env_data.yml with target_envs: dev
 ```
 
 ### Phase 4 — Build dbt Models
@@ -207,7 +204,7 @@ gh secret set SNOWFLAKE_ACCOUNT  --body "your-account"
 gh secret set SNOWFLAKE_USER     --body "your-user"
 gh secret set SNOWFLAKE_PRIVATE_KEY < ~/.snowflake/keys/rsa_key.p8
 
-# 2. Set per-environment secrets and variables (DEV, QA, PROD)
+# 2. Set per-environment secrets and variables (DEV, PROD)
 .github/scripts/setup_github_secrets.sh
 .github/scripts/setup_github_environments.sh
 
@@ -223,8 +220,7 @@ flowchart LR
     subgraph triggers ["Triggers"]
         PR["PR to dev / main"]
         PushDev["Push to dev"]
-        ManualQA["Manual: Promote QA"]
-        ManualProd["Manual: Promote Prod"]
+        ManualPromote["Manual: Promote validated → production"]
         ManualRB["Manual: Rollback"]
         Cron["Cron daily 5am PST"]
         ManualSync["Manual: Sync Envs"]
@@ -233,19 +229,19 @@ flowchart LR
 
     subgraph workflows ["Workflows"]
         ValidatePR["validate-pr\n4 parallel jobs · dry-run"]
-        DeployDev["deploy-dev\nsnapshot → dbt → SVs →\nagents → eval ⚠️ advisory"]
-        PromoteQA["promote-qa\npre-flight → snapshot →\ndeploy → eval 🔒 hard gate"]
-        PromoteProd["promote-prod\napproval → snapshot → deploy →\neval 🔒 hard gate → auto-rollback"]
-        Rollback["rollback\nrestore from snapshot"]
+        DeployDev["deploy-dev\nsnapshot → dbt → SVs →\nagents (alias=latest) → eval ⚠️ advisory"]
+        DeployProdValidated["deploy-prod-validated\napproval → snapshot → SVs →\nagents (alias=validated) → eval ⚠️ advisory"]
+        PromoteValidated["promote-validated-to-production\napproval → flip alias → smoke + eval"]
+        Rollback["rollback\nalias reassignment to prior version"]
         DataRefresh["daily-data-refresh\ngenerate → dbt → verify"]
-        SyncEnv["sync-env-data\nTRUNCATE+INSERT RAW\nPROD → DEV / QA"]
+        SyncEnv["sync-env-data\nTRUNCATE+INSERT RAW\nPROD → DEV"]
         DCMDeploy["dcm-deploy\nplan → deploy infra"]
     end
 
     PR --> ValidatePR
     PushDev --> DeployDev
-    ManualQA --> PromoteQA
-    ManualProd --> PromoteProd
+    PR --> DeployProdValidated
+    ManualPromote --> PromoteValidated
     ManualRB --> Rollback
     Cron --> DataRefresh
     ManualSync --> SyncEnv
@@ -253,33 +249,31 @@ flowchart LR
     DataRefresh -.->|calls| SyncEnv
 ```
 
-### Promotion Flow: DEV → QA → PROD
+### Promotion Flow: DEV → PROD validated → PROD production
 
-Eval thresholds escalate at each stage. PROD adds an approval gate and auto-rollback on eval failure.
+DEV evals are advisory; iteration speed is the priority. PROD has two aliases: `validated` is moved automatically by the deploy on main-merge (after a single approval). `production` is moved manually after a second human approval. Threshold failures on PROD evals are advisory: deploy still completes, but the operator decides whether to promote and can trigger rollback if needed.
 
 ```mermaid
 flowchart TD
     subgraph dev ["DEV — advisory evals (threshold: 0.60)"]
         D1["Snapshot"] --> D2["dbt run"] --> D3["Deploy SVs"]
-        D3 --> D4["SV Eval ⚠️"] --> D5["Deploy Agents"] --> D6["Agent Eval ⚠️"]
+        D3 --> D4["SV Eval (advisory)"] --> D5["Deploy Agents (alias=latest)"] --> D6["Agent Eval (advisory)"]
     end
 
-    subgraph qa ["QA — hard eval gate (threshold: 0.70)"]
-        Q1["Pre-flight\nvalidate · drift · dry-run"] --> Q2["Snapshot"]
-        Q2 --> Q3["dbt + Deploy SVs"] --> Q4["SV Eval 🔒"]
-        Q4 --> Q5["Deploy Agents"] --> Q6["Agent Eval 🔒"]
+    subgraph prodVal ["PROD validated — single approval (threshold: 0.80, advisory)"]
+        V1["PROD approval"] --> V2["Snapshot"]
+        V2 --> V3["dbt + Deploy SVs"]
+        V3 --> V4["Deploy Agents (alias=validated)"]
+        V4 --> V5["Smoke + Eval (advisory)"]
     end
 
-    subgraph prod ["PROD — approval + auto-rollback (threshold: 0.80)"]
-        P1["Pre-flight + Approval"] --> P2["Snapshot"]
-        P2 --> P3["dbt + Deploy SVs"] --> P4["SV Eval 🔒"]
-        P4 --> P5["Deploy Agents"] --> P6["Agent Eval 🔒"]
-        P4 -->|failure| P7["Auto-Rollback"]
-        P6 -->|failure| P7
+    subgraph prodProm ["PROD production — second approval, customer traffic"]
+        Pp1["production-promote approval"] --> Pp2["alias flip"]
+        Pp2 --> Pp3["Smoke + Post-promote eval (advisory)"]
     end
 
-    D6 -->|"manual dispatch"| Q1
-    Q6 -->|"manual dispatch"| P1
+    D6 -->|"merge dev → main"| V1
+    V5 -->|"manual dispatch"| Pp1
 ```
 
 ## Repository Structure
@@ -292,7 +286,6 @@ AgentMangement/
 │
 ├── environments/                    # Per-env config (database, role, warehouse, name_suffix)
 │   ├── dev.env.yml
-│   ├── qa.env.yml
 │   └── prod.env.yml
 │
 ├── agent_management/                # Core Python library (pip-installable)
@@ -337,19 +330,20 @@ AgentMangement/
 │       └── marts/semantic/          #   11 semantic views (dbt materialization)
 │
 ├── dcm/                             # Infrastructure as Code (separate README)
-│   ├── manifest.yml                 #   DEV/QA/PROD targets
+│   ├── manifest.yml                 #   DEV/PROD targets
 │   └── sources/                     #   Database, schemas, roles, grants
 │
 ├── data-generation/                 # Synthetic ski resort data
 │
 ├── .github/workflows/               # CI/CD pipelines
-│   ├── deploy-dev.yml               #   Deploy on merge to main (environment: DEV)
-│   ├── promote-qa.yml               #   Manual promote with eval gate (environment: QA)
-│   ├── promote-prod.yml             #   Manual promote with approval (environment: PROD)
-│   ├── validate-pr.yml              #   Lint + dry-run validate on PR
-│   ├── rollback.yml                 #   Rollback any environment
+│   ├── validate-pr.yml              #   Lint + dry-run validate + eval on PR
+│   ├── deploy-dev.yml               #   Deploy on merge to dev (environment: DEV, alias=latest)
+│   ├── deploy-prod-validated.yml    #   Deploy on merge to main (environment: PROD, alias=validated)
+│   ├── promote-validated-to-production.yml # Manual promote (alias flip: validated → production)
+│   ├── rollback.yml                 #   Rollback any environment via alias reassignment
 │   ├── daily_data_refresh.yml       #   Daily data pipeline (environment: PROD)
-│   └── dcm-deploy.yml              #   DCM infrastructure deploy
+│   ├── sync_env_data.yml            #   Sync PROD RAW → DEV (called by daily refresh)
+│   └── dcm-deploy.yml               #   DCM infrastructure deploy (dev + main)
 │
 ├── .github/actions/                 # Reusable composite actions
 │   └── snowflake-setup/action.yml   #   Checkout + Python + pip + private key
@@ -374,18 +368,17 @@ Configured in `project.yml` under `deployment.mode`:
 
 | Mode | Agent Naming | Use Case |
 |------|-------------|----------|
-| `single_account` | PROD: `RESORT_EXECUTIVE` (no suffix), DEV: `RESORT_EXECUTIVE_DEV`, QA: `RESORT_EXECUTIVE_QA` | All envs in one Snowflake account |
+| `single_account` | PROD: `RESORT_EXECUTIVE` (no suffix), DEV: `RESORT_EXECUTIVE_DEV` | All envs in one Snowflake account |
 | `cross_account` | Same name in every account (no suffix needed) | Separate Snowflake accounts per env |
 
 In single-account mode, `name_suffix` from each environment config is appended to agent names. The agent's `display_name` in Snowsight also gets a label (e.g., `[DEV]`) via `resolve_profile()`.
 
 ## Data Flow Direction
 
-PROD is the source of truth. DEV and QA clone RAW tables from PROD using zero-copy clones:
+PROD is the source of truth. DEV clones RAW tables from PROD using zero-copy clones:
 
 ```
 PROD (real data)  ──clone──>  DEV (iterate on agents/SVs)
-                  ──clone──>  QA  (validate before promoting)
 ```
 
 Configured via `deployment.data_source: prod` in `project.yml`.
@@ -602,8 +595,10 @@ Without the `USE DATABASE` / `USE SCHEMA`, the eval task will look for the seman
 
 ```bash
 pip install -e ".[dev]"
-pytest tests/ -q
+uv run python -m pytest tests/ -q
 ```
+
+`uv run` is the canonical local test command (see [Makefile](Makefile) `test` target). It avoids the system Python missing pytest and matches CI behavior.
 
 ## CI/CD Authentication
 
@@ -619,9 +614,6 @@ Credentials are split between **repo-level secrets** and **environment-level var
 | Env: DEV | Variable | `SNOWFLAKE_WAREHOUSE` | `AM_SKI_RESORT_WH_DEV` |
 | Env: DEV | Variable | `SNOWFLAKE_ROLE` | `AM_DEPLOY_ROLE_DEV` |
 | Env: DEV | Variable | `SNOWFLAKE_DATABASE` | `AM_SKI_RESORT_DEV` |
-| Env: QA | Variable | `SNOWFLAKE_WAREHOUSE` | `AM_SKI_RESORT_WH_QA` |
-| Env: QA | Variable | `SNOWFLAKE_ROLE` | `AM_DEPLOY_ROLE_QA` |
-| Env: QA | Variable | `SNOWFLAKE_DATABASE` | `AM_SKI_RESORT_QA` |
 | Env: PROD | Variable | `SNOWFLAKE_WAREHOUSE` | `AM_SKI_RESORT_WH` |
 | Env: PROD | Variable | `SNOWFLAKE_ROLE` | `AM_DEPLOY_ROLE` |
 | Env: PROD | Variable | `SNOWFLAKE_DATABASE` | `AM_SKI_RESORT` |
@@ -630,7 +622,7 @@ Credentials are split between **repo-level secrets** and **environment-level var
 > Database names, roles, and warehouses are not sensitive — masking them breaks Snowsight
 > URLs and makes CI output harder to read.
 
-Each workflow job declares `environment: DEV` (or QA/PROD), and `${{ vars.SNOWFLAKE_DATABASE }}` resolves to the correct value for that environment.
+Each workflow job declares `environment: DEV` or `PROD`, and `${{ vars.SNOWFLAKE_DATABASE }}` resolves to the correct value for that environment. The `production-promote` GitHub environment guards the customer-traffic alias flip with a separate approval.
 
 Setup: `.github/scripts/setup_github_secrets.sh` · Teardown: `.github/scripts/teardown.sh`
 

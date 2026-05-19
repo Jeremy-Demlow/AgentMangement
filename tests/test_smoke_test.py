@@ -68,14 +68,50 @@ class FakeSession:
 
 
 class FakeConn:
-    def __init__(self):
+    """Fake Snowflake connection that satisfies smoke_test's needs.
+
+    smoke_test issues two queries via cursor():
+      1. SELECT CURRENT_ORGANIZATION_NAME(), CURRENT_ACCOUNT_NAME()  -> org URL
+      2. DESCRIBE AGENT <fqn>                                         -> alias JSON
+    The second is consumed by versioning.get_aliases() inside
+    smoke_test._preflight_selector(). Without alias data, preflight refuses to
+    run because no committed version carries the alias under test.
+    """
+
+    def __init__(self, aliases: dict | None = None):
         self.rest = MagicMock()
         self.rest.token = "fake-token"
+        if aliases is None:
+            aliases = {"DEFAULT": "VERSION$1", "LATEST": "VERSION$1"}
+        self._aliases_json = json.dumps(aliases)
 
     def cursor(self):
         cur = MagicMock()
-        cur.execute.return_value = None
-        cur.fetchone.return_value = ("ORG", "ACCT")
+        # Track which kind of query was last executed so the right fetchone()
+        # / description shape is returned.
+        state = {"kind": "org"}
+
+        def execute(sql, *args, **kwargs):
+            if "DESCRIBE AGENT" in sql.upper():
+                state["kind"] = "describe_agent"
+            else:
+                state["kind"] = "org"
+            return None
+
+        def fetchone():
+            if state["kind"] == "describe_agent":
+                return ("AGENT", self._aliases_json)
+            return ("ORG", "ACCT")
+
+        # description is read after execute(); MagicMock attribute access works.
+        def get_description():
+            if state["kind"] == "describe_agent":
+                return [("name",), ("aliases",)]
+            return [("CURRENT_ORGANIZATION_NAME()",), ("CURRENT_ACCOUNT_NAME()",)]
+
+        cur.execute.side_effect = execute
+        cur.fetchone.side_effect = fetchone
+        type(cur).description = property(lambda _self: get_description())
         return cur
 
 

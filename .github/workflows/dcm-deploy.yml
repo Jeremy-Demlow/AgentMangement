@@ -1,7 +1,9 @@
 name: Deploy Infrastructure (DCM)
 
-# Deploys DCM (Database Change Management) project to DEV (push to main) or
-# any target (manual dispatch).
+# Deploys DCM (Database Change Management) project. Triggers:
+#   pull_request to dev or main, paths: dcm/**  -> plan-only, posted to step summary
+#   push to dev or main, paths: dcm/**          -> create + deploy (target=DEV)
+#   workflow_dispatch                            -> plan + optional deploy for any target
 #
 # Connection strategy: use the same snowflake-setup composite action as the
 # other workflows (Python + key file) and drive `snow dcm` via the
