@@ -126,6 +126,39 @@ PR / push (dev or main)     →  dcm-deploy.yml                        (infra pl
 
 There is intentionally no QA environment. Pre-production internal validation runs against the `validated` alias on the same PROD agent that will eventually receive customer traffic via the `production` alias.
 
+### Workflow contract
+
+`validate-pr.yml` only triggers when a PR changes paths in its `paths:` filter. The current set is:
+
+```
+agents/specs/**
+semantic-views/definitions/**
+agent_management/**
+agent-evaluation/**
+environments/**
+tests/**
+dbt_ski_resort/**
+```
+
+Practical consequences:
+
+- A PR that only changes `README.md`, `CONTRIBUTING.md`, or `.github/workflows/**` will NOT run `validate-pr.yml` and will NOT post eval comments. This is intentional — there is nothing to evaluate. The `Cursor Bugbot` advisory check still runs on any PR.
+- Eval comments (per-SV summary, agent eval summary) only appear when `validate-pr.yml` runs. If you want eval signal on a docs-only PR, include a code-path change (for example, a test) so the workflow is triggered.
+
+`dcm-deploy.yml` triggers on PR or push to `dev` or `main` when files under `dcm/**` change. Schema/role/grant changes propagate to DEV at merge to `dev`; PROD DCM deploy still requires manual dispatch.
+
+### Eval semantics by stage
+
+| Stage | Eval behavior | What "advisory" means |
+|-------|---------------|-----------------------|
+| PR to `dev` | `continue-on-error: true` on dev base ref | Threshold fail logs red but does not block merge. |
+| PR to `main` | Blocking on main base ref | Threshold fail blocks merge. |
+| `deploy-dev.yml` | Advisory | Alias `latest` updates regardless of eval score. |
+| `deploy-prod-validated.yml` | Advisory threshold; crash hard-fails | Alias `validated` already moved to the new version when the eval runs. The operator decides whether to promote. |
+| `promote-validated-to-production.yml` | Advisory threshold; crash hard-fails | Alias `production` has already flipped when the eval runs. If it regresses, trigger `rollback.yml` to reassign `production` back to a prior version. |
+
+Crash exit codes (taxonomy in `agent_management/run_sv_eval.py`) always hard-fail. Threshold-only failures are advisory because the alias-based deploy is reversible: rolling back is a single `ALTER AGENT ... MODIFY VERSION ... SET ALIAS ...` away.
+
 ## Environment Mapping
 
 | Input value | GitHub Environment | Snowflake Database | Snowflake Role |
