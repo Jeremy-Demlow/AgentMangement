@@ -16,12 +16,12 @@ name: Deploy Infrastructure (DCM)
 
 on:
   pull_request:
-    branches: [main]
+    branches: [dev, main]
     paths:
       - 'dcm/**'
 
   push:
-    branches: [main]
+    branches: [dev, main]
     paths:
       - 'dcm/**'
 

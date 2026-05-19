@@ -132,13 +132,14 @@ AgentMangement/
 ├── .gitignore
 │
 ├── .github/workflows/                     # CI/CD workflows
-│   ├── daily_data_refresh.yml             # Daily data pipeline (environment: PROD)
-│   ├── dcm-deploy.yml                  # DCM infrastructure deploy
-│   ├── validate-pr.yml                    # Lint + validate on PR
-│   ├── deploy-dev.yml                     # Deploy on merge to main (environment: DEV)
-│   ├── promote-qa.yml                     # Manual promote with eval gate (environment: QA)
-│   ├── promote-prod.yml                   # Manual promote with approval + eval gate (environment: PROD)
-│   └── rollback.yml                       # Rollback any environment
+│   ├── daily_data_refresh.yml             # Daily data pipeline (cron, environment: PROD)
+│   ├── dcm-deploy.yml                     # DCM infrastructure deploy (dev + main)
+│   ├── validate-pr.yml                    # Lint + validate on PR (dry-run, evals)
+│   ├── deploy-dev.yml                     # Deploy on merge to dev (environment: DEV, alias: latest)
+│   ├── deploy-prod-validated.yml          # Deploy on merge to main (environment: PROD, alias: validated)
+│   ├── promote-validated-to-production.yml # Manual promote (alias: validated → production)
+│   ├── sync_env_data.yml                  # Sync PROD RAW → DEV (called by daily refresh)
+│   └── rollback.yml                       # Rollback any environment (alias reassignment)
 │
 ├── .github/scripts/                       # CI/CD helper scripts
 │   ├── setup_github_secrets.sh             # Set repo + environment secrets (4 repo + 3×4 env)
@@ -255,7 +256,7 @@ AgentMangement/
 - Every requirement must have at least one test case
 - Every bug fix must have a regression test entry
 - No feature is "done" until tests pass and docs are updated
-- No environment promotion without passing eval gate (QA, prod)
+- Promotion flow: feature → dev (advisory evals) → main (blocking SV eval) → validated alias → production alias (manual promote with approval)
 - No agent deploy without prior semantic view deploy (order enforced)
 
 ## What NOT to Do
