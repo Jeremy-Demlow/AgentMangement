@@ -383,7 +383,19 @@ def show_results(cursor, config: dict, run_name: str, category: str = None):
     print(f"\nSnowsight: {url}")
 
 
-def poll_until_done(cursor, run_name: str, stage: str, filename: str, poll_interval: int = POLL_INTERVAL_SECONDS) -> str:
+def poll_until_done(cursor, run_name: str, stage: str, filename: str, poll_interval: int = POLL_INTERVAL_SECONDS) -> tuple[str, str]:
+    """Poll EXECUTE_AI_EVALUATION until it reaches a terminal status.
+
+    Returns ``(status, status_details)`` where ``status`` is one of:
+      - ``"COMPLETED"``                 -> eval finished successfully
+      - ``"FAILED: <terminal_token>"``  -> orchestrator gave up
+      - ``"TIMEOUT"``                   -> we ran out of poll attempts
+
+    ``status_details`` is the orchestrator's STATUS_DETAILS column (empty
+    string when absent). Surfacing it lets callers distinguish a transient
+    Cortex platform flake (``Invocation failed``) from a genuine eval engine
+    error so the caller can decide whether to retry.
+    """
     # Snowflake reports a sequence of statuses for Cortex Agent evals:
     #   CREATED -> INVOCATION_IN_PROGRESS -> INVOCATION_COMPLETED ->
     #   (metric computation, async) -> COMPLETED
@@ -399,6 +411,7 @@ def poll_until_done(cursor, run_name: str, stage: str, filename: str, poll_inter
         # bail fast on a genuine error instead of polling for 30 minutes.
         "INVOCATION_FAILED", "INVOCATION_ERROR",
     }
+    last_details = ""
     for attempt in range(1, MAX_POLL_ATTEMPTS + 1):
         cursor.execute(f"""
             CALL EXECUTE_AI_EVALUATION(
@@ -417,16 +430,48 @@ def poll_until_done(cursor, run_name: str, stage: str, filename: str, poll_inter
             else:
                 status_str = str(rows[0][0]).upper()
 
-            print(f"  [{attempt:02d}] Status: {status_str}")
+            details_raw = ""
+            if "STATUS_DETAILS" in col_names:
+                details_raw = rows[0][col_names.index("STATUS_DETAILS")] or ""
+            elif len(rows[0]) > 4:
+                details_raw = rows[0][4] or ""
+            last_details = str(details_raw)
+
+            print(f"  [{attempt:02d}] Status: {status_str}" + (
+                f"  ({last_details})" if last_details else ""
+            ))
 
             if status_str in TERMINAL_OK:
-                return "COMPLETED"
+                return "COMPLETED", last_details
             if status_str in TERMINAL_FAIL:
-                return f"FAILED: {status_str}"
+                return f"FAILED: {status_str}", last_details
 
         time.sleep(poll_interval)
 
-    return "TIMEOUT"
+    return "TIMEOUT", last_details
+
+
+# Cortex platform-level transient signatures. When the orchestrator reports
+# FAILED with one of these in STATUS_DETAILS, retrying the run usually
+# succeeds; the failure is not in our spec or our questions. Mirrors the
+# `_PLATFORM_BLOCKER_PATTERNS` in agent_management/run_sv_eval.py.
+_RETRYABLE_DETAIL_PATTERNS = (
+    "invocation failed",
+    "service is currently unavailable",
+    "internal error",
+)
+
+
+def is_retryable_failure(status_details: str) -> bool:
+    """True if the FAILED status_details looks like a transient platform flake.
+
+    Pure function so it is unit-testable without spinning up a real eval.
+    Returns False for empty/None details (no signal == do not retry).
+    """
+    if not status_details:
+        return False
+    msg = status_details.lower()
+    return any(pat in msg for pat in _RETRYABLE_DETAIL_PATTERNS)
 
 
 def fetch_results(cursor, agent: dict, run_name: str,
@@ -795,10 +840,33 @@ def main():
             return
 
         print(f"\n6. Polling every {args.poll_interval}s (max {MAX_POLL_ATTEMPTS} attempts)...")
-        final_status = poll_until_done(cursor, run_name, stage, sf_yaml_filename, poll_interval=args.poll_interval)
+        final_status, status_details = poll_until_done(cursor, run_name, stage, sf_yaml_filename, poll_interval=args.poll_interval)
+
+        # Retry once on transient platform flakes (Invocation failed,
+        # service unavailable, internal error). Same retry policy used by
+        # agent_management/run_sv_eval.py and deploy-prod-validated.yml.
+        # A retry uses a fresh run_name so the orchestrator does not see a
+        # stale FAILED record on STATUS calls.
+        if "FAILED" in final_status and is_retryable_failure(status_details):
+            retry_run_name = f"{run_name}-r1"
+            retry_filename = sf_yaml_filename.replace(run_name, retry_run_name) \
+                if run_name in sf_yaml_filename else f"{retry_run_name}.yaml"
+            print(
+                f"\n  Eval reported transient platform flake "
+                f"(STATUS_DETAILS={status_details!r}); retrying once as {retry_run_name}..."
+            )
+            sf_yaml_retry = generate_snowflake_yaml(config, dataset_name)
+            upload_yaml(cursor, sf_yaml_retry, stage, retry_filename)
+            start_eval(cursor, retry_run_name, stage, retry_filename)
+            final_status, status_details = poll_until_done(cursor, retry_run_name, stage, retry_filename, poll_interval=args.poll_interval)
+            if "FAILED" not in final_status and "TIMEOUT" not in final_status:
+                run_name = retry_run_name
+                sf_yaml_filename = retry_filename
 
         if "FAILED" in final_status or "TIMEOUT" in final_status:
             print(f"\n  Evaluation did not complete: {final_status}")
+            if status_details:
+                print(f"  STATUS_DETAILS: {status_details}")
             errors = fetch_errors(cursor, agent, run_name)
             if errors:
                 print(f"\n  Errors/warnings ({len(errors)}):")
