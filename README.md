@@ -40,7 +40,7 @@ The framework manages the full lifecycle across two environments (DEV, PROD), ea
 └─────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────┐
-│  Snowflake (single account, 3 databases)                        │
+│  Snowflake (single account, 2 databases)                        │
 │                                                                 │
 │  AM_SKI_RESORT_DEV (developer iteration)                        │
 │    RAW (cloned from PROD)                                       │
@@ -627,6 +627,149 @@ Each workflow job declares `environment: DEV` or `PROD`, and `${{ vars.SNOWFLAKE
 Setup: `.github/scripts/setup_github_secrets.sh` · Teardown: `.github/scripts/teardown.sh`
 
 See [`.github/PIPELINE_SETUP.md`](.github/PIPELINE_SETUP.md) for the full setup guide.
+
+## Production Hardening and Resilience
+
+The framework has been hardened against the failure patterns we hit in real
+operation. This section captures the deliberate choices a fork should know
+about before adapting it to a new domain.
+
+### Eval resilience: STATUS_DETAILS visibility and retry-once on transients
+
+The Cortex agent eval orchestrator occasionally fails with transient errors
+(`Invocation failed`, service unavailable, internal error, timeout, rate
+limit). Without retry, a single transient kills a whole CI run.
+
+`agent-evaluation/scripts/run_eval.py` now:
+
+- Returns `(status, status_details)` from polling and prints the actual
+  Cortex error on every poll line. The previous behavior was the unhelpful
+  `Evaluation did not complete: FAILED: FAILED`. You now see, e.g.
+  `[07] Status: FAILED  (Metric 'logical_consistency' failed)`.
+- Auto-retries the eval ONCE under a fresh `<run_name>-r1` when
+  `STATUS_DETAILS` matches a known **invocation-phase** transient
+  (Invocation failed, service unavailable, internal error, timeout, rate
+  limit).
+- Treats `STATUS_DETAILS` returned as a JSON-encoded array (the shape Cortex
+  uses for multi-error cases) the same as a plain string for both display
+  and pattern matching.
+- Catches Cortex error 210007 (`Dataset version ... already exists`) on
+  retry start and surfaces a clean message instead of a Python traceback.
+
+**What is intentionally NOT retried:** metric-judge failures (e.g.
+`Metric 'logical_consistency' failed`) happen during `COMPUTATION_IN_PROGRESS`,
+after Cortex has created its internal
+`SYSTEM_AI_OBS_CORTEX_AGENT_DATASET_VERSION_DO_NOT_DELETE` object. A retry
+would crash with error 210007 because the dataset version cannot be reused.
+We surface the original failure honestly instead. If a metric judge failure
+needs investigation, the operator can re-run the agent eval manually after
+Cortex cleans up its internal state (typically a few minutes).
+
+The retry policy mirrors the existing patterns in
+`agent_management/run_sv_eval.py` (per-VQR `Invocation failed` retry) and
+`.github/workflows/deploy-prod-validated.yml` (whole-run crash retry). See
+[REQ-021](reqs/21_eval_resilience_retry.md) for the diagnostic write-up.
+
+### Schema drift auto-heal in workflows
+
+`write_pandas(auto_create_table=True)` infers types from the first sample
+row. NULL values produce `NUMBER(38,0)` columns that later reject string
+appends. Both the daily refresh and the env-sync workflow now reconcile
+this drift automatically:
+
+- `.github/workflows/daily_data_refresh.yml` — checks RAW and MARTS for
+  known affected columns (`CUSTOMER_FEEDBACK.SUBCATEGORY`,
+  `GROOMING_LOGS.NOTES`, `LIFT_MAINTENANCE.NOTES`) and widens them to
+  `VARCHAR` before dbt runs.
+- `.github/workflows/sync_env_data.yml` — same reconciliation against the
+  target env so a freshly-synced DEV/QA never inherits the bug.
+
+See [REG-001 and REG-002 in `tests/regression.md`](tests/regression.md) for
+the original incidents.
+
+### Per-table idempotency in the data generator
+
+`data-generation/generate_daily_increment.py` uses an `IDEMPOTENCY_TABLES`
+registry plus `present_for_date()` to gate writes per table. The previous
+all-or-nothing check silently skipped any table once weather existed for a
+date. After REG-003, each of the 13 RAW tables is independently checked
+and backfilled. See [REG-003](tests/regression.md).
+
+### Cortex Agent versioning, alias-based deploys, single-DDL rollback
+
+Agents deploy via the Cortex Agent Versioning Private Preview path:
+
+```
+ADD LIVE VERSION FROM LAST  →  MODIFY LIVE VERSION SET SPECIFICATION  →
+COMMIT (creates VERSION$N+1)  →  MODIFY VERSION <N+1> SET ALIAS = <alias>
+```
+
+Alias semantics:
+
+- DEV: `latest` is moved on every dev-branch deploy.
+- PROD: `validated` is moved on every main-branch deploy (single approval).
+  `production` is the customer-traffic alias and only moves after a second
+  human approval via `promote-validated-to-production.yml`.
+
+`assert_alias_points_to()` verifies that both the deploy alias AND the
+`DEFAULT` alias resolve correctly after each deploy. Without `DEFAULT`,
+selectorless REST calls fail with `Version 'live' not found`. See
+[REG-006](tests/regression.md).
+
+Rollback is a single DDL: `ALTER AGENT <fqn> MODIFY VERSION <prev> SET
+ALIAS = production`. See [`docs/operations/ROLLBACK_RUNBOOK.md`](docs/operations/ROLLBACK_RUNBOOK.md).
+
+### Drift guardrails
+
+`tests/test_docs_drift_guardrails.py` runs in the default test suite and
+fails when:
+
+- Active docs reference removed workflows (the historical QA-promote
+  workflows that no longer exist; see the guardrail test for the
+  exact list).
+- A workflow filename in active docs does not exist under `.github/workflows/`.
+- `project.yml`'s `environments:` keys do not match files under
+  `environments/*.env.yml`.
+- A workflow declares an `environment:` value outside `{DEV, PROD,
+  production-promote}`.
+
+Archival docs are excluded via an explicit `ARCHIVAL_DOCS` set so the scan
+stays honest. See [REQ-020](reqs/20_docs_drift_guardrails.md).
+
+### Eval semantics by stage
+
+| Stage | Eval behavior | What "advisory" means |
+|-------|--------------|-----------------------|
+| PR to `dev` | Advisory (`continue-on-error: true` on dev base ref) | Threshold fail logs red but does not block merge. |
+| PR to `main` | Blocking on main base ref | Threshold fail blocks merge. |
+| `deploy-dev.yml` | Advisory | Alias `latest` updates regardless of eval score. |
+| `deploy-prod-validated.yml` | Advisory threshold; crash hard-fails | Alias `validated` already moved to the new version when the eval runs. The operator decides whether to promote. |
+| `promote-validated-to-production.yml` | Advisory threshold; crash hard-fails | Alias `production` has already flipped when the eval runs. If it regresses, trigger `rollback.yml` to reassign `production` back to a prior version. |
+
+Crash exit codes always hard-fail. Threshold-only failures are advisory
+because alias-based deploys are reversible: rolling back is one
+`ALTER AGENT` away. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full
+workflow contract.
+
+### Regressions and traceability
+
+Every fixed bug becomes a row in [`tests/regression.md`](tests/regression.md)
+with root cause, fix summary, and the test or workflow check that proves
+it stays fixed. Every meaningful change in this repo carries a `reqs/`
+file (REQ-NNN) so future contributors can read the original intent
+without spelunking through commits.
+
+REQ files added during the recent grooming pass:
+
+| REQ | Topic |
+|-----|-------|
+| [REQ-015](reqs/15_test_suite_alignment.md) | Restore local test suite after `get_aliases()` moved to `DESCRIBE AGENT` JSON |
+| [REQ-016](reqs/16_docs_alignment_validated_alias.md) | Two-environment validated-alias model in active docs |
+| [REQ-017](reqs/17_ci_workflow_contract.md) | CI workflow contract: paths filters and eval semantics |
+| [REQ-018](reqs/18_regression_log.md) | Permanent regression log (REG-001..007) |
+| [REQ-019](reqs/19_eval_classification_seams.md) | `classify_eval_outcome()` pure helper + sv_eval helper tests |
+| [REQ-020](reqs/20_docs_drift_guardrails.md) | Five drift guardrail tests in the default suite |
+| [REQ-021](reqs/21_eval_resilience_retry.md) | Agent eval STATUS_DETAILS visibility + retry-once on transients |
 
 ## Local Testing
 
