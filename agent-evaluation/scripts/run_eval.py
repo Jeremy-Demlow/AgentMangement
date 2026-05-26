@@ -435,7 +435,7 @@ def poll_until_done(cursor, run_name: str, stage: str, filename: str, poll_inter
                 details_raw = rows[0][col_names.index("STATUS_DETAILS")] or ""
             elif len(rows[0]) > 4:
                 details_raw = rows[0][4] or ""
-            last_details = str(details_raw)
+            last_details = _flatten_status_details(details_raw)
 
             print(f"  [{attempt:02d}] Status: {status_str}" + (
                 f"  ({last_details})" if last_details else ""
@@ -459,18 +459,57 @@ _RETRYABLE_DETAIL_PATTERNS = (
     "invocation failed",
     "service is currently unavailable",
     "internal error",
+    # LLM judge transient failures during COMPUTATION_IN_PROGRESS. The
+    # Cortex metric judge (used to score answer_correctness /
+    # logical_consistency) makes its own LLM calls; rate limits or timeouts
+    # surface as `Metric '<name>' failed` in STATUS_DETAILS even when the
+    # agent itself responded fine. Retrying once recovers most of these.
+    "metric ",
+    "timed out",
+    "timeout",
+    "rate limit",
 )
 
 
-def is_retryable_failure(status_details: str) -> bool:
+def _flatten_status_details(raw) -> str:
+    """Render STATUS_DETAILS as a single readable line.
+
+    Snowflake's `EXECUTE_AI_EVALUATION('STATUS', ...)` returns STATUS_DETAILS
+    as either a plain string ("Invocation failed") or a JSON-encoded array
+    (`'[\\n  "Metric \\'logical_consistency\\' failed"\\n]'`). The raw repr
+    is unreadable in CI logs because of embedded newlines and quoting.
+    Flatten arrays into ``"; "``-joined items so the per-poll log line and
+    the failure summary stay legible.
+
+    Pure function so the rendering and pattern-match surface is testable.
+    """
+    if raw is None or raw == "":
+        return ""
+    if isinstance(raw, (list, tuple)):
+        return "; ".join(str(x) for x in raw if x)
+    text = str(raw).strip()
+    if text.startswith("[") and text.endswith("]"):
+        try:
+            import json
+            parsed = json.loads(text)
+            if isinstance(parsed, list):
+                return "; ".join(str(x) for x in parsed if x)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return text
+
+
+def is_retryable_failure(status_details) -> bool:
     """True if the FAILED status_details looks like a transient platform flake.
 
     Pure function so it is unit-testable without spinning up a real eval.
     Returns False for empty/None details (no signal == do not retry).
+    Accepts string or list/tuple from the Snowflake driver.
     """
-    if not status_details:
+    flat = _flatten_status_details(status_details)
+    if not flat:
         return False
-    msg = status_details.lower()
+    msg = flat.lower()
     return any(pat in msg for pat in _RETRYABLE_DETAIL_PATTERNS)
 
 
