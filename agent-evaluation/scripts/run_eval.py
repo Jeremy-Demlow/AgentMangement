@@ -383,7 +383,19 @@ def show_results(cursor, config: dict, run_name: str, category: str = None):
     print(f"\nSnowsight: {url}")
 
 
-def poll_until_done(cursor, run_name: str, stage: str, filename: str, poll_interval: int = POLL_INTERVAL_SECONDS) -> str:
+def poll_until_done(cursor, run_name: str, stage: str, filename: str, poll_interval: int = POLL_INTERVAL_SECONDS) -> tuple[str, str]:
+    """Poll EXECUTE_AI_EVALUATION until it reaches a terminal status.
+
+    Returns ``(status, status_details)`` where ``status`` is one of:
+      - ``"COMPLETED"``                 -> eval finished successfully
+      - ``"FAILED: <terminal_token>"``  -> orchestrator gave up
+      - ``"TIMEOUT"``                   -> we ran out of poll attempts
+
+    ``status_details`` is the orchestrator's STATUS_DETAILS column (empty
+    string when absent). Surfacing it lets callers distinguish a transient
+    Cortex platform flake (``Invocation failed``) from a genuine eval engine
+    error so the caller can decide whether to retry.
+    """
     # Snowflake reports a sequence of statuses for Cortex Agent evals:
     #   CREATED -> INVOCATION_IN_PROGRESS -> INVOCATION_COMPLETED ->
     #   (metric computation, async) -> COMPLETED
@@ -399,6 +411,7 @@ def poll_until_done(cursor, run_name: str, stage: str, filename: str, poll_inter
         # bail fast on a genuine error instead of polling for 30 minutes.
         "INVOCATION_FAILED", "INVOCATION_ERROR",
     }
+    last_details = ""
     for attempt in range(1, MAX_POLL_ATTEMPTS + 1):
         cursor.execute(f"""
             CALL EXECUTE_AI_EVALUATION(
@@ -417,16 +430,99 @@ def poll_until_done(cursor, run_name: str, stage: str, filename: str, poll_inter
             else:
                 status_str = str(rows[0][0]).upper()
 
-            print(f"  [{attempt:02d}] Status: {status_str}")
+            details_raw = ""
+            if "STATUS_DETAILS" in col_names:
+                details_raw = rows[0][col_names.index("STATUS_DETAILS")] or ""
+            elif len(rows[0]) > 4:
+                details_raw = rows[0][4] or ""
+            last_details = _flatten_status_details(details_raw)
+
+            print(f"  [{attempt:02d}] Status: {status_str}" + (
+                f"  ({last_details})" if last_details else ""
+            ))
 
             if status_str in TERMINAL_OK:
-                return "COMPLETED"
+                return "COMPLETED", last_details
             if status_str in TERMINAL_FAIL:
-                return f"FAILED: {status_str}"
+                return f"FAILED: {status_str}", last_details
 
         time.sleep(poll_interval)
 
-    return "TIMEOUT"
+    return "TIMEOUT", last_details
+
+
+# Cortex platform-level transient signatures. When the orchestrator reports
+# FAILED with one of these in STATUS_DETAILS, retrying the run usually
+# succeeds; the failure is not in our spec or our questions. Mirrors the
+# `_PLATFORM_BLOCKER_PATTERNS` in agent_management/run_sv_eval.py.
+#
+# IMPORTANT: only retry signatures that happen BEFORE Cortex creates its
+# internal `SYSTEM_AI_OBS_CORTEX_AGENT_DATASET_VERSION_DO_NOT_DELETE` object
+# (i.e. during INVOCATION_IN_PROGRESS or earlier). Once that object exists,
+# `EXECUTE_AI_EVALUATION('START', ...)` rejects any retry with error 210007
+# (`Dataset version ... already exists`) until Cortex cleans it up. Failures
+# that happen during COMPUTATION_IN_PROGRESS (metric judge timeouts) hit
+# this constraint on retry and CANNOT be auto-recovered. They are intentionally
+# excluded so we surface the real signal instead of crashing on retry.
+_RETRYABLE_DETAIL_PATTERNS = (
+    "invocation failed",
+    "service is currently unavailable",
+    "internal error",
+    # Generic transients that can occur in either phase. Kept because some
+    # invocation-phase failures surface this way, and the START guard below
+    # turns the post-COMPUTATION variant into a clean message rather than
+    # a crash.
+    "timed out",
+    "timeout",
+    "rate limit",
+)
+
+# Cortex error code emitted when EXECUTE_AI_EVALUATION('START', ...) hits
+# the dataset-version uniqueness constraint after a previous failed run.
+# Treat as a hard "do not retry again" signal: surface the original failure.
+_DATASET_VERSION_LOCK_ERROR_CODE = "210007"
+
+
+def _flatten_status_details(raw) -> str:
+    """Render STATUS_DETAILS as a single readable line.
+
+    Snowflake's `EXECUTE_AI_EVALUATION('STATUS', ...)` returns STATUS_DETAILS
+    as either a plain string ("Invocation failed") or a JSON-encoded array
+    (`'[\\n  "Metric \\'logical_consistency\\' failed"\\n]'`). The raw repr
+    is unreadable in CI logs because of embedded newlines and quoting.
+    Flatten arrays into ``"; "``-joined items so the per-poll log line and
+    the failure summary stay legible.
+
+    Pure function so the rendering and pattern-match surface is testable.
+    """
+    if raw is None or raw == "":
+        return ""
+    if isinstance(raw, (list, tuple)):
+        return "; ".join(str(x) for x in raw if x)
+    text = str(raw).strip()
+    if text.startswith("[") and text.endswith("]"):
+        try:
+            import json
+            parsed = json.loads(text)
+            if isinstance(parsed, list):
+                return "; ".join(str(x) for x in parsed if x)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return text
+
+
+def is_retryable_failure(status_details) -> bool:
+    """True if the FAILED status_details looks like a transient platform flake.
+
+    Pure function so it is unit-testable without spinning up a real eval.
+    Returns False for empty/None details (no signal == do not retry).
+    Accepts string or list/tuple from the Snowflake driver.
+    """
+    flat = _flatten_status_details(status_details)
+    if not flat:
+        return False
+    msg = flat.lower()
+    return any(pat in msg for pat in _RETRYABLE_DETAIL_PATTERNS)
 
 
 def fetch_results(cursor, agent: dict, run_name: str,
@@ -795,10 +891,52 @@ def main():
             return
 
         print(f"\n6. Polling every {args.poll_interval}s (max {MAX_POLL_ATTEMPTS} attempts)...")
-        final_status = poll_until_done(cursor, run_name, stage, sf_yaml_filename, poll_interval=args.poll_interval)
+        final_status, status_details = poll_until_done(cursor, run_name, stage, sf_yaml_filename, poll_interval=args.poll_interval)
+
+        # Retry once on transient platform flakes (Invocation failed,
+        # service unavailable, internal error). Same retry policy used by
+        # agent_management/run_sv_eval.py and deploy-prod-validated.yml.
+        # A retry uses a fresh run_name so the orchestrator does not see a
+        # stale FAILED record on STATUS calls.
+        if "FAILED" in final_status and is_retryable_failure(status_details):
+            retry_run_name = f"{run_name}-r1"
+            retry_filename = sf_yaml_filename.replace(run_name, retry_run_name) \
+                if run_name in sf_yaml_filename else f"{retry_run_name}.yaml"
+            print(
+                f"\n  Eval reported transient platform flake "
+                f"(STATUS_DETAILS={status_details!r}); retrying once as {retry_run_name}..."
+            )
+            sf_yaml_retry = generate_snowflake_yaml(config, dataset_name)
+            try:
+                upload_yaml(cursor, sf_yaml_retry, stage, retry_filename)
+                start_eval(cursor, retry_run_name, stage, retry_filename)
+            except Exception as exc:  # noqa: BLE001 - guarded retry
+                # Cortex error 210007 means the original run created an
+                # internal dataset version object that has not been cleaned
+                # up. The platform refuses to start a retry until it does.
+                # Surface the original failure cleanly instead of crashing.
+                msg = str(exc)
+                if _DATASET_VERSION_LOCK_ERROR_CODE in msg or \
+                        "DATASET_VERSION_DO_NOT_DELETE" in msg:
+                    print(
+                        f"\n  Retry blocked by Cortex internal dataset lock "
+                        f"(error {_DATASET_VERSION_LOCK_ERROR_CODE}). "
+                        f"Treating original failure as final."
+                    )
+                    # final_status already set from the first poll; skip retry poll.
+                else:
+                    print(f"\n  Retry start failed: {exc}")
+                    raise
+            else:
+                final_status, status_details = poll_until_done(cursor, retry_run_name, stage, retry_filename, poll_interval=args.poll_interval)
+                if "FAILED" not in final_status and "TIMEOUT" not in final_status:
+                    run_name = retry_run_name
+                    sf_yaml_filename = retry_filename
 
         if "FAILED" in final_status or "TIMEOUT" in final_status:
             print(f"\n  Evaluation did not complete: {final_status}")
+            if status_details:
+                print(f"  STATUS_DETAILS: {status_details}")
             errors = fetch_errors(cursor, agent, run_name)
             if errors:
                 print(f"\n  Errors/warnings ({len(errors)}):")
