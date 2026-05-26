@@ -455,20 +455,32 @@ def poll_until_done(cursor, run_name: str, stage: str, filename: str, poll_inter
 # FAILED with one of these in STATUS_DETAILS, retrying the run usually
 # succeeds; the failure is not in our spec or our questions. Mirrors the
 # `_PLATFORM_BLOCKER_PATTERNS` in agent_management/run_sv_eval.py.
+#
+# IMPORTANT: only retry signatures that happen BEFORE Cortex creates its
+# internal `SYSTEM_AI_OBS_CORTEX_AGENT_DATASET_VERSION_DO_NOT_DELETE` object
+# (i.e. during INVOCATION_IN_PROGRESS or earlier). Once that object exists,
+# `EXECUTE_AI_EVALUATION('START', ...)` rejects any retry with error 210007
+# (`Dataset version ... already exists`) until Cortex cleans it up. Failures
+# that happen during COMPUTATION_IN_PROGRESS (metric judge timeouts) hit
+# this constraint on retry and CANNOT be auto-recovered. They are intentionally
+# excluded so we surface the real signal instead of crashing on retry.
 _RETRYABLE_DETAIL_PATTERNS = (
     "invocation failed",
     "service is currently unavailable",
     "internal error",
-    # LLM judge transient failures during COMPUTATION_IN_PROGRESS. The
-    # Cortex metric judge (used to score answer_correctness /
-    # logical_consistency) makes its own LLM calls; rate limits or timeouts
-    # surface as `Metric '<name>' failed` in STATUS_DETAILS even when the
-    # agent itself responded fine. Retrying once recovers most of these.
-    "metric ",
+    # Generic transients that can occur in either phase. Kept because some
+    # invocation-phase failures surface this way, and the START guard below
+    # turns the post-COMPUTATION variant into a clean message rather than
+    # a crash.
     "timed out",
     "timeout",
     "rate limit",
 )
+
+# Cortex error code emitted when EXECUTE_AI_EVALUATION('START', ...) hits
+# the dataset-version uniqueness constraint after a previous failed run.
+# Treat as a hard "do not retry again" signal: surface the original failure.
+_DATASET_VERSION_LOCK_ERROR_CODE = "210007"
 
 
 def _flatten_status_details(raw) -> str:
@@ -895,12 +907,31 @@ def main():
                 f"(STATUS_DETAILS={status_details!r}); retrying once as {retry_run_name}..."
             )
             sf_yaml_retry = generate_snowflake_yaml(config, dataset_name)
-            upload_yaml(cursor, sf_yaml_retry, stage, retry_filename)
-            start_eval(cursor, retry_run_name, stage, retry_filename)
-            final_status, status_details = poll_until_done(cursor, retry_run_name, stage, retry_filename, poll_interval=args.poll_interval)
-            if "FAILED" not in final_status and "TIMEOUT" not in final_status:
-                run_name = retry_run_name
-                sf_yaml_filename = retry_filename
+            try:
+                upload_yaml(cursor, sf_yaml_retry, stage, retry_filename)
+                start_eval(cursor, retry_run_name, stage, retry_filename)
+            except Exception as exc:  # noqa: BLE001 - guarded retry
+                # Cortex error 210007 means the original run created an
+                # internal dataset version object that has not been cleaned
+                # up. The platform refuses to start a retry until it does.
+                # Surface the original failure cleanly instead of crashing.
+                msg = str(exc)
+                if _DATASET_VERSION_LOCK_ERROR_CODE in msg or \
+                        "DATASET_VERSION_DO_NOT_DELETE" in msg:
+                    print(
+                        f"\n  Retry blocked by Cortex internal dataset lock "
+                        f"(error {_DATASET_VERSION_LOCK_ERROR_CODE}). "
+                        f"Treating original failure as final."
+                    )
+                    # final_status already set from the first poll; skip retry poll.
+                else:
+                    print(f"\n  Retry start failed: {exc}")
+                    raise
+            else:
+                final_status, status_details = poll_until_done(cursor, retry_run_name, stage, retry_filename, poll_interval=args.poll_interval)
+                if "FAILED" not in final_status and "TIMEOUT" not in final_status:
+                    run_name = retry_run_name
+                    sf_yaml_filename = retry_filename
 
         if "FAILED" in final_status or "TIMEOUT" in final_status:
             print(f"\n  Evaluation did not complete: {final_status}")

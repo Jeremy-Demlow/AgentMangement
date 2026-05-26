@@ -637,8 +637,8 @@ about before adapting it to a new domain.
 ### Eval resilience: STATUS_DETAILS visibility and retry-once on transients
 
 The Cortex agent eval orchestrator occasionally fails with transient errors
-(`Invocation failed`, metric-judge timeouts, rate limits). Without retry, a
-single transient kills a whole CI run.
+(`Invocation failed`, service unavailable, internal error, timeout, rate
+limit). Without retry, a single transient kills a whole CI run.
 
 `agent-evaluation/scripts/run_eval.py` now:
 
@@ -647,12 +647,23 @@ single transient kills a whole CI run.
   `Evaluation did not complete: FAILED: FAILED`. You now see, e.g.
   `[07] Status: FAILED  (Metric 'logical_consistency' failed)`.
 - Auto-retries the eval ONCE under a fresh `<run_name>-r1` when
-  `STATUS_DETAILS` matches a known transient pattern (Invocation failed,
-  service unavailable, internal error, metric judge failed, timeout, rate
-  limit). Genuine spec/authoring errors do NOT auto-retry.
+  `STATUS_DETAILS` matches a known **invocation-phase** transient
+  (Invocation failed, service unavailable, internal error, timeout, rate
+  limit).
 - Treats `STATUS_DETAILS` returned as a JSON-encoded array (the shape Cortex
-  uses for metric-judge failures) the same as a plain string for both
-  display and pattern matching.
+  uses for multi-error cases) the same as a plain string for both display
+  and pattern matching.
+- Catches Cortex error 210007 (`Dataset version ... already exists`) on
+  retry start and surfaces a clean message instead of a Python traceback.
+
+**What is intentionally NOT retried:** metric-judge failures (e.g.
+`Metric 'logical_consistency' failed`) happen during `COMPUTATION_IN_PROGRESS`,
+after Cortex has created its internal
+`SYSTEM_AI_OBS_CORTEX_AGENT_DATASET_VERSION_DO_NOT_DELETE` object. A retry
+would crash with error 210007 because the dataset version cannot be reused.
+We surface the original failure honestly instead. If a metric judge failure
+needs investigation, the operator can re-run the agent eval manually after
+Cortex cleans up its internal state (typically a few minutes).
 
 The retry policy mirrors the existing patterns in
 `agent_management/run_sv_eval.py` (per-VQR `Invocation failed` retry) and

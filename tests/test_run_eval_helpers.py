@@ -36,17 +36,20 @@ def test_internal_error_is_retryable():
     assert run_eval.is_retryable_failure("Cortex internal error 500") is True
 
 
-def test_metric_judge_failure_is_retryable():
-    """LLM judge transient failures during COMPUTATION_IN_PROGRESS are
-    typically Cortex rate-limits / timeouts on the judge's own LLM calls.
-    Retry once.
+def test_metric_judge_failure_is_NOT_retryable():
+    """Metric judge failures happen during COMPUTATION_IN_PROGRESS, by which
+    time Cortex has already created its internal
+    SYSTEM_AI_OBS_CORTEX_AGENT_DATASET_VERSION_DO_NOT_DELETE object. A retry
+    would crash at EXECUTE_AI_EVALUATION('START', ...) with error 210007
+    (`Dataset version ... already exists`). So we explicitly do NOT auto-retry
+    these and instead surface the real signal.
     """
     assert run_eval.is_retryable_failure(
         "Metric 'logical_consistency' failed"
-    ) is True
+    ) is False
     assert run_eval.is_retryable_failure(
-        "Metric 'answer_correctness' failed: timeout"
-    ) is True
+        "Metric 'answer_correctness' failed; Metric 'logical_consistency' failed"
+    ) is False
 
 
 def test_timeout_is_retryable():
@@ -71,16 +74,26 @@ def test_empty_details_is_not_retryable():
 
 def test_retryable_handles_json_array_status_details():
     """Snowflake returns STATUS_DETAILS as a JSON-encoded array string for
-    metric-judge failures. is_retryable_failure must transparently parse it.
+    multi-error cases. is_retryable_failure must transparently parse it.
+    Use a still-retryable signature to assert array parsing works.
     """
-    raw = '[\n  "Metric \'logical_consistency\' failed"\n]'
+    raw = '[\n  "Invocation failed"\n]'
     assert run_eval.is_retryable_failure(raw) is True
 
 
 def test_retryable_handles_python_list_status_details():
     """Some driver paths return STATUS_DETAILS already deserialized."""
-    raw = ["Metric 'logical_consistency' failed"]
+    raw = ["Invocation failed", "service is currently unavailable"]
     assert run_eval.is_retryable_failure(raw) is True
+
+
+def test_array_metric_judge_failure_remains_not_retryable():
+    """Even when metric-judge errors arrive as a JSON array, they must not
+    auto-retry. Locks the contract that array shape never accidentally flips
+    a non-retryable signature into retryable.
+    """
+    raw = '[\n  "Metric \'logical_consistency\' failed"\n]'
+    assert run_eval.is_retryable_failure(raw) is False
 
 
 def test_flatten_status_details_string_passthrough():

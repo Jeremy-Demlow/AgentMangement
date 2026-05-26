@@ -34,6 +34,14 @@ The DEV warehouse is already multi-cluster (1-5, STANDARD) per DCM, and Snowflak
 - Bumping warehouse size or cluster counts. DCM already configures multi-cluster (1-5) for both DEV and PROD; the live warehouses match. Investigation showed contention was not the cause.
 - Adding retry on TIMEOUT. Timeouts indicate genuine eval engine stuckness, not transient flake; retrying would just timeout again.
 - Changing `run_ci_eval.py`'s parallelism. With multi-cluster warehouse and per-run retry, parallel eval starts are safe to keep at the default `max_parallel=10`.
+- Auto-retrying metric-judge failures (`Metric '...' failed`). They surface during `COMPUTATION_IN_PROGRESS`, after Cortex has created its internal `SYSTEM_AI_OBS_CORTEX_AGENT_DATASET_VERSION_DO_NOT_DELETE` object. A retry would crash with Cortex error 210007 (`Dataset version ... already exists`). Operator must re-run manually after Cortex cleans up.
+
+## Lessons from production validation
+
+The first version of this REQ (commit ff2c054) added retry for any transient signature including metric-judge failures. CI run 26475295730 surfaced two corrections:
+
+1. `STATUS_DETAILS` arrives as a JSON-encoded array (`'[\n  "Metric \\'logical_consistency\\' failed"\n]'`) for multi-error cases. Added `_flatten_status_details()` so display and pattern matching share the same parsed form (commit a37a46a).
+2. Retry on metric-judge failures crashes with Cortex error 210007 because the dataset-version object is locked. Removed `metric ` from `_RETRYABLE_DETAIL_PATTERNS` and added a graceful catch for 210007 in the retry block. Tests updated to lock the new contract: metric-judge failures stay non-retryable, but array-shaped retryable signatures still parse correctly.
 
 ## Verification
 
