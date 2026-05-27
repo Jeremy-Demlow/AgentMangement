@@ -1,0 +1,71 @@
+project:
+  name: my-agent-project
+  version: "0.1.0"
+  description: "Cortex Agent project config"
+
+defaults:
+  snowflake:
+    account: YOUR_ACCOUNT
+  schemas:
+    raw: RAW
+    staging: STAGING
+    marts: MARTS
+    semantic: SEMANTIC
+    agents: AGENTS
+  model:
+    orchestration: claude-sonnet-4-5
+  orchestration:
+    budget:
+      seconds: 300
+      tokens: 50000
+
+deployment:
+  mode: single_account
+  data_source: prod
+
+environments:
+  dev:
+    database: MY_APP_DEV
+    role: MY_APP_DEPLOY_ROLE_DEV
+    warehouse: MY_APP_WH_DEV
+    semantic_schema: SEMANTIC
+    agents_schema: AGENTS
+    name_suffix: _DEV
+  prod:
+    database: MY_APP
+    role: MY_APP_DEPLOY_ROLE
+    warehouse: MY_APP_WH
+    semantic_schema: SEMANTIC
+    agents_schema: AGENTS
+    name_suffix: ""
+
+agent_versioning:
+  keep_last_n_versions: 10
+  aliases:
+    dev: [latest]
+    prod: [validated, production]
+
+agents:
+  my_agent:
+    semantic_views:
+      - SEM_MY_DOMAIN
+
+eval:
+  source_schemas:
+    marts: MARTS
+    agents: AGENTS
+  stage: eval_config_stage
+  file_format: yaml_file_format
+  sv_eval:
+    stage: sv_eval_stage
+    file_format: yaml_file_format
+    default_scope: all
+
+raw_tables: []
+
+semantic_views:
+  source: dbt
+
+dbt:
+  project_dir: dbt_project
+  profile: dbt_project
