@@ -10,6 +10,7 @@ Implements REQ-010: Library Configuration.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -44,20 +45,49 @@ def _validate(config: dict) -> None:
         )
 
 
-def load_project_config() -> dict:
-    path = project_config_path()
-    if not path.exists():
+def load_project_config(path: str | os.PathLike | None = None) -> dict:
+    """Load project-level config.
+
+    Resolution order:
+      1. explicit ``path`` argument
+      2. ``AGENT_MGMT_PROJECT_CONFIG`` env var (handled by ``project_config_path``)
+      3. repo-root ``project.yml`` discovery (legacy compatibility)
+
+    The explicit path keeps the package usable after ``pip install`` without
+    requiring callers to run from this reference repository.
+    """
+    cfg_path = Path(path).expanduser().resolve() if path else project_config_path()
+    if not cfg_path.exists():
         return {}
-    with open(path) as f:
+    with open(cfg_path) as f:
         return yaml.safe_load(f) or {}
 
 
-def load_env_config(env: str | None = None) -> dict:
-    env = env or os.environ.get("SNOWFLAKE_ENV", "dev")
-    path = environments_dir() / f"{env}.env.yml"
-    if not path.exists():
-        raise FileNotFoundError(f"Environment config not found: {path}")
-    with open(path) as f:
+def load_env_config(
+    env: str | None = None,
+    path: str | os.PathLike | None = None,
+) -> dict:
+    """Load an environment config.
+
+    Resolution order:
+      1. explicit ``path`` argument
+      2. ``AGENT_MGMT_ENV_CONFIG`` env var
+      3. ``environments/<env>.env.yml`` under ``AGENT_MGMT_ENVIRONMENTS_DIR``
+         or the discovered project root
+
+    ``env`` is only used for step 3. If an explicit path is supplied, the file's
+    own ``environment`` field is authoritative.
+    """
+    if path:
+        cfg_path = Path(path).expanduser().resolve()
+    elif os.environ.get("AGENT_MGMT_ENV_CONFIG"):
+        cfg_path = Path(os.environ["AGENT_MGMT_ENV_CONFIG"]).expanduser().resolve()
+    else:
+        env = env or os.environ.get("SNOWFLAKE_ENV", "dev")
+        cfg_path = environments_dir() / f"{env}.env.yml"
+    if not cfg_path.exists():
+        raise FileNotFoundError(f"Environment config not found: {cfg_path}")
+    with open(cfg_path) as f:
         config = yaml.safe_load(f)
     _validate(config)
     return config
