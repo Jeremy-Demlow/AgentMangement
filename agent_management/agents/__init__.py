@@ -1,16 +1,11 @@
-"""Agent lifecycle APIs.
-
-This package is the public home for Cortex Agent operations. Modules here are
-thin compatibility facades over the original implementation while the library is
-being simplified.
-"""
+"""Public Cortex Agent lifecycle APIs."""
 from __future__ import annotations
 
-from agent_management.deploy_agents import build_spec, deploy_agent, resolve_agent_identity
-from agent_management.rollback import rollback_agent
-from agent_management.smoke_test import run_smoke_test
-from agent_management.snapshot_agent import diff_snapshots, load_snapshot, snapshot_agent
-from agent_management.versioning import (
+from agent_management.agents.deploy import build_spec, deploy_agent, resolve_agent_identity
+from agent_management.agents.rollback import rollback_agent
+from agent_management.agents.smoke import run_smoke_test
+from agent_management.agents.snapshot import diff_snapshots, load_snapshot, snapshot_agent
+from agent_management.agents.versioning import (
     add_live_from_last,
     commit_live,
     commit_version,

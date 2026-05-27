@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-from agent_management.detect_sv_drift import (
+from agent_management.semantic_views.drift import (
     _find_source,
     list_sv_models,
     parse_dbt_sv,
@@ -102,7 +102,7 @@ def test_yaml_source_parser(tmp_path: Path):
     yaml_file.write_text(SV_YAML_SHAPE)
     # parse_source_yaml Jinja-renders via render_file; patch to return raw content.
     with patch(
-        "agent_management.detect_sv_drift.render_file",
+        "agent_management.semantic_views.drift.render_file",
         return_value=SV_YAML_SHAPE,
     ):
         parsed = parse_source_yaml(yaml_file, config={})
@@ -121,9 +121,9 @@ def test_find_source_prefers_dbt(tmp_path: Path, monkeypatch):
     (dbt_dir / "sem_both.sql").write_text("-- dbt")
     (yaml_dir / "sem_both.yaml").write_text("name: sem_both")
 
-    monkeypatch.setattr("agent_management.detect_sv_drift.SV_MODEL_DIR", dbt_dir)
+    monkeypatch.setattr("agent_management.semantic_views.drift.SV_MODEL_DIR", dbt_dir)
     monkeypatch.setattr(
-        "agent_management.detect_sv_drift.sv_definitions_dir",
+        "agent_management.semantic_views.drift.sv_definitions_dir",
         lambda: yaml_dir,
     )
 
@@ -139,9 +139,9 @@ def test_find_source_falls_back_to_yaml_when_no_dbt(tmp_path: Path, monkeypatch)
     yaml_dir.mkdir(parents=True)
     (yaml_dir / "sem_only_yaml.yaml").write_text("name: sem_only_yaml")
 
-    monkeypatch.setattr("agent_management.detect_sv_drift.SV_MODEL_DIR", dbt_dir)
+    monkeypatch.setattr("agent_management.semantic_views.drift.SV_MODEL_DIR", dbt_dir)
     monkeypatch.setattr(
-        "agent_management.detect_sv_drift.sv_definitions_dir",
+        "agent_management.semantic_views.drift.sv_definitions_dir",
         lambda: yaml_dir,
     )
 
@@ -152,11 +152,11 @@ def test_find_source_falls_back_to_yaml_when_no_dbt(tmp_path: Path, monkeypatch)
 
 def test_find_source_neither_returns_none(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(
-        "agent_management.detect_sv_drift.SV_MODEL_DIR",
+        "agent_management.semantic_views.drift.SV_MODEL_DIR",
         tmp_path / "no_dbt",
     )
     monkeypatch.setattr(
-        "agent_management.detect_sv_drift.sv_definitions_dir",
+        "agent_management.semantic_views.drift.sv_definitions_dir",
         lambda: tmp_path / "no_yaml",
     )
     kind, path = _find_source("sem_missing", source="auto")
@@ -172,9 +172,9 @@ def test_list_sv_models_yaml_only(tmp_path: Path, monkeypatch):
     (yaml_dir / "sem_b.yml").write_text("")
     (yaml_dir / "not_an_sv.yaml").write_text("")
 
-    monkeypatch.setattr("agent_management.detect_sv_drift.SV_MODEL_DIR", dbt_dir)
+    monkeypatch.setattr("agent_management.semantic_views.drift.SV_MODEL_DIR", dbt_dir)
     monkeypatch.setattr(
-        "agent_management.detect_sv_drift.sv_definitions_dir",
+        "agent_management.semantic_views.drift.sv_definitions_dir",
         lambda: yaml_dir,
     )
     assert list_sv_models(source="yaml") == ["sem_a", "sem_b"]

@@ -1,10 +1,10 @@
-"""Unit tests for agent_management.smoke_test."""
+"""Unit tests for agent_management.agents.smoke."""
 from __future__ import annotations
 
 import json
 from unittest.mock import MagicMock
 
-from agent_management import smoke_test as st
+from agent_management.agents import smoke as st
 
 
 def test_build_url_with_alias():

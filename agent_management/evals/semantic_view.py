@@ -5,8 +5,8 @@ they are intentionally separate from Cortex Agent evals.
 """
 from __future__ import annotations
 
-from agent_management.get_sv_eval_scores import fetch_eval_data_with_fallback, is_platform_error, score_results
-from agent_management.run_sv_eval import (
+from agent_management.evals.sv_scores import fetch_eval_data_with_fallback, is_platform_error, score_results
+from agent_management.evals.sv_runner import (
     compute_score,
     generate_eval_yaml,
     is_platform_blocker,

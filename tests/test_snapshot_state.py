@@ -1,12 +1,12 @@
-"""Unit tests for agent_management.snapshot_state (pointer-only)."""
+"""Unit tests for agent_management.agents.snapshot_state (pointer-only)."""
 from __future__ import annotations
 
 import json
 from pathlib import Path
 from unittest.mock import patch
 
-from agent_management import snapshot_state as ss
-from agent_management import versioning
+from agent_management.agents import snapshot_state as ss
+from agent_management.agents import versioning
 
 
 class FakeConn:

@@ -6,7 +6,7 @@ stable import path while the scripts are thinned into wrappers.
 """
 from __future__ import annotations
 
-from agent_management.run_ci_eval import (
+from agent_management.evals.agent_runner import (
     build_cmd,
     classify_eval_outcome,
     extract_run_name,

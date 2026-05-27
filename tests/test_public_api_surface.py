@@ -44,9 +44,13 @@ def test_semantic_view_public_surface_imports():
     assert callable(sync)
 
 
-def test_eval_console_scripts_are_distinct():
+def test_console_scripts_point_at_domain_packages():
     pyproject = tomllib.loads(Path("pyproject.toml").read_text())
     scripts = pyproject["project"]["scripts"]
 
+    assert scripts["agent-mgmt-deploy-agents"] == "agent_management.agents.deploy:main"
+    assert scripts["agent-mgmt-deploy-svs"] == "agent_management.semantic_views.deploy:main"
+    assert scripts["agent-mgmt-snapshot"] == "agent_management.agents.snapshot_state:main"
+    assert scripts["agent-mgmt-rollback"] == "agent_management.agents.rollback:main"
     assert scripts["agent-mgmt-eval-agent"] == "agent_management.evals.agent:main"
     assert scripts["agent-mgmt-eval-sv"] == "agent_management.evals.semantic_view:main"
