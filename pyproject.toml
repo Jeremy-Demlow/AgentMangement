@@ -4,7 +4,7 @@ version = "0.6.0"
 description = "CI/CD reference framework for Snowflake Cortex Agents, Semantic Views, and dbt"
 readme = "README.md"
 requires-python = ">=3.11"
-license = {text = "Apache-2.0"}
+license = "Apache-2.0"
 dependencies = [
     "snowflake-connector-python>=3.6.0",
     "pyyaml>=6.0",
