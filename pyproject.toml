@@ -30,6 +30,8 @@ agent-mgmt-metrics = "agent_management.compute_metrics:main"
 agent-mgmt-render-eval = "agent_management.render_eval_templates:main"
 agent-mgmt-detect-drift = "agent_management.detect_drift:main"
 agent-mgmt-check-sv-eval = "agent_management.check_sv_eval:main"
+agent-mgmt-eval-agent = "agent_management.evals.agent:main"
+agent-mgmt-eval-sv = "agent_management.evals.semantic_view:main"
 
 [build-system]
 requires = ["setuptools>=68.0"]

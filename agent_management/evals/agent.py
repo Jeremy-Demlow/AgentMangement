@@ -11,6 +11,7 @@ from agent_management.run_ci_eval import (
     classify_eval_outcome,
     extract_run_name,
     find_eval_configs,
+    main,
     prepare_agent,
     run_single_eval,
 )
@@ -20,6 +21,7 @@ __all__ = [
     "classify_eval_outcome",
     "extract_run_name",
     "find_eval_configs",
+    "main",
     "prepare_agent",
     "run_single_eval",
 ]
