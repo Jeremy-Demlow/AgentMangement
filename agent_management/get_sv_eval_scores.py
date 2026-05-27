@@ -59,9 +59,8 @@ logger = logging.getLogger(__name__)
 # Cortex Analyst platform error signatures. Each entry is a substring or
 # Snowflake error code that, when present in a VQR's ERROR text, indicates
 # a Snowflake-side platform issue rather than a content regression.
-# Add to this list as new platform issues are observed in the wild and
-# document them in docs/operations/IAC_GAPS.md so we can revisit when the
-# platform fix lands.
+# Add to this list as new platform issues are observed in the wild so we can
+# revisit when the platform fix lands.
 PLATFORM_ERROR_SIGNATURES: tuple[str, ...] = (
     "invocation failed",   # Cortex Analyst flake -- VQR submission stage
     "392700",              # Cortex Analyst engine error -- diagnosed direct

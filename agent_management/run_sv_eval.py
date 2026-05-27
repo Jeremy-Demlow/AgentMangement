@@ -72,8 +72,7 @@ EXIT_PLATFORM_BLOCKED = 3
 # spec. Detecting these lets CI classify the failure instead of dumping the
 # raw stack and confusing operators.
 _PLATFORM_BLOCKER_PATTERNS = (
-    # The Cortex Analyst Evaluations PuPr optimization-object bug. See
-    # docs/operations/IAC_GAPS.md #8.
+    # The Cortex Analyst Evaluations PuPr optimization-object bug.
     "semantic view optimization",
     "system_ai_obs_analyst_eval",
     # Also seen on platform outages / maintenance windows.
@@ -736,8 +735,8 @@ def main():
                     "SV EVAL GATE: PLATFORM BLOCKED for all %d view(s). "
                     "Snowflake Cortex Analyst Evaluations PuPr bug — the "
                     "SYSTEM_AI_OBS_ANALYST_EVAL_* optimization object is "
-                    "missing / not queryable. See docs/operations/IAC_GAPS.md #8. "
-                    "Advisory: pipeline will continue.",
+                    "missing / not queryable. This is a known Cortex Analyst "
+                    "evaluation platform blocker. Advisory: pipeline will continue.",
                     len(sv_names),
                 )
                 sys.exit(EXIT_PLATFORM_BLOCKED)

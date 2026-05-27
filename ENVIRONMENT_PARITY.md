@@ -41,7 +41,8 @@ Committed `VERSION$N` on the agent object in Snowflake is the ground truth for
 what spec is serving traffic. The spec YAML in `agents/specs/` is the *input*
 to deploys; after a deploy, the rendered spec lives in `VERSION$N` forever.
 
-See [docs/operations/AGENT_VERSIONING.md](docs/operations/AGENT_VERSIONING.md).
+The deploy path uses Cortex Agent Versioning only; live drafts are committed
+and aliases are reassigned, not overwritten with `CREATE OR REPLACE`.
 
 ## PR Validation Gates
 

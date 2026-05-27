@@ -19,12 +19,8 @@ There is no QA environment. The "pre-production eval" that QA used to serve now
 runs against the `validated` alias on the PROD agent. Customer traffic follows
 the `production` alias, which only moves after a human approval.
 
-See:
-
-- [docs/operations/AGENT_VERSIONING.md](docs/operations/AGENT_VERSIONING.md)
-- [docs/operations/ROLLBACK_RUNBOOK.md](docs/operations/ROLLBACK_RUNBOOK.md)
-- [docs/semantic-views/VQR_GUIDE.md](docs/semantic-views/VQR_GUIDE.md)
-- [reqs/README.md](reqs/README.md)
+Operational runbooks and REQ notes are maintained as local reference assets;
+the public repository keeps the executable framework, examples, and tests.
 
 ## Agent spec style guide
 

@@ -13,7 +13,7 @@ COMMENT = 'Read-only: SELECT on all schemas (includes future objects)';
 -- NOTE: The template variable is named {{wh_role}} for historical reasons but
 -- the actual role name follows the pattern AM_SKI_RESORT_WH_USER[_<env>]. Do
 -- not rename without coordinating with manifest.yml and all target configs.
--- See docs/operations/IAC_GAPS.md #5.
+-- Optional future hardening: split OWNER-style DDL from deployer operations
 DEFINE ROLE {{wh_role}}
 COMMENT = 'Warehouse USAGE for {{wh_name}}';
 
@@ -33,7 +33,7 @@ GRANT USAGE ON DATABASE {{db}} TO DATABASE ROLE {{db}}.ANALYST;
 -- Without EVERY one of these, EXECUTE_AI_EVALUATION on a semantic view
 -- fails with "Semantic View Optimization SYSTEM_AI_OBS_ANALYST_EVAL_<sv>
 -- does not exist or not authorized" because the companion optimization
--- object can't be provisioned. See docs/operations/IAC_GAPS.md #8.
+-- object can't be provisioned by current Snowflake platform behavior.
 --
 -- Required per the doc:
 --   1. CORTEX_USER database role

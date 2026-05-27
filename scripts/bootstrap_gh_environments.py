@@ -1,6 +1,6 @@
-"""Bootstrap or reconcile GitHub Environments from the snapshot file.
+"""Bootstrap or reconcile GitHub Environments from a snapshot file.
 
-Reads docs/operations/gh-environments-snapshot.json and:
+Reads examples/github-environments-snapshot.json by default and:
   - Creates the environment if it doesn't exist
   - Sets required reviewers per snapshot
   - Sets environment variables per snapshot
@@ -29,7 +29,7 @@ import sys
 from pathlib import Path
 
 
-SNAPSHOT_PATH = Path(__file__).resolve().parent.parent / "docs" / "operations" / "gh-environments-snapshot.json"
+SNAPSHOT_PATH = Path(__file__).resolve().parent.parent / "examples" / "github-environments-snapshot.json"
 
 
 def gh(*args, check=True, capture=True):

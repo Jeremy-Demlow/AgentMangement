@@ -381,7 +381,7 @@ jobs:
             platform_blocked)
               echo "### SV Evaluation Gate: PLATFORM BLOCKED" >> "$GITHUB_STEP_SUMMARY"
               echo "Snowflake Cortex Analyst Evaluations PuPr issue (SYSTEM_AI_OBS_ANALYST_EVAL_* missing)." >> "$GITHUB_STEP_SUMMARY"
-              echo "Pipeline continuing. See docs/operations/IAC_GAPS.md #8." >> "$GITHUB_STEP_SUMMARY"
+              echo "Pipeline continuing. This is a known Cortex Analyst evaluation platform blocker." >> "$GITHUB_STEP_SUMMARY"
               ;;
             crash|unknown|*)
               echo "### SV Evaluation Gate: CRASHED (code=${{ steps.sv_eval.outputs.code }})" >> "$GITHUB_STEP_SUMMARY"

@@ -20,8 +20,8 @@ def setup_logging(verbosity: int = 0) -> None:
 
 
 def __getattr__(name: str):
-    # Lazy re-exports so importing the package stays cheap while giving users
-    # the public API surface described in reqs/01_library_boundaries.md.
+    # Lazy re-exports keep package import cheap while preserving the historical
+    # top-level API surface.
     _lazy = {
         "run_smoke_test": ("agent_management.smoke_test", "run_smoke_test"),
         "snapshot_agent": ("agent_management.snapshot_agent", "snapshot_agent"),

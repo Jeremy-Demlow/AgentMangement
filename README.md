@@ -356,10 +356,8 @@ AgentMangement/
 │
 ├── .github/PIPELINE_SETUP.md        # CI/CD pipeline setup guide
 │
-├── tests/                           # Python tests (smoke + template rendering)
-├── docs/                            # Architecture, data dictionary, dev notes
-├── requirements/                    # Traceable requirements (REQ-001..013)
-└── models/                          # Data model documentation
+├── examples/                        # Public starter project + env config templates
+└── tests/                           # Python tests (smoke + template rendering)
 ```
 
 ## Deployment Mode
@@ -667,8 +665,7 @@ Cortex cleans up its internal state (typically a few minutes).
 
 The retry policy mirrors the existing patterns in
 `agent_management/run_sv_eval.py` (per-VQR `Invocation failed` retry) and
-`.github/workflows/deploy-prod-validated.yml` (whole-run crash retry). See
-[REQ-021](reqs/21_eval_resilience_retry.md) for the diagnostic write-up.
+`.github/workflows/deploy-prod-validated.yml` (whole-run crash retry).
 
 ### Schema drift auto-heal in workflows
 
@@ -717,7 +714,7 @@ selectorless REST calls fail with `Version 'live' not found`. See
 [REG-006](tests/regression.md).
 
 Rollback is a single DDL: `ALTER AGENT <fqn> MODIFY VERSION <prev> SET
-ALIAS = production`. See [`docs/operations/ROLLBACK_RUNBOOK.md`](docs/operations/ROLLBACK_RUNBOOK.md).
+ALIAS = production`.
 
 ### Drift guardrails
 
@@ -734,7 +731,7 @@ fails when:
   production-promote}`.
 
 Archival docs are excluded via an explicit `ARCHIVAL_DOCS` set so the scan
-stays honest. See [REQ-020](reqs/20_docs_drift_guardrails.md).
+stays honest.
 
 ### Eval semantics by stage
 
@@ -755,21 +752,7 @@ workflow contract.
 
 Every fixed bug becomes a row in [`tests/regression.md`](tests/regression.md)
 with root cause, fix summary, and the test or workflow check that proves
-it stays fixed. Every meaningful change in this repo carries a `reqs/`
-file (REQ-NNN) so future contributors can read the original intent
-without spelunking through commits.
-
-REQ files added during the recent grooming pass:
-
-| REQ | Topic |
-|-----|-------|
-| [REQ-015](reqs/15_test_suite_alignment.md) | Restore local test suite after `get_aliases()` moved to `DESCRIBE AGENT` JSON |
-| [REQ-016](reqs/16_docs_alignment_validated_alias.md) | Two-environment validated-alias model in active docs |
-| [REQ-017](reqs/17_ci_workflow_contract.md) | CI workflow contract: paths filters and eval semantics |
-| [REQ-018](reqs/18_regression_log.md) | Permanent regression log (REG-001..007) |
-| [REQ-019](reqs/19_eval_classification_seams.md) | `classify_eval_outcome()` pure helper + sv_eval helper tests |
-| [REQ-020](reqs/20_docs_drift_guardrails.md) | Five drift guardrail tests in the default suite |
-| [REQ-021](reqs/21_eval_resilience_retry.md) | Agent eval STATUS_DETAILS visibility + retry-once on transients |
+it stays fixed.
 
 ## Local Testing
 
