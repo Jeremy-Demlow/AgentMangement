@@ -56,7 +56,7 @@ Each env file has these sections:
 4. Validate:
 
    ```bash
-   python -m agent_management.validate_specs --env sandbox
+   agent-mgmt-validate --env sandbox
    ```
 
 5. Add the environment to `project.yml` under `environments:` so it's documented centrally.

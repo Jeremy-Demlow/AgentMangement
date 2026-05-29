@@ -33,8 +33,8 @@ Function reference:
     GET_ANALYST_AI_EVALUATION_DATA.
 
 Usage:
-    python -m agent_management.check_sv_eval --env prod --run-name "my_eval_run"
-    python -m agent_management.check_sv_eval --env prod --sv sem_operations --run-name "my_eval_run"
+    agent-mgmt-check-sv-eval --env prod --run-name "my_eval_run"
+    agent-mgmt-check-sv-eval --env prod --sv sem_operations --run-name "my_eval_run"
 
 Implements REQ-009: Semantic View Evaluation.
 """

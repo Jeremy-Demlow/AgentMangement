@@ -21,10 +21,10 @@ log a skipped warning but don't report drift.
 
 Usage::
 
-    python -m agent_management.detect_sv_drift --env dev
-    python -m agent_management.detect_sv_drift --env prod --view sem_safety_incidents
-    python -m agent_management.detect_sv_drift --env dev --source yaml --fail-on-drift
-    python -m agent_management.detect_sv_drift --env dev --fail-on-drift
+    agent-mgmt-detect-sv-drift --env dev
+    agent-mgmt-detect-sv-drift --env prod --view sem_safety_incidents
+    agent-mgmt-detect-sv-drift --env dev --source yaml --fail-on-drift
+    agent-mgmt-detect-sv-drift --env dev --fail-on-drift
 
 Exit codes:
     0 = no drift (or --fail-on-drift not set)

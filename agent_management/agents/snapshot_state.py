@@ -18,8 +18,8 @@ Pointer shape::
 
 Usage::
 
-    python -m agent_management.snapshot_state --env prod
-    python -m agent_management.snapshot_state --env prod --agent RESORT_EXECUTIVE
+    agent-mgmt-snapshot --env prod
+    agent-mgmt-snapshot --env prod --agent RESORT_EXECUTIVE
 
 Implements REQ-005: Snapshot and Rollback (pointer-only).
 """

@@ -4,9 +4,9 @@ Reads verified_queries/*.yaml and merges verified_queries into the
 WITH EXTENSION (CA=...) JSON block in each dbt sem_*.sql model.
 
 Usage:
-    python -m agent_management.sync_vqrs_to_dbt
-    python -m agent_management.sync_vqrs_to_dbt --dry-run
-    python -m agent_management.sync_vqrs_to_dbt --sv sem_revenue
+    agent-mgmt-sync-vqrs
+    agent-mgmt-sync-vqrs --dry-run
+    agent-mgmt-sync-vqrs --sv sem_revenue
 
 Implements REQ-009: Semantic View Evaluation.
 """

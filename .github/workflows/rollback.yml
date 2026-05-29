@@ -54,7 +54,7 @@ jobs:
 
       - name: Rollback (alias reassignment)
         run: |
-          CMD="python -m agent_management.rollback --env ${{ inputs.environment }} --agent ${{ inputs.agent }} --alias ${{ inputs.alias }}"
+          CMD="agent-mgmt-rollback --env ${{ inputs.environment }} --agent ${{ inputs.agent }} --alias ${{ inputs.alias }}"
           if [ -n "${{ inputs.target_version }}" ]; then
             CMD="$CMD --to ${{ inputs.target_version }}"
           fi
@@ -62,7 +62,7 @@ jobs:
           $CMD
 
       - name: Smoke test
-        run: python -m agent_management.smoke_test --env ${{ inputs.environment }} --agent ${{ inputs.agent }} --alias ${{ inputs.alias }}
+        run: agent-mgmt-smoke-agent --env ${{ inputs.environment }} --agent ${{ inputs.agent }} --alias ${{ inputs.alias }}
 
       - name: Cleanup
         if: always()

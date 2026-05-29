@@ -44,13 +44,13 @@ agents/
 3. Validate locally:
 
    ```bash
-   python -m agent_management.validate_specs --env dev
+   agent-mgmt-validate --env dev
    ```
 
 4. Dry-run deploy:
 
    ```bash
-   python -m agent_management.deploy_agents --env dev --agent my_agent --dry-run
+   agent-mgmt-deploy-agents --env dev --agent my_agent --dry-run
    ```
 
 5. Generated SQL appears in `generated/dev/MY_AGENT.sql`.
@@ -79,9 +79,9 @@ agents/
 ## Related Commands
 
 ```bash
-python -m agent_management.validate_specs --env dev          # Validate all specs
-python -m agent_management.deploy_agents --env dev           # Deploy all agents
-python -m agent_management.deploy_agents --env dev -a <name> # Deploy one agent
-python -m agent_management.snapshot_state --env dev -t agents # Snapshot current state
-python -m agent_management.rollback --env dev --list          # List available snapshots
+agent-mgmt-validate --env dev          # Validate all specs
+agent-mgmt-deploy-agents --env dev           # Deploy all agents
+agent-mgmt-deploy-agents --env dev -a <name> # Deploy one agent
+agent-mgmt-snapshot --env dev -t agents # Snapshot current state
+agent-mgmt-rollback --env dev --list          # List available snapshots
 ```

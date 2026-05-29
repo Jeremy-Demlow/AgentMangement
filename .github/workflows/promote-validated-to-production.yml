@@ -41,13 +41,13 @@ jobs:
       - name: Promote validated -> production
         run: |
           if [ -n "${{ inputs.agent }}" ]; then
-            python -m agent_management.versioning promote --env prod --from validated --to production --agent ${{ inputs.agent }}
+            agent-mgmt-agent-versioning promote --env prod --from validated --to production --agent ${{ inputs.agent }}
           else
-            python -m agent_management.versioning promote --env prod --from validated --to production
+            agent-mgmt-agent-versioning promote --env prod --from validated --to production
           fi
 
       - name: Smoke test (production)
-        run: python -m agent_management.smoke_test --env prod --alias production
+        run: agent-mgmt-smoke-agent --env prod --alias production
 
       - name: Post-promote eval (production)
         id: eval
@@ -58,7 +58,7 @@ jobs:
           code=2
           for attempt in 1 2; do
             echo "=== Eval attempt $attempt/2 ==="
-            python -m agent_management.run_ci_eval --env prod --alias production
+            agent-mgmt-eval-agent --env prod --alias production
             code=$?
             if [ "$code" != "2" ]; then break; fi
             if [ "$attempt" = "1" ]; then

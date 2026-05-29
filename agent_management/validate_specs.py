@@ -4,8 +4,8 @@ Checks YAML structure, required fields, Jinja2 rendering, and optionally
 validates against Snowflake via dry-run deployment.
 
 Usage:
-    python -m agent_management.validate_specs --env dev
-    python -m agent_management.validate_specs --env dev --remote
+    agent-mgmt-validate --env dev
+    agent-mgmt-validate --env dev --remote
 
 Implements REQ-002 and REQ-003 validation acceptance criteria.
 """

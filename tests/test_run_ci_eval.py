@@ -1,10 +1,10 @@
-"""Unit tests for agent_management.run_ci_eval.classify_eval_outcome.
+"""Unit tests for agent_management.evals.agent_runner.classify_eval_outcome.
 
 REQ-019: Pure-function seam for crash-vs-threshold classification.
 """
 from __future__ import annotations
 
-from agent_management.run_ci_eval import classify_eval_outcome, extract_run_name
+from agent_management.evals.agent_runner import classify_eval_outcome, extract_run_name
 
 
 def test_classify_passed_on_zero_returncode():

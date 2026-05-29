@@ -425,9 +425,14 @@ After `pip install -e .`:
 | `agent-mgmt-render-eval` | Render eval templates for a target environment |
 | `agent-mgmt-detect-drift` | Detect Git vs Snowflake spec drift |
 | `agent-mgmt-check-sv-eval` | Check semantic view evaluation results |
-| `python -m agent_management.run_sv_eval` | Run SV evals end-to-end (start, poll, check) |
-| `python -m agent_management.get_sv_eval_scores` | Display SV eval scorecard with per-VQR detail |
-| `python -m agent_management.check_sv_evals` | Check VQR and eval status across environments |
+| `agent-mgmt-eval-agent` | Run Cortex Agent evaluations |
+| `agent-mgmt-eval-sv` | Run SV evals end-to-end (start, poll, check) |
+| `agent-mgmt-smoke-agent` | Smoke-test deployed agents |
+| `agent-mgmt-agent-versioning` | Inspect/promote Cortex Agent versions and aliases |
+| `agent-mgmt-sync-vqrs` | Sync verified queries into dbt semantic view models |
+| `agent-mgmt-sv-scores` | Display SV eval scorecard with per-VQR detail |
+| `agent-mgmt-check-sv-evals` | Check VQR and eval status across environments |
+| `agent-mgmt-format-sv-comment` | Format SV eval results for PR comments |
 
 ## Evaluations
 
@@ -451,44 +456,44 @@ SV evaluations use Snowflake's built-in `EXECUTE_AI_EVALUATION` to test Cortex A
 
 ```bash
 # Run evals for all SVs (waits for completion, checks thresholds)
-python -m agent_management.run_sv_eval --env prod
+agent-mgmt-eval-sv --env prod
 
 # Run for a single SV
-python -m agent_management.run_sv_eval --env prod --sv sem_revenue
+agent-mgmt-eval-sv --env prod --sv sem_revenue
 
 # Run only SVs used by a specific agent (from project.yml agents config)
-python -m agent_management.run_sv_eval --env prod --agent ski_ops_assistant
+agent-mgmt-eval-sv --env prod --agent ski_ops_assistant
 
 # Run SVs for multiple agents
-python -m agent_management.run_sv_eval --env prod --agent ski_ops_assistant --agent resort_executive
+agent-mgmt-eval-sv --env prod --agent ski_ops_assistant --agent resort_executive
 
 # Start evals without waiting
-python -m agent_management.run_sv_eval --env prod --no-wait
+agent-mgmt-eval-sv --env prod --no-wait
 
 # Check status of a running eval
-python -m agent_management.run_sv_eval --env prod --status --run-name "sv_eval_20260420"
+agent-mgmt-eval-sv --env prod --status --run-name "sv_eval_20260420"
 
 # Fetch results of a completed eval
-python -m agent_management.run_sv_eval --env prod --results --run-name "sv_eval_20260420"
+agent-mgmt-eval-sv --env prod --results --run-name "sv_eval_20260420"
 ```
 
 #### Viewing Eval Scores
 
 ```bash
 # Scorecard for all SVs (auto-detects latest run per SV)
-python -m agent_management.get_sv_eval_scores --env prod
+agent-mgmt-sv-scores --env prod
 
 # With per-VQR detail
-python -m agent_management.get_sv_eval_scores --env prod --detail
+agent-mgmt-sv-scores --env prod --detail
 
 # JSON output for CI/CD pipelines
-python -m agent_management.get_sv_eval_scores --env prod --json
+agent-mgmt-sv-scores --env prod --json
 
 # Override threshold (default from config)
-python -m agent_management.get_sv_eval_scores --env prod --threshold 0.80
+agent-mgmt-sv-scores --env prod --threshold 0.80
 
 # Single SV with specific run name
-python -m agent_management.get_sv_eval_scores --env prod --sv sem_revenue --run-name eval_revenue_v9
+agent-mgmt-sv-scores --env prod --sv sem_revenue --run-name eval_revenue_v9
 ```
 
 #### Retrieving Eval Data with SQL

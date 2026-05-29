@@ -19,7 +19,7 @@ Usage::
 
 CLI::
 
-    python -m agent_management.validate_spec_format agents/specs/*.yml
+    agent-mgmt-validate-spec-format agents/specs/*.yml
 """
 from __future__ import annotations
 

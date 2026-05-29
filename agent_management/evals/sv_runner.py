@@ -21,13 +21,13 @@ Function reference:
           Always use GET_ANALYST_AI_EVALUATION_DATA instead.
 
 Usage:
-    python -m agent_management.run_sv_eval --env prod
-    python -m agent_management.run_sv_eval --env prod --sv sem_revenue
-    python -m agent_management.run_sv_eval --env prod --agent ski_ops_assistant
-    python -m agent_management.run_sv_eval --env dev --dry-run
-    python -m agent_management.run_sv_eval --env dev --max-parallel 4
-    python -m agent_management.run_sv_eval --env prod --status --run-name "sv_eval_20260416"
-    python -m agent_management.run_sv_eval --env prod --results --run-name "sv_eval_20260416"
+    agent-mgmt-eval-sv --env prod
+    agent-mgmt-eval-sv --env prod --sv sem_revenue
+    agent-mgmt-eval-sv --env prod --agent ski_ops_assistant
+    agent-mgmt-eval-sv --env dev --dry-run
+    agent-mgmt-eval-sv --env dev --max-parallel 4
+    agent-mgmt-eval-sv --env prod --status --run-name "sv_eval_20260416"
+    agent-mgmt-eval-sv --env prod --results --run-name "sv_eval_20260416"
 
 Implements REQ-009: Semantic View Evaluation.
 """

@@ -1,9 +1,9 @@
 """Check VQR deployment and eval status across environments.
 
 Usage:
-    python -m agent_management.check_sv_evals --env prod
-    python -m agent_management.check_sv_evals --env prod dev qa
-    python -m agent_management.check_sv_evals --env dev --sv sem_revenue
+    agent-mgmt-check-sv-evals --env prod
+    agent-mgmt-check-sv-evals --env prod dev qa
+    agent-mgmt-check-sv-evals --env dev --sv sem_revenue
 """
 from __future__ import annotations
 

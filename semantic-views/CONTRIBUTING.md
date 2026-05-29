@@ -50,19 +50,19 @@ semantic-views/
 3. Validate locally:
 
    ```bash
-   python -m agent_management.validate_specs --env dev
+   agent-mgmt-validate --env dev
    ```
 
 4. Dry-run deploy (validates against Snowflake without creating):
 
    ```bash
-   python -m agent_management.deploy_semantic_views --env dev --view sem_my_domain --dry-run
+   agent-mgmt-deploy-svs --env dev --view sem_my_domain --dry-run
    ```
 
 5. Deploy:
 
    ```bash
-   python -m agent_management.deploy_semantic_views --env dev --view sem_my_domain
+   agent-mgmt-deploy-svs --env dev --view sem_my_domain
    ```
 
 ## Conventions
@@ -97,7 +97,7 @@ The flag is checked at two levels: env config takes precedence, then `project.ym
 ## Drift Detection
 
 ```bash
-python -m agent_management.detect_drift --env dev
+agent-mgmt-detect-drift --env dev
 ```
 
 Compares declared columns in SV YAMLs against actual table schemas. Reports:
@@ -113,9 +113,9 @@ Compares declared columns in SV YAMLs against actual table schemas. Reports:
 ## Related Commands
 
 ```bash
-python -m agent_management.validate_specs --env dev                  # Validate all
-python -m agent_management.deploy_semantic_views --env dev            # Deploy all SVs
-python -m agent_management.deploy_semantic_views --env dev -v <name>  # Deploy one SV
-python -m agent_management.detect_drift --env dev                    # Check for drift
-python -m agent_management.snapshot_state --env dev -t semantic-views # Snapshot state
+agent-mgmt-validate --env dev                  # Validate all
+agent-mgmt-deploy-svs --env dev            # Deploy all SVs
+agent-mgmt-deploy-svs --env dev -v <name>  # Deploy one SV
+agent-mgmt-detect-drift --env dev                    # Check for drift
+agent-mgmt-snapshot --env dev -t semantic-views # Snapshot state
 ```

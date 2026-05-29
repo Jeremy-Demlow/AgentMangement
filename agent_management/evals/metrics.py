@@ -5,9 +5,9 @@ classification metrics (precision, recall, F1), and checks against
 environment-specific thresholds.
 
 Usage:
-    python -m agent_management.compute_metrics --env prod --results agent-evaluation/results/resort_executive_20260401_173852.json
-    python -m agent_management.compute_metrics --env prod --results-dir agent-evaluation/results/
-    python -m agent_management.compute_metrics --env dev --results-dir agent-evaluation/results/ --strict
+    agent-mgmt-metrics --env prod --results agent-evaluation/results/resort_executive_20260401_173852.json
+    agent-mgmt-metrics --env prod --results-dir agent-evaluation/results/
+    agent-mgmt-metrics --env dev --results-dir agent-evaluation/results/ --strict
 
 Implements REQ-004: Evaluation Framework.
 """

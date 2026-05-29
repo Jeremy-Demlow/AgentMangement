@@ -4,9 +4,9 @@ Resolves {{ eval.* }} Jinja2 placeholders in eval YAML files so they can be
 used directly by run_eval.py or uploaded to Snowflake stages.
 
 Usage:
-    python -m agent_management.render_eval_templates --env dev
-    python -m agent_management.render_eval_templates --env dev --file configs/resort_executive.yaml
-    python -m agent_management.render_eval_templates --env dev --run-date 20260403
+    agent-mgmt-render-eval --env dev
+    agent-mgmt-render-eval --env dev --file configs/resort_executive.yaml
+    agent-mgmt-render-eval --env dev --run-date 20260403
 
 Implements REQ-011: Eval Template Rendering.
 """

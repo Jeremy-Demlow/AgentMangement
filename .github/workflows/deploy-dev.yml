@@ -44,7 +44,7 @@ jobs:
           snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
       - name: Snapshot current state
-        run: python -m agent_management.snapshot_state --env dev
+        run: agent-mgmt-snapshot --env dev
 
       - name: Upload snapshots
         uses: actions/upload-artifact@v4
@@ -77,7 +77,7 @@ jobs:
           snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
       - name: Sync VQRs into dbt models
-        run: python -m agent_management.sync_vqrs_to_dbt
+        run: agent-mgmt-sync-vqrs
 
       - name: Bootstrap RAW seed tables (idempotent)
         # Loads LIFTS/LOCATIONS/PRODUCTS/TICKET_TYPES into <db>.RAW so dbt
@@ -102,7 +102,7 @@ jobs:
           dbt run --target dev --select "marts.semantic" --profiles-dir .
 
       - name: Deploy/verify semantic views (dev)
-        run: python -m agent_management.deploy_semantic_views --env dev
+        run: agent-mgmt-deploy-svs --env dev
 
       - name: Cleanup
         if: always()
@@ -136,7 +136,7 @@ jobs:
         #   3 = platform blocker (Cortex Analyst Evaluations PuPr bug) — advisory
         run: |
           set +e
-          python -m agent_management.run_sv_eval --env dev --run-name "CI-${{ github.run_id }}-${{ github.sha }}"
+          agent-mgmt-eval-sv --env dev --run-name "CI-${{ github.run_id }}-${{ github.sha }}"
           code=$?
           echo "code=$code" >> "$GITHUB_OUTPUT"
           if [ "$code" = "0" ]; then
@@ -201,10 +201,10 @@ jobs:
           snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
       - name: Deploy agents to dev (versioned)
-        run: python -m agent_management.deploy_agents --env dev
+        run: agent-mgmt-deploy-agents --env dev
 
       - name: Smoke test
-        run: python -m agent_management.smoke_test --env dev --alias latest
+        run: agent-mgmt-smoke-agent --env dev --alias latest
 
       - name: Cleanup
         if: always()
@@ -230,7 +230,7 @@ jobs:
 
       - name: Run agent evaluations
         id: agent_eval
-        run: python -m agent_management.run_ci_eval --env dev --alias latest
+        run: agent-mgmt-eval-agent --env dev --alias latest
 
       - name: Agent Eval Summary
         if: always()

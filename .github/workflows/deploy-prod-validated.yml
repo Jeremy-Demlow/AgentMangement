@@ -75,7 +75,7 @@ jobs:
           snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
       - name: Snapshot current state (pointer)
-        run: python -m agent_management.snapshot_state --env prod
+        run: agent-mgmt-snapshot --env prod
 
       - name: Upload snapshots
         uses: actions/upload-artifact@v4
@@ -105,7 +105,7 @@ jobs:
           snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
       - name: Sync VQRs into dbt models
-        run: python -m agent_management.sync_vqrs_to_dbt
+        run: agent-mgmt-sync-vqrs
 
       - name: Run dbt
         if: hashFiles('dbt_ski_resort/dbt_project.yml') != ''
@@ -119,7 +119,7 @@ jobs:
           dbt run --target prod --select "marts.semantic" --profiles-dir .
 
       - name: Deploy/verify semantic views (prod)
-        run: python -m agent_management.deploy_semantic_views --env prod
+        run: agent-mgmt-deploy-svs --env prod
 
       - name: Cleanup
         if: always()
@@ -142,10 +142,10 @@ jobs:
           snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
       - name: Deploy agents (versioned, alias=validated)
-        run: python -m agent_management.deploy_agents --env prod
+        run: agent-mgmt-deploy-agents --env prod
 
       - name: Smoke test (validated)
-        run: python -m agent_management.smoke_test --env prod --alias validated
+        run: agent-mgmt-smoke-agent --env prod --alias validated
 
       - name: Cleanup
         if: always()
@@ -182,7 +182,7 @@ jobs:
           code=2
           for attempt in 1 2; do
             echo "=== Eval attempt $attempt/2 ==="
-            python -m agent_management.run_ci_eval --env prod --alias validated
+            agent-mgmt-eval-agent --env prod --alias validated
             code=$?
             # Only retry on crash. Pass and threshold-fail are terminal.
             if [ "$code" != "2" ]; then

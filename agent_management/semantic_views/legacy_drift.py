@@ -4,8 +4,8 @@ Compares columns declared in SV YAML templates against DESCRIBE TABLE output
 to identify added, removed, or type-changed columns.
 
 Usage:
-    python -m agent_management.detect_drift --env prod
-    python -m agent_management.detect_drift --env prod --view sem_operations
+    agent-mgmt-detect-drift --env prod
+    agent-mgmt-detect-drift --env prod --view sem_operations
 
 Implements REQ-006: Drift Detection.
 """

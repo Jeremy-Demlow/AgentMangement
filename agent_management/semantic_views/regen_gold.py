@@ -14,7 +14,7 @@ diff so a human can decide whether to:
 
 Usage::
 
-    python -m agent_management.regen_sv_gold \\
+    agent-mgmt-regen-sv-gold \\
         --env dev \\
         --sv SEM_STAFFING_ANALYTICS \\
         --run-name PR-52-25465013047_sem_staffing_analytics \\

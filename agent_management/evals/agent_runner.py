@@ -5,10 +5,10 @@ then executes evaluations against Snowflake **in parallel**. Exits non-zero
 if any agent fails its thresholds.
 
 Usage (CI):
-    python -m agent_management.run_ci_eval --env dev
-    python -m agent_management.run_ci_eval --env dev --agent resort_executive
-    python -m agent_management.run_ci_eval --env dev --dry-run
-    python -m agent_management.run_ci_eval --env dev --max-parallel 4
+    agent-mgmt-eval-agent --env dev
+    agent-mgmt-eval-agent --env dev --agent resort_executive
+    agent-mgmt-eval-agent --env dev --dry-run
+    agent-mgmt-eval-agent --env dev --max-parallel 4
 """
 from __future__ import annotations
 

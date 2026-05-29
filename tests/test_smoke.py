@@ -18,7 +18,7 @@ from agent_management.utils.config import (
     get_eval_config, get_deployment_mode, get_data_source_env,
 )
 from agent_management.render_template import render_string, build_context
-from agent_management.deploy_agents import (
+from agent_management.agents.deploy import (
     build_spec, resolve_agent_identity, resolve_profile,
 )
 

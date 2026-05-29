@@ -22,8 +22,8 @@ Usage::
 
 CLI::
 
-    python -m agent_management.snapshot_agent capture --env dev --agent AM_SKI_RESORT_DEV.AGENTS.RESORT_EXECUTIVE_DEV
-    python -m agent_management.snapshot_agent diff snapshots/a.json snapshots/b.json
+    agent-mgmt-snapshot-agent capture --env dev --agent AM_SKI_RESORT_DEV.AGENTS.RESORT_EXECUTIVE_DEV
+    agent-mgmt-snapshot-agent diff snapshots/a.json snapshots/b.json
 """
 from __future__ import annotations
 

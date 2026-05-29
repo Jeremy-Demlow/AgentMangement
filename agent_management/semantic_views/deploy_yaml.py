@@ -4,10 +4,10 @@ Reads SV YAML from PROD, merges verified_queries from local YAML files,
 and deploys via CALL SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML.
 
 Usage:
-    python -m agent_management.deploy_svs_yaml --env prod
-    python -m agent_management.deploy_svs_yaml --env prod dev qa
-    python -m agent_management.deploy_svs_yaml --env dev --sv sem_revenue
-    python -m agent_management.deploy_svs_yaml --env dev --dry-run
+    agent-mgmt-deploy-svs-yaml --env prod
+    agent-mgmt-deploy-svs-yaml --env prod dev qa
+    agent-mgmt-deploy-svs-yaml --env dev --sv sem_revenue
+    agent-mgmt-deploy-svs-yaml --env dev --dry-run
 """
 from __future__ import annotations
 

@@ -10,8 +10,8 @@ if the SQL fails, the operator fixes the cause and re-runs.
 
 Usage::
 
-    python -m agent_management.rollback --env prod --agent RESORT_EXECUTIVE --alias production
-    python -m agent_management.rollback --env prod --agent RESORT_EXECUTIVE --alias production --to VERSION$5
+    agent-mgmt-rollback --env prod --agent RESORT_EXECUTIVE --alias production
+    agent-mgmt-rollback --env prod --agent RESORT_EXECUTIVE --alias production --to VERSION$5
 
 Implements REQ-005: Snapshot and Rollback (versioning era).
 """

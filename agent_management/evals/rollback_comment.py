@@ -5,7 +5,7 @@ days across DEV and PROD, and emits a markdown summary. validate-pr.yml posts
 this to the PR so reviewers see recent prod instability at a glance.
 
 Usage:
-    python -m agent_management.format_rollback_history_comment --output /tmp/rollback_history.md
+    agent-mgmt-format-rollback-comment --output /tmp/rollback_history.md
 
 Produces empty output (exit 0, empty file) when there's nothing to report so
 the PR doesn't get noisy comments during stable periods.

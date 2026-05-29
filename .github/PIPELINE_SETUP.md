@@ -164,22 +164,22 @@ eval:
 
 ```bash
 # Evaluate all semantic views
-python -m agent_management.run_sv_eval --env prod
+agent-mgmt-eval-sv --env prod
 
 # Evaluate a single SV
-python -m agent_management.run_sv_eval --env prod --sv SEM_REVENUE
+agent-mgmt-eval-sv --env prod --sv SEM_REVENUE
 
 # Evaluate only SVs used by a specific agent
-python -m agent_management.run_sv_eval --env prod --agent ski_ops_assistant
+agent-mgmt-eval-sv --env prod --agent ski_ops_assistant
 
 # Dry run (show config without executing)
-python -m agent_management.run_sv_eval --env dev --dry-run
+agent-mgmt-eval-sv --env dev --dry-run
 
 # Check status of a running eval
-python -m agent_management.run_sv_eval --env prod --status --run-name "CI-abc123"
+agent-mgmt-eval-sv --env prod --status --run-name "CI-abc123"
 
 # Fetch results of a completed eval
-python -m agent_management.run_sv_eval --env prod --results --run-name "CI-abc123"
+agent-mgmt-eval-sv --env prod --results --run-name "CI-abc123"
 ```
 
 ## Local Testing

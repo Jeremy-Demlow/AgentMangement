@@ -32,11 +32,11 @@ Function reference:
           Always use GET_ANALYST_AI_EVALUATION_DATA instead.
 
 Usage:
-    python -m agent_management.get_sv_eval_scores --env prod
-    python -m agent_management.get_sv_eval_scores --env prod --sv sem_revenue --run-name eval_revenue_v9
-    python -m agent_management.get_sv_eval_scores --env prod --detail
-    python -m agent_management.get_sv_eval_scores --env prod --json
-    python -m agent_management.get_sv_eval_scores --env prod --threshold 0.80
+    agent-mgmt-sv-scores --env prod
+    agent-mgmt-sv-scores --env prod --sv sem_revenue --run-name eval_revenue_v9
+    agent-mgmt-sv-scores --env prod --detail
+    agent-mgmt-sv-scores --env prod --json
+    agent-mgmt-sv-scores --env prod --threshold 0.80
 """
 from __future__ import annotations
 

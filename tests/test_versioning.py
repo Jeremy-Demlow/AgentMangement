@@ -1,9 +1,9 @@
-"""Unit tests for agent_management.versioning."""
+"""Unit tests for agent_management.agents.versioning."""
 from __future__ import annotations
 
 import pytest
 
-from agent_management import versioning
+from agent_management.agents import versioning
 
 
 class FakeCursor:

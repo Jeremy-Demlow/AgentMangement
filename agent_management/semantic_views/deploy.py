@@ -8,9 +8,9 @@ Supports two modes controlled by semantic_views.source in env config:
          SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML.
 
 Usage:
-    python -m agent_management.deploy_semantic_views --env dev
-    python -m agent_management.deploy_semantic_views --env dev --view sem_revenue
-    python -m agent_management.deploy_semantic_views --env dev --dry-run
+    agent-mgmt-deploy-svs --env dev
+    agent-mgmt-deploy-svs --env dev --view sem_revenue
+    agent-mgmt-deploy-svs --env dev --dry-run
 
 Implements REQ-002: Semantic View CI/CD Pipeline.
 """
