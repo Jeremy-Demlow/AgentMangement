@@ -132,14 +132,20 @@ def run_yaml_path(config: dict, schema_fqn: str, view: str | None, dry_run: bool
 
 def run_dbt_path(config: dict, schema_fqn: str, dry_run: bool) -> int:
     logger.info("=" * 60)
+    if dry_run:
+        logger.info("[dbt mode] DRY RUN — semantic views are managed by dbt")
+        logger.info("Would verify dbt-created semantic views in %s during deploy", schema_fqn)
+        logger.info("\n%s", "=" * 60)
+        logger.info("Dry run complete: Environment: %s", config["environment"])
+        return 0
+
     conn = connect(config, schema=config["deployment"]["semantic_schema"])
     cur = conn.cursor()
 
     found, failed = verify_dbt_views(cur, schema_fqn, dry_run)
 
     logger.info("\n%s", "=" * 60)
-    action = "Verified" if dry_run else "Verified"
-    logger.info("%s: %d  Failed: %d  Environment: %s", action, found, failed, config['environment'])
+    logger.info("Verified: %d  Failed: %d  Environment: %s", found, failed, config['environment'])
 
     cur.close()
     conn.close()
