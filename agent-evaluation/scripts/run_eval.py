@@ -454,7 +454,7 @@ def poll_until_done(cursor, run_name: str, stage: str, filename: str, poll_inter
 # Cortex platform-level transient signatures. When the orchestrator reports
 # FAILED with one of these in STATUS_DETAILS, retrying the run usually
 # succeeds; the failure is not in our spec or our questions. Mirrors the
-# `_PLATFORM_BLOCKER_PATTERNS` in agent_management/run_sv_eval.py.
+# `_PLATFORM_BLOCKER_PATTERNS` in agent_management/evals/sv_runner.py.
 #
 # IMPORTANT: only retry signatures that happen BEFORE Cortex creates its
 # internal `SYSTEM_AI_OBS_CORTEX_AGENT_DATASET_VERSION_DO_NOT_DELETE` object
@@ -895,7 +895,7 @@ def main():
 
         # Retry once on transient platform flakes (Invocation failed,
         # service unavailable, internal error). Same retry policy used by
-        # agent_management/run_sv_eval.py and deploy-prod-validated.yml.
+        # agent_management/evals/sv_runner.py and deploy-prod-validated.yml.
         # A retry uses a fresh run_name so the orchestrator does not see a
         # stale FAILED record on STATUS calls.
         if "FAILED" in final_status and is_retryable_failure(status_details):

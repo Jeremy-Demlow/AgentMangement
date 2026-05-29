@@ -5,7 +5,7 @@ With Cortex Agent Versioning, rollback becomes a single DDL statement::
     ALTER AGENT <fqn> MODIFY VERSION <target_version> SET ALIAS = <alias>
 
 The target version is read from the most recent snapshot pointer (see
-agent_management.snapshot_state). There is no fallback to spec re-apply —
+agent_management.agents.snapshot_state). There is no fallback to spec re-apply —
 if the SQL fails, the operator fixes the cause and re-runs.
 
 Usage::
@@ -144,7 +144,7 @@ def rollback_agent(
         )
 
         # Best-effort audit log append so the rollback is visible in
-        # `agent_management.versioning log`.
+        # `agent_management.agents.versioning log`.
         try:
             identity = discover_identity(env)
             record_deploy(

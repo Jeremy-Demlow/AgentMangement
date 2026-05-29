@@ -1,9 +1,4 @@
-"""Cortex Agent evaluation API.
-
-The executable implementation currently lives in :mod:`agent_management.run_ci_eval`
-and ``agent-evaluation/scripts/run_eval.py``. This facade gives library users a
-stable import path while the scripts are thinned into wrappers.
-"""
+"""Cortex Agent evaluation API."""
 from __future__ import annotations
 
 from agent_management.evals.agent_runner import (

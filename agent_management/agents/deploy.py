@@ -2,7 +2,7 @@
 
 This is the single deployment path. Every deploy:
 
-  1. snapshots the agent state  (see agent_management.snapshot_state)
+  1. snapshots the agent state  (see agent_management.agents.snapshot_state)
   2. ADD LIVE VERSION FROM LAST (or ADD LIVE VERSION on first-time create)
   3. MODIFY LIVE VERSION SET SPEC FROM '<yaml>'
   4. COMMIT LIVE VERSION        (creates VERSION$N)
@@ -229,7 +229,7 @@ def _deploy_alias(config: dict) -> str:
 
 def _keep_last_n(config: dict) -> int:
     # Retained config hook, but version pruning is not possible under Cortex
-    # Agent Versioning Private Preview (see agent_management/versioning.py).
+    # Agent Versioning Private Preview (see agent_management.agents.versioning).
     # Value is reported in deploy logs only.
     project = load_project_config()
     versioning_cfg = project.get("agent_versioning", {})

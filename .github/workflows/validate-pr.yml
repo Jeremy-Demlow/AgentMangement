@@ -267,7 +267,7 @@ jobs:
         id: sv_eval
         env:
           SV_RUN_NAME: "PR-${{ github.event.pull_request.number }}-${{ github.run_id }}"
-        # Exit-code taxonomy from agent_management.run_sv_eval (kept in sync
+        # Exit-code taxonomy from agent_management.evals.sv_runner (kept in sync
         # with deploy-dev.yml so workflows and Python share semantics):
         #   0 = passed
         #   1 = threshold failure (truthful fail; non-blocking on dev via

@@ -289,23 +289,14 @@ AgentMangement/
 │   └── prod.env.yml
 │
 ├── agent_management/                # Core Python library (pip-installable)
-│   ├── deploy_agents.py             #   ALTER AGENT / CREATE AGENT
-│   ├── deploy_semantic_views.py     #   SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML
-│   ├── render_template.py           #   Jinja2 env substitution
-│   ├── snapshot_state.py            #   Pre-deploy state capture
-│   ├── rollback.py                  #   Restore from snapshot
-│   ├── validate_specs.py            #   YAML lint + dry-run
-│   ├── detect_drift.py              #   Git vs Snowflake diff
-│   ├── compute_metrics.py           #   F1/precision/recall from eval
-│   ├── check_sv_eval.py             #   SV eval quality gate
-│   ├── run_sv_eval.py               #   Run SV evals end-to-end
-│   ├── get_sv_eval_scores.py        #   SV eval scorecard (GET_ANALYST_AI_EVALUATION_DATA)
-│   ├── check_sv_evals.py            #   Multi-env VQR + eval status
-│   ├── render_eval_templates.py     #   Render eval configs per env
+│   ├── agents/                      #   Agent deploy/versioning/rollback/smoke
+│   ├── semantic_views/              #   SV deploy/drift/VQR sync
+│   ├── evals/                       #   Agent + SV eval runners, scoring, comments
 │   ├── ci/                          #   CI checks (test coverage, PK tests, lineage)
-│   └── utils/
-│       ├── config.py                #   Config loading, FQN helpers, suffix resolution
-│       └── snowflake_client.py      #   Snowflake connection wrapper
+│   ├── utils/                       #   Config + Snowflake connection helpers
+│   ├── render_template.py           #   Jinja2 env substitution
+│   ├── validate_specs.py            #   YAML lint + dry-run
+│   └── validate_spec_format.py      #   Agent spec style validation
 │
 ├── agents/                          # Cortex Agent definitions
 │   └── specs/                       #   Jinja2 YAML templates
@@ -669,7 +660,7 @@ needs investigation, the operator can re-run the agent eval manually after
 Cortex cleans up its internal state (typically a few minutes).
 
 The retry policy mirrors the existing patterns in
-`agent_management/run_sv_eval.py` (per-VQR `Invocation failed` retry) and
+`agent_management/evals/sv_runner.py` (per-VQR `Invocation failed` retry) and
 `.github/workflows/deploy-prod-validated.yml` (whole-run crash retry).
 
 ### Schema drift auto-heal in workflows

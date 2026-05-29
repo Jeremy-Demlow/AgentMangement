@@ -1,7 +1,7 @@
 """Rich JSON snapshot of a Cortex Agent for audit and diff.
 
 Captures the agent's full spec (via DESCRIBE AGENT) plus SHOW VERSIONS
-metadata. Complements ``agent_management.snapshot_state``:
+metadata. Complements ``agent_management.agents.snapshot_state``:
 
   snapshot_state  -> lightweight pointer (version + aliases) for rollback
   snapshot_agent  -> rich JSON (full spec + versions + aliases) for audit/diff

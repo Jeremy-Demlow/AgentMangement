@@ -1,8 +1,8 @@
 """Package layout guardrails.
 
 The product package should expose domain packages, not a flat pile of CLI
-wrappers. Legacy wrappers are preserved under old/ for reference, but they must
-not ship inside the installable agent_management package.
+wrappers. Legacy wrappers may exist locally under old/, but they must not ship
+inside the installable agent_management package.
 """
 from __future__ import annotations
 
@@ -59,23 +59,35 @@ def test_legacy_wrappers_are_not_shipped_in_package_root():
     assert not (root_module_stems & OLD_ROOT_MODULES)
 
 
-def test_workflows_use_product_commands_not_legacy_root_modules():
-    workflow_dir = REPO_ROOT / ".github" / "workflows"
+def test_workflow_files_use_product_commands_not_legacy_root_modules():
+    workflow_paths = list((REPO_ROOT / ".github" / "workflows").glob("*.yml"))
+    workflow_paths.extend((REPO_ROOT / ".github" / "scripts").glob("*.sh"))
+    workflow_paths.extend([
+        REPO_ROOT / "Makefile",
+        REPO_ROOT / "README.md",
+        REPO_ROOT / "CONTRIBUTING.md",
+        REPO_ROOT / "ENVIRONMENT_PARITY.md",
+        REPO_ROOT / "agent-evaluation" / "CONTRIBUTING.md",
+        REPO_ROOT / "agents" / "CONTRIBUTING.md",
+        REPO_ROOT / "semantic-views" / "CONTRIBUTING.md",
+        REPO_ROOT / "environments" / "CONTRIBUTING.md",
+    ])
     offenders: dict[str, list[str]] = {}
 
-    for workflow in workflow_dir.glob("*.yml"):
+    for workflow in workflow_paths:
         text = workflow.read_text()
         for module in OLD_ROOT_MODULES:
-            needle = f"python -m agent_management.{module}"
-            if needle in text:
-                offenders.setdefault(workflow.name, []).append(needle)
+            for needle in (
+                f"python -m agent_management.{module}",
+                f"agent_management.{module}",
+            ):
+                if needle in text:
+                    offenders.setdefault(workflow.name, []).append(needle)
 
     assert not offenders
 
 
-def test_legacy_wrappers_are_archived_outside_package():
-    old_dir = REPO_ROOT / "old" / "agent_management_wrappers"
-    archived = {path.name for path in old_dir.glob("*.py")}
-    expected = {f"{module}.py" for module in OLD_ROOT_MODULES}
+def test_old_archive_is_not_tracked_package_content():
+    gitignore = (REPO_ROOT / ".gitignore").read_text()
 
-    assert expected <= archived
+    assert "/old/" in gitignore

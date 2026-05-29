@@ -129,7 +129,7 @@ jobs:
       - name: Run SV evaluations
         id: sv_eval
         continue-on-error: true
-        # Exit code taxonomy from agent_management.run_sv_eval:
+        # Exit code taxonomy from agent_management.evals.sv_runner:
         #   0 = passed
         #   1 = threshold failure (advisory in DEV)
         #   2 = crash / unhandled (hard fail)

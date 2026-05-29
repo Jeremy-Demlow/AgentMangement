@@ -9,8 +9,8 @@ This project deploys semantic views and agents to two Snowflake environments
 | Artifact | Source of Truth | Deploy path |
 |---|---|---|
 | Semantic views | `dbt_ski_resort/models/marts/semantic/sem_*.sql` | `dbt run` via deploy workflows |
-| Agents | `agents/specs/*.yml` | `agent_management.deploy_agents` (versioning path) |
-| Verified queries | `semantic-views/verified_queries/*.yaml` | `agent_management.sync_vqrs_to_dbt` (merged into dbt SV model) |
+| Agents | `agents/specs/*.yml` | `agent_management.agents.deploy` (versioning path) |
+| Verified queries | `semantic-views/verified_queries/*.yaml` | `agent_management.semantic_views.vqrs` (merged into dbt SV model) |
 | Evaluation datasets | `agent-evaluation/datasets/*.yaml` | Rendered into Snowflake by `agent-evaluation/scripts/run_eval.py` |
 
 ### Semantic views: either source works

@@ -35,7 +35,7 @@ Reserved alias names: FIRST, LAST, LIVE, DEFAULT, and anything starting with
 "version$". The system uppercases user aliases when it stores them.
 
 Agent invocation is REST-only: this module does not issue chat requests; see
-agent_management.smoke_test for that path.
+agent_management.agents.smoke for that path.
 """
 from __future__ import annotations
 

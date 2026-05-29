@@ -21,70 +21,70 @@ test:  ## Run test suite (uv-managed environment)
 .PHONY: validate render-eval
 
 validate:  ## Validate all agent specs and SV YAMLs
-	$(PYTHON) -m agent_management.validate_specs --env $(ENV)
+	agent-mgmt-validate --env $(ENV)
 
 render-eval:  ## Render eval templates for ENV
-	$(PYTHON) -m agent_management.render_eval_templates --env $(ENV)
+	agent-mgmt-render-eval --env $(ENV)
 
 # ─── Deployment ────────────────────────────────────────────────
 .PHONY: deploy-agents deploy-svs snapshot
 
 deploy-agents:  ## Deploy agents to ENV
-	$(PYTHON) -m agent_management.deploy_agents --env $(ENV)
+	agent-mgmt-deploy-agents --env $(ENV)
 
 deploy-svs:  ## Deploy semantic views to ENV
-	$(PYTHON) -m agent_management.deploy_semantic_views --env $(ENV)
+	agent-mgmt-deploy-svs --env $(ENV)
 
 snapshot:  ## Capture pre-deploy snapshots for ENV
-	$(PYTHON) -m agent_management.snapshot_state --env $(ENV)
+	agent-mgmt-snapshot --env $(ENV)
 
 # ─── Evaluation ────────────────────────────────────────────────
 .PHONY: eval sv-eval sv-eval-check deploy-vqrs check-vqrs metrics drift sync-vqrs
 
 eval:  ## Run CI evaluations for ENV
-	$(PYTHON) -m agent_management.run_ci_eval --env $(ENV)
+	agent-mgmt-eval-agent --env $(ENV)
 
 sv-eval:  ## Run SV evaluations for ENV
-	$(PYTHON) -m agent_management.run_sv_eval --env $(ENV)
+	agent-mgmt-eval-sv --env $(ENV)
 
 sv-eval-check:  ## Check SV eval results for ENV (read-only)
-	$(PYTHON) -m agent_management.check_sv_eval --env $(ENV) --run-name "$(RUN_NAME)"
+	agent-mgmt-check-sv-eval --env $(ENV) --run-name "$(RUN_NAME)"
 
 deploy-vqrs:  ## Deploy VQRs to semantic views for ENV
-	$(PYTHON) -m agent_management.deploy_svs_yaml --env $(ENV)
+	agent-mgmt-deploy-svs-yaml --env $(ENV)
 
 check-vqrs:  ## Check VQR + eval status across environments
-	$(PYTHON) -m agent_management.check_sv_evals --env $(ENV)
+	agent-mgmt-check-sv-evals --env $(ENV)
 
 sync-vqrs:  ## Sync verified queries into dbt models
-	$(PYTHON) -m agent_management.sync_vqrs_to_dbt
+	agent-mgmt-sync-vqrs
 
 metrics:  ## Compute metrics from eval results for ENV
-	$(PYTHON) -m agent_management.compute_metrics --env $(ENV)
+	agent-mgmt-metrics --env $(ENV)
 
 drift:  ## Detect SV schema drift for ENV
-	$(PYTHON) -m agent_management.detect_drift --env $(ENV)
+	agent-mgmt-detect-drift --env $(ENV)
 
 # ─── Dry Runs ──────────────────────────────────────────────────
 .PHONY: dry-deploy-agents dry-deploy-svs dry-eval dry-sv-eval dry-sync-vqrs dry-deploy-vqrs
 
 dry-deploy-agents:  ## Dry-run agent deployment
-	$(PYTHON) -m agent_management.deploy_agents --env $(ENV) --dry-run
+	agent-mgmt-deploy-agents --env $(ENV) --dry-run
 
 dry-deploy-svs:  ## Dry-run SV deployment
-	$(PYTHON) -m agent_management.deploy_semantic_views --env $(ENV) --dry-run
+	agent-mgmt-deploy-svs --env $(ENV) --dry-run
 
 dry-eval:  ## Dry-run evaluation
-	$(PYTHON) -m agent_management.run_ci_eval --env $(ENV) --dry-run
+	agent-mgmt-eval-agent --env $(ENV) --dry-run
 
 dry-sv-eval:  ## Dry-run SV evaluation
-	$(PYTHON) -m agent_management.run_sv_eval --env $(ENV) --dry-run
+	agent-mgmt-eval-sv --env $(ENV) --dry-run
 
 dry-sync-vqrs:  ## Preview VQR sync without writing
-	$(PYTHON) -m agent_management.sync_vqrs_to_dbt --dry-run
+	agent-mgmt-sync-vqrs --dry-run
 
 dry-deploy-vqrs:  ## Dry-run VQR deployment
-	$(PYTHON) -m agent_management.deploy_svs_yaml --env $(ENV) --dry-run
+	agent-mgmt-deploy-svs-yaml --env $(ENV) --dry-run
 
 # ─── Help ──────────────────────────────────────────────────────
 .PHONY: help
