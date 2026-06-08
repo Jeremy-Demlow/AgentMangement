@@ -53,6 +53,14 @@ export SNOWFLAKE_ROLE="$DEFAULT_ROLE"
 export SNOWFLAKE_DATABASE="$DEFAULT_DB"
 export PYTHONPATH="$REPO_ROOT"
 
+# Install the package so the agent-mgmt-* console scripts resolve, mirroring
+# what CI does via the snowflake-setup composite action. Without this the
+# product commands below fail with "command not found".
+if ! command -v agent-mgmt-validate >/dev/null 2>&1; then
+    echo -e "${YELLOW}Installing agent-management (editable) so agent-mgmt-* commands resolve...${NC}"
+    $PYTHON -m pip install -e "$REPO_ROOT" --quiet
+fi
+
 echo -e "${YELLOW}Environment: $TARGET_ENV | DB: $SNOWFLAKE_DATABASE | WH: $SNOWFLAKE_WAREHOUSE | Role: $SNOWFLAKE_ROLE${NC}"
 
 pass_count=0

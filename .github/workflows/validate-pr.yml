@@ -59,21 +59,18 @@ jobs:
           cache: 'pip'
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt
+          # Install the package so agent-mgmt-* console scripts are on PATH.
+          pip install .
 
       - name: Validate all specs for dev
-        env:
-          PYTHONPATH: ${{ github.workspace }}
         run: agent-mgmt-validate --env dev
 
       - name: Validate agent spec format (tool description template)
-        env:
-          PYTHONPATH: ${{ github.workspace }}
         run: agent-mgmt-validate-spec-format agents/specs/resort_executive.yml agents/specs/ski_ops_assistant.yml
 
       - name: Validate all specs for prod
-        env:
-          PYTHONPATH: ${{ github.workspace }}
         run: agent-mgmt-validate --env prod
 
   dbt-quality-gate:

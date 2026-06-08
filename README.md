@@ -78,6 +78,12 @@ agent-mgmt-deploy-svs --env dev
 agent-mgmt-deploy-agents --env dev
 ```
 
+> **New here?** Start with the notebooks in [`notebooks/`](notebooks/README.md):
+> [`agent_management_quickstart.ipynb`](notebooks/agent_management_quickstart.ipynb) tours the lifecycle
+> and CLIs (dry-run, safe), and [`build_from_scratch.ipynb`](notebooks/build_from_scratch.ipynb) walks
+> you through authoring a semantic view, agent, and evals from scratch — then promoting them into the
+> repo. Both run against `dev` or `prod`.
+
 ## Building From This Repo
 
 ### Agent development framework
