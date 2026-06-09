@@ -7,6 +7,29 @@ Interactive walkthroughs of the `agent_management` library. Two notebooks, two a
 - **`build_from_scratch.ipynb`** — *author* the artifacts: build a semantic view, agent, and evals from
   nothing, then promote them into the repo. Live (creates and drops sandbox objects).
 
+## Environment setup (run this first)
+
+The notebooks run in this project's `uv` environment. Install the notebook tooling (Jupyter kernel +
+the package) once:
+
+```bash
+uv sync --extra notebook --extra crypto --extra dev
+```
+
+This installs `ipykernel` + `jupyterlab` alongside `agent-management` into `.venv`. Then point your
+notebook front-end at that environment:
+
+- **VS Code / Cursor**: open a notebook and pick the kernel named `.venv (Python 3.11.x)`.
+- **JupyterLab**: `uv run jupyter lab`.
+- **Named kernel (optional)**: register an explicit kernel that other Jupyter installs can see:
+
+  ```bash
+  uv run python -m ipykernel install --user --name agent-mgmt --display-name "Agent Mgmt (.venv)"
+  ```
+
+If you see `ModuleNotFoundError: No module named 'agent_management'`, the notebook is pointed at the
+wrong kernel — reselect the project `.venv` kernel above.
+
 ## `agent_management_quickstart.ipynb`
 
 An end-to-end showcase of the library as a complete product. It walks the full lifecycle:
