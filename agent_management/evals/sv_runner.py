@@ -42,9 +42,11 @@ from datetime import datetime
 
 from agent_management import setup_logging
 from agent_management.evals.sv_scores import is_platform_error
+from agent_management.semantic_views.drift import list_sv_models
 from agent_management.utils.config import (
     get_database,
     get_sv_eval_config,
+    get_sv_source,
     get_svs_for_agents,
     get_thresholds,
     load_env_config,
@@ -518,6 +520,34 @@ def main():
     logger.info("Run name: %s", run_name)
     logger.info("Threshold: sql_correctness >= %s", sv_threshold)
     logger.info("=" * 60)
+
+    if args.dry_run:
+        if args.sv:
+            sv_names = [args.sv.upper()]
+        elif args.agent:
+            sv_names = get_svs_for_agents(args.agent)
+            if not sv_names:
+                logger.error("No semantic views configured for agent(s): %s", ", ".join(args.agent))
+                logger.error("Check the 'agents' section in project.yml")
+                sys.exit(1)
+            logger.info("Agent scope: %s -> %d SVs", ", ".join(args.agent), len(sv_names))
+        else:
+            try:
+                source = get_sv_source(config)
+            except Exception:
+                source = "auto"
+            if source not in ("dbt", "yaml"):
+                source = "auto"
+            sv_names = [name.upper() for name in list_sv_models(source=source)]
+
+        logger.info("SVs to evaluate: %s", ", ".join(sv_names))
+        for sv_name in sv_names:
+            sv_run_name = f"{run_name}_{sv_name.lower()}"
+            run_eval_for_sv(
+                None, database, schema, sv_name, stage, file_format,
+                sv_run_name, args.no_wait, dry_run=True,
+            )
+        return
 
     conn = connect(config)
     cur = conn.cursor()
