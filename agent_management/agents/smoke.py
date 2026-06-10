@@ -406,7 +406,16 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     setup_logging(args.verbose)
 
-    agents = [args.agent] if args.agent else _agents_in_env(args.env)
+    if args.agent:
+        # Accept a full FQN as-is, or resolve a short name to the AGENTS-schema
+        # FQN via config (mirrors versioning/eval CLIs). Without this, a short
+        # name falls through to the connection's default schema and misroutes.
+        agent_arg = args.agent
+        if "." not in agent_arg:
+            agent_arg = get_agent_fqn(load_env_config(args.env), agent_arg)
+        agents = [agent_arg]
+    else:
+        agents = _agents_in_env(args.env)
     overall_ok = True
     results: list[SmokeResult] = []
     for fqn in agents:

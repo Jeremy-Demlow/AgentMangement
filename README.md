@@ -718,6 +718,26 @@ selectorless REST calls fail with `Version 'live' not found`. See
 Rollback is a single DDL: `ALTER AGENT <fqn> MODIFY VERSION <prev> SET
 ALIAS = production`.
 
+#### Promotion seeds a LIVE draft (editor fidelity)
+
+After `COMMIT`, Snowflake does not recreate a `LIVE` draft — a fully committed
+agent has no `LIVE`, which is correct for runtime (selectorless REST resolves
+to `DEFAULT`) but makes the Snowsight Agent editor report `Version 'live' not
+found`. By convention, `agent-mgmt-agent-versioning promote` leaves the agent
+with a `LIVE` draft mirroring the promoted version (default on; `--no-seed-live`
+to skip):
+
+- **forward** (promoted == `LAST`): `ADD LIVE VERSION FROM LAST` mirrors it.
+- **rollback** (promoted != `LAST`): `ADD LIVE VERSION FROM LAST` then
+  `MODIFY LIVE VERSION SET SPECIFICATION` to the promoted version's spec.
+  `FROM LAST` is the *only* supported seed source — `FROM VERSION$N` / `FROM
+  <alias>` raise SQL compilation error `001003` (verified live).
+
+This is runtime-safe (a `LIVE` draft is never served to a committed alias),
+self-correcting (re-seeded each promote; the next deploy reuses + overwrites
+it), and an existing `LIVE` is left untouched. The tradeoff is a standing
+editable surface in prod — govern out-of-band UI edits with RBAC.
+
 ### Drift guardrails
 
 `tests/test_docs_drift_guardrails.py` runs in the default test suite and

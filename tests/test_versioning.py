@@ -242,6 +242,105 @@ def test_promote_alias_no_op_when_target_already_correct():
     assert not any("MODIFY VERSION" in sql for sql, _ in cur.executed)
 
 
+def test_add_live_from_last_emits_comment_when_given():
+    cur = FakeCursor()
+    conn = FakeConn(cur)
+    versioning.add_live_from_last(conn, "DB.SCH.AGENT", comment="seed v5")
+    sql, _ = cur.executed[0]
+    assert sql == "ALTER AGENT DB.SCH.AGENT ADD LIVE VERSION FROM LAST COMMENT = 'seed v5'"
+
+
+def test_add_live_from_last_no_comment_omits_clause():
+    cur = FakeCursor()
+    conn = FakeConn(cur)
+    versioning.add_live_from_last(conn, "DB.SCH.AGENT")
+    sql, _ = cur.executed[0]
+    assert sql == "ALTER AGENT DB.SCH.AGENT ADD LIVE VERSION FROM LAST"
+
+
+def test_get_version_spec_returns_matching_agent_spec():
+    cur = FakeCursor()
+    cur.set_result(
+        description=[("created_on",), ("name",), ("alias",), ("spec_file_path",),
+                     ("is_default",), ("comment",), ("profile",), ("agent_spec",)],
+        rows=[
+            ("2026-01-02", "VERSION$2", None, "p", True, "", "", '{"models":{}}'),
+            ("2026-01-01", "VERSION$1", None, "p", False, "", "", '{"old":1}'),
+        ],
+    )
+    conn = FakeConn(cur)
+    assert versioning.get_version_spec(conn, "DB.SCH.AGENT", "VERSION$1") == '{"old":1}'
+    assert versioning.get_version_spec(conn, "DB.SCH.AGENT", "VERSION$9") is None
+
+
+def test_seed_live_after_promote_skips_when_live_exists():
+    """If a LIVE draft already exists, leave it untouched (no COMMIT-first error)."""
+    cur = FakeCursor()
+    cur.set_result(
+        description=[("created_on",), ("name",)],
+        rows=[("2026-01-02", ""), ("2026-01-01", "VERSION$5")],  # empty = LIVE draft
+    )
+    conn = FakeConn(cur)
+    created = versioning.seed_live_after_promote(conn, "DB.SCH.AGENT", "VERSION$5")
+    assert created is False
+    assert not any("ADD LIVE VERSION FROM LAST" in s for s, _ in cur.executed)
+
+
+def test_seed_live_after_promote_forward_seeds_from_last_only():
+    """promoted == LAST: ADD LIVE FROM LAST mirrors it; no spec overwrite."""
+    cur = FakeCursor()
+    conn = FakeConn(cur)
+
+    def exec_spy(sql, params=None):
+        cur.executed.append((sql, params))
+        if "SHOW VERSIONS" in sql:
+            cur._description = [("created_on",), ("name",)]
+            cur._rows = [("2026-01-01", "VERSION$5")]  # no LIVE draft present
+        elif "DESCRIBE AGENT" in sql:
+            cur._description = [("name",), ("aliases",)]
+            cur._rows = [("AGENT", '{"DEFAULT":"VERSION$5","LAST":"VERSION$5","VALIDATED":"VERSION$5"}')]
+
+    cur.execute = exec_spy  # type: ignore[assignment]
+    created = versioning.seed_live_after_promote(conn, "DB.SCH.AGENT", "VERSION$5")
+    assert created is True
+    sqls = [s for s, _ in cur.executed]
+    assert any("ADD LIVE VERSION FROM LAST" in s for s in sqls)
+    # Forward promote: no spec overwrite needed.
+    assert not any("MODIFY LIVE VERSION SET SPECIFICATION" in s for s in sqls)
+
+
+def test_seed_live_after_promote_rollback_overwrites_spec():
+    """promoted != LAST: seed FROM LAST then overwrite LIVE spec with promoted spec."""
+    cur = FakeCursor()
+    conn = FakeConn(cur)
+    show_calls = {"n": 0}
+
+    def exec_spy(sql, params=None):
+        cur.executed.append((sql, params))
+        if "SHOW VERSIONS" in sql:
+            show_calls["n"] += 1
+            if show_calls["n"] == 1:
+                # has_live_draft check: no LIVE draft, only committed versions
+                cur._description = [("created_on",), ("name",)]
+                cur._rows = [("2026-01-02", "VERSION$6"), ("2026-01-01", "VERSION$3")]
+            else:
+                # get_version_spec lookup: needs agent_spec column
+                cur._description = [("name",), ("agent_spec",)]
+                cur._rows = [("VERSION$6", '{"new":1}'), ("VERSION$3", '{"rolled":3}')]
+        elif "DESCRIBE AGENT" in sql:
+            cur._description = [("name",), ("aliases",)]
+            cur._rows = [("AGENT", '{"DEFAULT":"VERSION$3","LAST":"VERSION$6","PRODUCTION":"VERSION$3"}')]
+
+    cur.execute = exec_spy  # type: ignore[assignment]
+    created = versioning.seed_live_after_promote(conn, "DB.SCH.AGENT", "VERSION$3")
+    assert created is True
+    sqls = [s for s, _ in cur.executed]
+    assert any("ADD LIVE VERSION FROM LAST" in s for s in sqls)
+    # Rollback: LIVE spec overwritten with the promoted (older) version's spec.
+    assert any("MODIFY LIVE VERSION SET SPECIFICATION" in s for s in sqls)
+    assert any('{"rolled":3}' in s for s in sqls)
+
+
 def test_promote_alias_missing_source_raises():
     cur = FakeCursor()
     cur.set_result(

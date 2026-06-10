@@ -7,6 +7,7 @@ Updated for the versioning-only world:
   resolve_agent_identity, resolve_profile.
 """
 import os
+import types
 
 import jinja2
 import pytest
@@ -15,7 +16,7 @@ from agent_management.utils.config import (
     load_env_config, get_database, get_semantic_schema,
     get_agents_schema, get_agent_fqn, get_sv_fqn, get_thresholds,
     get_expected_databases, get_expected_schemas,
-    get_eval_config, get_deployment_mode, get_data_source_env,
+    get_deployment_mode, get_data_source_env,
 )
 from agent_management.render_template import render_string, build_context
 from agent_management.agents.deploy import (
@@ -174,6 +175,34 @@ class TestDeployAgentsHelpers:
         prod_config = load_env_config("prod")
         profile = resolve_profile(mock_agent, prod_config)
         assert profile["display_name"] == "Test"
+
+
+class TestSmokeAgentResolution:
+    """smoke main() resolves a short --agent name to the AGENTS-schema FQN."""
+
+    def _fake_run(self, captured):
+        def run(fqn, **kwargs):
+            captured["fqn"] = fqn
+            return types.SimpleNamespace(overall_ok=True, as_dict=lambda: {})
+        return run
+
+    def test_short_agent_name_resolves_to_agents_schema_fqn(self, monkeypatch):
+        from agent_management.agents import smoke
+        captured: dict = {}
+        monkeypatch.setattr(smoke, "run_smoke_test", self._fake_run(captured))
+        rc = smoke.main(["--env", "dev", "--agent", "resort_executive", "--json"])
+        assert rc == 0
+        db = EXPECTED_DBS["dev"]
+        agt = EXPECTED_SCHEMAS["dev"]["agents"]
+        assert captured["fqn"] == f"{db}.{agt}.RESORT_EXECUTIVE_DEV"
+
+    def test_full_fqn_passed_through_unchanged(self, monkeypatch):
+        from agent_management.agents import smoke
+        captured: dict = {}
+        monkeypatch.setattr(smoke, "run_smoke_test", self._fake_run(captured))
+        full = "AM_SKI_RESORT.AGENTS.RESORT_EXECUTIVE"
+        smoke.main(["--env", "prod", "--agent", full, "--json"])
+        assert captured["fqn"] == full
 
 
 class TestEvalRendering:

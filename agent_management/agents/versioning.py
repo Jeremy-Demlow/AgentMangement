@@ -14,6 +14,10 @@ Verified against Snowflake 10.14.103, April 2026. The DDL surface is:
     ALTER AGENT <fqn> ADD LIVE VERSION FROM LAST
         -- creates editable LIVE seeded from the latest committed version
         -- fails if a LIVE already exists
+        -- FROM LAST is the ONLY supported seed source. FROM VERSION$N and
+        -- FROM <alias> both raise SQL compilation error 001003 (verified on
+        -- the live DDL surface). To seed LIVE from a non-LAST version, use
+        -- ADD LIVE FROM LAST then MODIFY LIVE VERSION SET SPECIFICATION.
 
     ALTER AGENT <fqn> MODIFY LIVE VERSION SET SPECIFICATION = $$<yaml>$$
         -- overwrites the LIVE draft with a new spec
@@ -270,11 +274,94 @@ def modify_live_spec(conn, agent_fqn: str, spec_yaml: str) -> None:
     )
 
 
-def add_live_from_last(conn, agent_fqn: str) -> None:
-    """Seed an editable LIVE draft from the last committed version."""
+def add_live_from_last(conn, agent_fqn: str, *, comment: str | None = None) -> None:
+    """Seed an editable LIVE draft from the last committed version.
+
+    Snowflake only supports ``FROM LAST`` as the seed source: ``FROM VERSION$N``
+    and ``FROM <alias>`` are rejected with a SQL compilation error (verified
+    against the live DDL surface). To seed LIVE from a non-LAST version, seed
+    ``FROM LAST`` then overwrite the spec with :func:`modify_live_spec`.
+    """
     _assert_identifier(agent_fqn, kind="agent fqn")
     cur = conn.cursor()
-    cur.execute(f"ALTER AGENT {agent_fqn} ADD LIVE VERSION FROM LAST")
+    sql = f"ALTER AGENT {agent_fqn} ADD LIVE VERSION FROM LAST"
+    if comment:
+        escaped = comment.replace("'", "''")
+        sql += f" COMMENT = '{escaped}'"
+    cur.execute(sql)
+
+
+def get_version_spec(conn, agent_fqn: str, version: str) -> str | None:
+    """Return the stored spec (``agent_spec``) for a committed version, or None.
+
+    Reads the ``agent_spec`` column from ``SHOW VERSIONS IN AGENT``. Used to
+    re-seed a LIVE draft's *content* when promoting a version that is not LAST
+    (rollback), since ``ADD LIVE VERSION`` can only seed ``FROM LAST``.
+    """
+    _assert_identifier(agent_fqn, kind="agent fqn")
+    _assert_version_name(version)
+    cur = conn.cursor()
+    cur.execute(f"SHOW VERSIONS IN AGENT {agent_fqn}")
+    for row in _rows_as_dicts(cur):
+        if str(row.get("name") or "").upper() == version.upper():
+            spec = row.get("agent_spec")
+            return str(spec) if spec else None
+    return None
+
+
+def seed_live_after_promote(
+    conn,
+    agent_fqn: str,
+    promoted_version: str,
+    *,
+    comment: str | None = None,
+) -> bool:
+    """Ensure a LIVE draft exists that mirrors ``promoted_version``.
+
+    Convention: after promoting a version, leave the agent with a LIVE draft
+    seeded from that version so the Snowsight editor opens on the promoted
+    baseline and the next iteration starts from it.
+
+    Snowflake only supports ``ADD LIVE VERSION FROM LAST``, so:
+      * ``promoted == LAST``  -> ``ADD LIVE FROM LAST`` mirrors it directly.
+      * ``promoted != LAST``  -> ``ADD LIVE FROM LAST``, then overwrite LIVE's
+        spec with the promoted version's spec (rollback fidelity).
+
+    Returns True if a LIVE draft was created, False if one already existed
+    (left untouched) or seeding was skipped.
+    """
+    _assert_identifier(agent_fqn, kind="agent fqn")
+    _assert_version_name(promoted_version)
+    if has_live_draft(conn, agent_fqn):
+        logger.warning(
+            "seed_live_after_promote: LIVE draft already exists on %s; leaving "
+            "it untouched (commit it first to re-seed).",
+            agent_fqn,
+        )
+        return False
+    add_live_from_last(conn, agent_fqn, comment=comment)
+    aliases = get_aliases(conn, agent_fqn)
+    last = aliases.get("LAST")
+    if last and last.upper() != promoted_version.upper():
+        spec = get_version_spec(conn, agent_fqn, promoted_version)
+        if spec:
+            logger.info(
+                "seed_live_after_promote: rollback seed - overwriting LIVE spec "
+                "with %s (LAST=%s).",
+                promoted_version, last,
+            )
+            modify_live_spec(conn, agent_fqn, spec)
+        else:
+            logger.warning(
+                "seed_live_after_promote: no spec available for %s; LIVE left "
+                "seeded FROM LAST (%s). Edit/commit manually if needed.",
+                promoted_version, last,
+            )
+    logger.info(
+        "seed_live_after_promote: LIVE draft ready on %s (mirrors %s).",
+        agent_fqn, promoted_version,
+    )
+    return True
 
 
 def commit_live(conn, agent_fqn: str) -> str:
@@ -420,6 +507,24 @@ def _cmd_promote(args) -> int:
                 conn, fqn, from_alias=args.from_alias, to_alias=args.to_alias
             )
             promoted[fqn] = version
+            # Convention: leave a LIVE draft mirroring the promoted version so
+            # the Snowsight editor opens on the promoted baseline.
+            if args.seed_live:
+                try:
+                    seed_live_after_promote(
+                        conn,
+                        fqn,
+                        version,
+                        comment=(
+                            f"LIVE seeded after promote "
+                            f"{args.from_alias}->{args.to_alias} ({version})"
+                        ),
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "seed_live_after_promote failed (non-fatal) on %s: %s",
+                        fqn, exc,
+                    )
             # Append audit row so `versioning log` shows the promotion.
             try:
                 record_deploy(
@@ -475,6 +580,17 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--from", dest="from_alias", required=True)
     p.add_argument("--to", dest="to_alias", required=True)
     p.add_argument("--agent", help="Agent FQN or short name; all if omitted.")
+    p.add_argument(
+        "--seed-live",
+        dest="seed_live",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "After promoting, seed a LIVE draft mirroring the promoted version "
+            "so the Snowsight editor opens on it (default: on). Use "
+            "--no-seed-live to skip."
+        ),
+    )
     p.set_defaults(func=_cmd_promote)
 
     list_p = sub.add_parser("list", help="List versions and aliases of an agent.")
