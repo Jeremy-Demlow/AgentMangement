@@ -44,8 +44,8 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt pytest
 
-      - name: Run smoke tests
-        run: pytest tests/test_smoke.py tests/test_templates.py -v
+      - name: Run unit tests (full suite)
+        run: pytest tests/ -v
 
   validate-specs:
     name: Validate Specs (local)
