@@ -78,6 +78,12 @@ agent-mgmt-deploy-svs --env dev
 agent-mgmt-deploy-agents --env dev
 ```
 
+> **New here?** Start with the notebooks in [`notebooks/`](notebooks/README.md):
+> [`agent_management_quickstart.ipynb`](notebooks/agent_management_quickstart.ipynb) tours the lifecycle
+> and CLIs (dry-run, safe), and [`build_from_scratch.ipynb`](notebooks/build_from_scratch.ipynb) walks
+> you through authoring a semantic view, agent, and evals from scratch — then promoting them into the
+> repo. Both run against `dev` or `prod`.
+
 ## Building From This Repo
 
 ### Agent development framework
@@ -289,23 +295,14 @@ AgentMangement/
 │   └── prod.env.yml
 │
 ├── agent_management/                # Core Python library (pip-installable)
-│   ├── deploy_agents.py             #   ALTER AGENT / CREATE AGENT
-│   ├── deploy_semantic_views.py     #   SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML
-│   ├── render_template.py           #   Jinja2 env substitution
-│   ├── snapshot_state.py            #   Pre-deploy state capture
-│   ├── rollback.py                  #   Restore from snapshot
-│   ├── validate_specs.py            #   YAML lint + dry-run
-│   ├── detect_drift.py              #   Git vs Snowflake diff
-│   ├── compute_metrics.py           #   F1/precision/recall from eval
-│   ├── check_sv_eval.py             #   SV eval quality gate
-│   ├── run_sv_eval.py               #   Run SV evals end-to-end
-│   ├── get_sv_eval_scores.py        #   SV eval scorecard (GET_ANALYST_AI_EVALUATION_DATA)
-│   ├── check_sv_evals.py            #   Multi-env VQR + eval status
-│   ├── render_eval_templates.py     #   Render eval configs per env
+│   ├── agents/                      #   Agent deploy/versioning/rollback/smoke
+│   ├── semantic_views/              #   SV deploy/drift/VQR sync
+│   ├── evals/                       #   Agent + SV eval runners, scoring, comments
 │   ├── ci/                          #   CI checks (test coverage, PK tests, lineage)
-│   └── utils/
-│       ├── config.py                #   Config loading, FQN helpers, suffix resolution
-│       └── snowflake_client.py      #   Snowflake connection wrapper
+│   ├── utils/                       #   Config + Snowflake connection helpers
+│   ├── render_template.py           #   Jinja2 env substitution
+│   ├── validate_specs.py            #   YAML lint + dry-run
+│   └── validate_spec_format.py      #   Agent spec style validation
 │
 ├── agents/                          # Cortex Agent definitions
 │   └── specs/                       #   Jinja2 YAML templates
@@ -356,10 +353,8 @@ AgentMangement/
 │
 ├── .github/PIPELINE_SETUP.md        # CI/CD pipeline setup guide
 │
-├── tests/                           # Python tests (smoke + template rendering)
-├── docs/                            # Architecture, data dictionary, dev notes
-├── requirements/                    # Traceable requirements (REQ-001..013)
-└── models/                          # Data model documentation
+├── examples/                        # Public starter project + env config templates
+└── tests/                           # Python tests (smoke + template rendering)
 ```
 
 ## Deployment Mode
@@ -427,9 +422,14 @@ After `pip install -e .`:
 | `agent-mgmt-render-eval` | Render eval templates for a target environment |
 | `agent-mgmt-detect-drift` | Detect Git vs Snowflake spec drift |
 | `agent-mgmt-check-sv-eval` | Check semantic view evaluation results |
-| `python -m agent_management.run_sv_eval` | Run SV evals end-to-end (start, poll, check) |
-| `python -m agent_management.get_sv_eval_scores` | Display SV eval scorecard with per-VQR detail |
-| `python -m agent_management.check_sv_evals` | Check VQR and eval status across environments |
+| `agent-mgmt-eval-agent` | Run Cortex Agent evaluations |
+| `agent-mgmt-eval-sv` | Run SV evals end-to-end (start, poll, check) |
+| `agent-mgmt-smoke-agent` | Smoke-test deployed agents |
+| `agent-mgmt-agent-versioning` | Inspect/promote Cortex Agent versions and aliases |
+| `agent-mgmt-sync-vqrs` | Sync verified queries into dbt semantic view models |
+| `agent-mgmt-sv-scores` | Display SV eval scorecard with per-VQR detail |
+| `agent-mgmt-check-sv-evals` | Check VQR and eval status across environments |
+| `agent-mgmt-format-sv-comment` | Format SV eval results for PR comments |
 
 ## Evaluations
 
@@ -453,44 +453,44 @@ SV evaluations use Snowflake's built-in `EXECUTE_AI_EVALUATION` to test Cortex A
 
 ```bash
 # Run evals for all SVs (waits for completion, checks thresholds)
-python -m agent_management.run_sv_eval --env prod
+agent-mgmt-eval-sv --env prod
 
 # Run for a single SV
-python -m agent_management.run_sv_eval --env prod --sv sem_revenue
+agent-mgmt-eval-sv --env prod --sv sem_revenue
 
 # Run only SVs used by a specific agent (from project.yml agents config)
-python -m agent_management.run_sv_eval --env prod --agent ski_ops_assistant
+agent-mgmt-eval-sv --env prod --agent ski_ops_assistant
 
 # Run SVs for multiple agents
-python -m agent_management.run_sv_eval --env prod --agent ski_ops_assistant --agent resort_executive
+agent-mgmt-eval-sv --env prod --agent ski_ops_assistant --agent resort_executive
 
 # Start evals without waiting
-python -m agent_management.run_sv_eval --env prod --no-wait
+agent-mgmt-eval-sv --env prod --no-wait
 
 # Check status of a running eval
-python -m agent_management.run_sv_eval --env prod --status --run-name "sv_eval_20260420"
+agent-mgmt-eval-sv --env prod --status --run-name "sv_eval_20260420"
 
 # Fetch results of a completed eval
-python -m agent_management.run_sv_eval --env prod --results --run-name "sv_eval_20260420"
+agent-mgmt-eval-sv --env prod --results --run-name "sv_eval_20260420"
 ```
 
 #### Viewing Eval Scores
 
 ```bash
 # Scorecard for all SVs (auto-detects latest run per SV)
-python -m agent_management.get_sv_eval_scores --env prod
+agent-mgmt-sv-scores --env prod
 
 # With per-VQR detail
-python -m agent_management.get_sv_eval_scores --env prod --detail
+agent-mgmt-sv-scores --env prod --detail
 
 # JSON output for CI/CD pipelines
-python -m agent_management.get_sv_eval_scores --env prod --json
+agent-mgmt-sv-scores --env prod --json
 
 # Override threshold (default from config)
-python -m agent_management.get_sv_eval_scores --env prod --threshold 0.80
+agent-mgmt-sv-scores --env prod --threshold 0.80
 
 # Single SV with specific run name
-python -m agent_management.get_sv_eval_scores --env prod --sv sem_revenue --run-name eval_revenue_v9
+agent-mgmt-sv-scores --env prod --sv sem_revenue --run-name eval_revenue_v9
 ```
 
 #### Retrieving Eval Data with SQL
@@ -666,9 +666,8 @@ needs investigation, the operator can re-run the agent eval manually after
 Cortex cleans up its internal state (typically a few minutes).
 
 The retry policy mirrors the existing patterns in
-`agent_management/run_sv_eval.py` (per-VQR `Invocation failed` retry) and
-`.github/workflows/deploy-prod-validated.yml` (whole-run crash retry). See
-[REQ-021](reqs/21_eval_resilience_retry.md) for the diagnostic write-up.
+`agent_management/evals/sv_runner.py` (per-VQR `Invocation failed` retry) and
+`.github/workflows/deploy-prod-validated.yml` (whole-run crash retry).
 
 ### Schema drift auto-heal in workflows
 
@@ -717,7 +716,27 @@ selectorless REST calls fail with `Version 'live' not found`. See
 [REG-006](tests/regression.md).
 
 Rollback is a single DDL: `ALTER AGENT <fqn> MODIFY VERSION <prev> SET
-ALIAS = production`. See [`docs/operations/ROLLBACK_RUNBOOK.md`](docs/operations/ROLLBACK_RUNBOOK.md).
+ALIAS = production`.
+
+#### Promotion seeds a LIVE draft (editor fidelity)
+
+After `COMMIT`, Snowflake does not recreate a `LIVE` draft — a fully committed
+agent has no `LIVE`, which is correct for runtime (selectorless REST resolves
+to `DEFAULT`) but makes the Snowsight Agent editor report `Version 'live' not
+found`. By convention, `agent-mgmt-agent-versioning promote` leaves the agent
+with a `LIVE` draft mirroring the promoted version (default on; `--no-seed-live`
+to skip):
+
+- **forward** (promoted == `LAST`): `ADD LIVE VERSION FROM LAST` mirrors it.
+- **rollback** (promoted != `LAST`): `ADD LIVE VERSION FROM LAST` then
+  `MODIFY LIVE VERSION SET SPECIFICATION` to the promoted version's spec.
+  `FROM LAST` is the *only* supported seed source — `FROM VERSION$N` / `FROM
+  <alias>` raise SQL compilation error `001003` (verified live).
+
+This is runtime-safe (a `LIVE` draft is never served to a committed alias),
+self-correcting (re-seeded each promote; the next deploy reuses + overwrites
+it), and an existing `LIVE` is left untouched. The tradeoff is a standing
+editable surface in prod — govern out-of-band UI edits with RBAC.
 
 ### Drift guardrails
 
@@ -734,7 +753,7 @@ fails when:
   production-promote}`.
 
 Archival docs are excluded via an explicit `ARCHIVAL_DOCS` set so the scan
-stays honest. See [REQ-020](reqs/20_docs_drift_guardrails.md).
+stays honest.
 
 ### Eval semantics by stage
 
@@ -755,21 +774,7 @@ workflow contract.
 
 Every fixed bug becomes a row in [`tests/regression.md`](tests/regression.md)
 with root cause, fix summary, and the test or workflow check that proves
-it stays fixed. Every meaningful change in this repo carries a `reqs/`
-file (REQ-NNN) so future contributors can read the original intent
-without spelunking through commits.
-
-REQ files added during the recent grooming pass:
-
-| REQ | Topic |
-|-----|-------|
-| [REQ-015](reqs/15_test_suite_alignment.md) | Restore local test suite after `get_aliases()` moved to `DESCRIBE AGENT` JSON |
-| [REQ-016](reqs/16_docs_alignment_validated_alias.md) | Two-environment validated-alias model in active docs |
-| [REQ-017](reqs/17_ci_workflow_contract.md) | CI workflow contract: paths filters and eval semantics |
-| [REQ-018](reqs/18_regression_log.md) | Permanent regression log (REG-001..007) |
-| [REQ-019](reqs/19_eval_classification_seams.md) | `classify_eval_outcome()` pure helper + sv_eval helper tests |
-| [REQ-020](reqs/20_docs_drift_guardrails.md) | Five drift guardrail tests in the default suite |
-| [REQ-021](reqs/21_eval_resilience_retry.md) | Agent eval STATUS_DETAILS visibility + retry-once on transients |
+it stays fixed.
 
 ## Local Testing
 

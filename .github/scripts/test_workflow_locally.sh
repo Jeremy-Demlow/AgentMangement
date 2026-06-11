@@ -53,6 +53,14 @@ export SNOWFLAKE_ROLE="$DEFAULT_ROLE"
 export SNOWFLAKE_DATABASE="$DEFAULT_DB"
 export PYTHONPATH="$REPO_ROOT"
 
+# Install the package so the agent-mgmt-* console scripts resolve, mirroring
+# what CI does via the snowflake-setup composite action. Without this the
+# product commands below fail with "command not found".
+if ! command -v agent-mgmt-validate >/dev/null 2>&1; then
+    echo -e "${YELLOW}Installing agent-management (editable) so agent-mgmt-* commands resolve...${NC}"
+    $PYTHON -m pip install -e "$REPO_ROOT" --quiet
+fi
+
 echo -e "${YELLOW}Environment: $TARGET_ENV | DB: $SNOWFLAKE_DATABASE | WH: $SNOWFLAKE_WAREHOUSE | Role: $SNOWFLAKE_ROLE${NC}"
 
 pass_count=0
@@ -79,8 +87,8 @@ should_run() {
 
 # ── Step 1: Snapshot ──────────────────────────────────────────────────────────
 if should_run "snapshot"; then
-    run_step "snapshot_state --env $TARGET_ENV" \
-        $PYTHON -m agent_management.snapshot_state --env "$TARGET_ENV"
+    run_step "agent-mgmt-snapshot --env $TARGET_ENV" \
+        agent-mgmt-snapshot --env "$TARGET_ENV"
 fi
 
 # ── Step 2: dbt build ────────────────────────────────────────────────────────
@@ -102,20 +110,20 @@ fi
 
 # ── Step 3: Deploy semantic views ────────────────────────────────────────────
 if should_run "deploy-svs"; then
-    run_step "deploy_semantic_views --env $TARGET_ENV" \
-        $PYTHON -m agent_management.deploy_semantic_views --env "$TARGET_ENV"
+    run_step "agent-mgmt-deploy-svs --env $TARGET_ENV" \
+        agent-mgmt-deploy-svs --env "$TARGET_ENV"
 fi
 
 # ── Step 4: SV eval gate ─────────────────────────────────────────────────────
 if should_run "sv-eval"; then
-    run_step "run_sv_eval --env $TARGET_ENV (dry-run)" \
-        $PYTHON -m agent_management.run_sv_eval --env "$TARGET_ENV" --dry-run || true
+    run_step "agent-mgmt-eval-sv --env $TARGET_ENV (dry-run)" \
+        agent-mgmt-eval-sv --env "$TARGET_ENV" --dry-run || true
 fi
 
 # ── Step 5: Deploy agents ────────────────────────────────────────────────────
 if should_run "deploy-agents"; then
-    run_step "deploy_agents --env $TARGET_ENV" \
-        $PYTHON -m agent_management.deploy_agents --env "$TARGET_ENV"
+    run_step "agent-mgmt-deploy-agents --env $TARGET_ENV" \
+        agent-mgmt-deploy-agents --env "$TARGET_ENV"
 fi
 
 # ── Step 6: Agent evaluations ────────────────────────────────────────────────
@@ -128,8 +136,8 @@ fi
 
 # ── Step 7: Compute metrics ──────────────────────────────────────────────────
 if should_run "compute-metrics"; then
-    run_step "compute_metrics --env $TARGET_ENV" \
-        $PYTHON -m agent_management.compute_metrics --env "$TARGET_ENV" \
+    run_step "agent-mgmt-metrics --env $TARGET_ENV" \
+        agent-mgmt-metrics --env "$TARGET_ENV" \
             --results-dir agent-evaluation/results/
 fi
 

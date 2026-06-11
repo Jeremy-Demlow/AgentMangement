@@ -44,8 +44,12 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt pytest
 
-      - name: Run smoke tests
-        run: pytest tests/test_smoke.py tests/test_templates.py -v
+      - name: Run unit tests (full suite, excl. data-generation env tests)
+        # Data-generation tests need pandas + a richer runtime; they run in the
+        # data pipeline workflows, not this lightweight PR gate.
+        run: pytest tests/ -v
+          --ignore=tests/test_data_generation_idempotency.py
+          --ignore=tests/test_data_generation_subcategory.py
 
   validate-specs:
     name: Validate Specs (local)
@@ -59,22 +63,19 @@ jobs:
           cache: 'pip'
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt
+          # Install the package so agent-mgmt-* console scripts are on PATH.
+          pip install .
 
       - name: Validate all specs for dev
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-        run: python -m agent_management.validate_specs --env dev
+        run: agent-mgmt-validate --env dev
 
       - name: Validate agent spec format (tool description template)
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-        run: python -m agent_management.validate_spec_format agents/specs/resort_executive.yml agents/specs/ski_ops_assistant.yml
+        run: agent-mgmt-validate-spec-format agents/specs/resort_executive.yml agents/specs/ski_ops_assistant.yml
 
       - name: Validate all specs for prod
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-        run: python -m agent_management.validate_specs --env prod
+        run: agent-mgmt-validate --env prod
 
   dbt-quality-gate:
     name: dbt Quality Gate
@@ -119,15 +120,15 @@ jobs:
           dbt compile --profiles-dir . --target ${{ matrix.env }}
 
       - name: Dry-run semantic views against ${{ matrix.env }}
-        run: python -m agent_management.deploy_semantic_views --env ${{ matrix.env }} --dry-run
+        run: agent-mgmt-deploy-svs --env ${{ matrix.env }} --dry-run
 
       - name: Dry-run agents against ${{ matrix.env }}
-        run: python -m agent_management.deploy_agents --env ${{ matrix.env }} --dry-run
+        run: agent-mgmt-deploy-agents --env ${{ matrix.env }} --dry-run
 
       - name: Detect SV drift vs dbt source of truth (advisory)
         id: drift_check
         continue-on-error: true
-        run: python -m agent_management.detect_sv_drift --env ${{ matrix.env }} --fail-on-drift
+        run: agent-mgmt-detect-drift --env ${{ matrix.env }} --fail-on-drift
 
       - name: Drift summary
         if: always()
@@ -168,7 +169,7 @@ jobs:
 
       - name: Query rollback history (last 7 days)
         continue-on-error: true
-        run: python -m agent_management.format_rollback_history_comment --env prod --days 7 --output /tmp/rollback_history.md
+        run: agent-mgmt-format-rollback-comment --env prod --days 7 --output /tmp/rollback_history.md
 
       - name: Comment PR with rollback history (if any)
         if: always()
@@ -236,10 +237,10 @@ jobs:
           snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
       - name: Dry-run semantic views (dev)
-        run: python -m agent_management.deploy_semantic_views --env dev --dry-run
+        run: agent-mgmt-deploy-svs --env dev --dry-run
 
       - name: Dry-run deploy agents (dev)
-        run: python -m agent_management.deploy_agents --env dev --dry-run
+        run: agent-mgmt-deploy-agents --env dev --dry-run
 
       - name: Cleanup
         if: always()
@@ -267,7 +268,7 @@ jobs:
         id: sv_eval
         env:
           SV_RUN_NAME: "PR-${{ github.event.pull_request.number }}-${{ github.run_id }}"
-        # Exit-code taxonomy from agent_management.run_sv_eval (kept in sync
+        # Exit-code taxonomy from agent_management.evals.sv_runner (kept in sync
         # with deploy-dev.yml so workflows and Python share semantics):
         #   0 = passed
         #   1 = threshold failure (truthful fail; non-blocking on dev via
@@ -276,7 +277,7 @@ jobs:
         #   3 = platform blocker (Cortex Analyst PuPr) -- advisory, exits 0
         run: |
           set +e
-          python -m agent_management.run_sv_eval --env dev --run-name "$SV_RUN_NAME"
+          agent-mgmt-eval-sv --env dev --run-name "$SV_RUN_NAME"
           code=$?
           echo "code=$code" >> "$GITHUB_OUTPUT"
           case "$code" in
@@ -300,7 +301,7 @@ jobs:
           # up to 5min; break as soon as we get a non-empty views{} payload.
           FOUND=0
           for attempt in 1 2 3 4 5 6 7 8 9 10; do
-            python -m agent_management.get_sv_eval_scores --env dev --run-name "$SV_RUN_NAME" --json > "$OUT" 2>/dev/null || true
+            agent-mgmt-sv-scores --env dev --run-name "$SV_RUN_NAME" --json > "$OUT" 2>/dev/null || true
             if python -c "import json,sys; d=json.load(open('$OUT')); sys.exit(0 if d.get('views') else 1)" 2>/dev/null; then
               echo "SV eval scores available (attempt $attempt)"
               FOUND=1
@@ -317,7 +318,7 @@ jobs:
       - name: Format SV eval PR comment
         if: always()
         continue-on-error: true
-        run: python -m agent_management.format_sv_eval_comment --input agent-evaluation/results/sv_eval_scores.json --output /tmp/sv_eval_summary.md
+        run: agent-mgmt-format-sv-comment --input agent-evaluation/results/sv_eval_scores.json --output /tmp/sv_eval_summary.md
 
       - name: Comment PR with SV eval summary
         if: always() && github.event.pull_request.number
@@ -381,7 +382,7 @@ jobs:
             platform_blocked)
               echo "### SV Evaluation Gate: PLATFORM BLOCKED" >> "$GITHUB_STEP_SUMMARY"
               echo "Snowflake Cortex Analyst Evaluations PuPr issue (SYSTEM_AI_OBS_ANALYST_EVAL_* missing)." >> "$GITHUB_STEP_SUMMARY"
-              echo "Pipeline continuing. See docs/operations/IAC_GAPS.md #8." >> "$GITHUB_STEP_SUMMARY"
+              echo "Pipeline continuing. This is a known Cortex Analyst evaluation platform blocker." >> "$GITHUB_STEP_SUMMARY"
               ;;
             crash|unknown|*)
               echo "### SV Evaluation Gate: CRASHED (code=${{ steps.sv_eval.outputs.code }})" >> "$GITHUB_STEP_SUMMARY"
@@ -419,7 +420,7 @@ jobs:
 
       - name: Run agent evaluations
         id: eval
-        run: python -m agent_management.run_ci_eval --env dev
+        run: agent-mgmt-eval-agent --env dev
 
       - name: Agent Eval Summary
         if: always()

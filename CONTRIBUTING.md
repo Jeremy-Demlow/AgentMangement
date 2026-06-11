@@ -19,12 +19,8 @@ There is no QA environment. The "pre-production eval" that QA used to serve now
 runs against the `validated` alias on the PROD agent. Customer traffic follows
 the `production` alias, which only moves after a human approval.
 
-See:
-
-- [docs/operations/AGENT_VERSIONING.md](docs/operations/AGENT_VERSIONING.md)
-- [docs/operations/ROLLBACK_RUNBOOK.md](docs/operations/ROLLBACK_RUNBOOK.md)
-- [docs/semantic-views/VQR_GUIDE.md](docs/semantic-views/VQR_GUIDE.md)
-- [reqs/README.md](reqs/README.md)
+Operational runbooks and REQ notes are maintained as local reference assets;
+the public repository keeps the executable framework, examples, and tests.
 
 ## Agent spec style guide
 
@@ -44,7 +40,7 @@ CROSS-REFERENCE WITH:  sibling tools the agent can chain with
 Validate locally:
 
 ```bash
-python -m agent_management.validate_spec_format agents/specs/resort_executive.yml
+agent-mgmt-validate-spec-format agents/specs/resort_executive.yml
 ```
 
 Seasons must be resolved from `DIM_DATE`; hard-coded strings like `2024-2025`
@@ -72,13 +68,12 @@ pip install -e ".[dev]"
 pytest tests/test_smoke.py tests/test_templates.py -v
 
 # Validate specs for all envs
-python -m agent_management.validate_specs --env dev
-python -m agent_management.validate_specs --env qa
-python -m agent_management.validate_specs --env prod
+agent-mgmt-validate --env dev
+agent-mgmt-validate --env prod
 
 # Dry-run deploy against DEV
-python -m agent_management.deploy_semantic_views --env dev --dry-run
-python -m agent_management.deploy_agents --env dev --dry-run
+agent-mgmt-deploy-svs --env dev --dry-run
+agent-mgmt-deploy-agents --env dev --dry-run
 ```
 
 ### 4. Open a PR
@@ -157,7 +152,7 @@ Practical consequences:
 | `deploy-prod-validated.yml` | Advisory threshold; crash hard-fails | Alias `validated` already moved to the new version when the eval runs. The operator decides whether to promote. |
 | `promote-validated-to-production.yml` | Advisory threshold; crash hard-fails | Alias `production` has already flipped when the eval runs. If it regresses, trigger `rollback.yml` to reassign `production` back to a prior version. |
 
-Crash exit codes (taxonomy in `agent_management/run_sv_eval.py`) always hard-fail. Threshold-only failures are advisory because the alias-based deploy is reversible: rolling back is a single `ALTER AGENT ... MODIFY VERSION ... SET ALIAS ...` away.
+Crash exit codes from the SV eval runner always hard-fail. Threshold-only failures are advisory because the alias-based deploy is reversible: rolling back is a single `ALTER AGENT ... MODIFY VERSION ... SET ALIAS ...` away.
 
 ## Environment Mapping
 
@@ -209,7 +204,7 @@ daily_data_refresh.yml (PROD)
 | `deploy-prod-validated.yml` (post-merge to main) | Advisory threshold; crash hard-fails | Operator decides whether to promote |
 | `promote-validated-to-production.yml` | Advisory threshold; crash hard-fails | Trigger `rollback.yml` if regressed |
 
-All evals go through `python -m agent_management.run_ci_eval --env <env>` which handles agent name suffix resolution.
+All evals go through `agent-mgmt-eval-agent --env <env>` which handles agent name suffix resolution.
 
 ### Eval Thresholds
 
@@ -229,8 +224,8 @@ eval:
 
 The eval config templates in `agent-evaluation/configs/` use `{{ eval.thresholds.answer_correctness }}` Jinja2 placeholders. These are resolved at two points:
 
-1. **CI runtime** — `run_ci_eval.py` renders templates via `render_file()` before running evals
-2. **Pre-generation** — `render_eval_templates.py` generates resolved configs into `agent-evaluation/generated/<env>/`
+1. **CI runtime** — `agent-mgmt-eval-agent` renders templates via `render_file()` before running evals
+2. **Pre-generation** — `agent-mgmt-render-eval` generates resolved configs into `agent-evaluation/generated/<env>/`
 
 To change thresholds, edit the `eval.thresholds` section in the environment config — **not** the template configs or generated configs.
 
@@ -250,8 +245,8 @@ Single-account mode uses suffixes:
 # (via GitHub Actions → Rollback → leave timestamp empty)
 
 # Or locally:
-python -m agent_management.rollback --env dev --list
-python -m agent_management.rollback --env dev --timestamp 20260409_120000 --target all --dry-run
+agent-mgmt-rollback --env dev --list
+agent-mgmt-rollback --env dev --timestamp 20260409_120000 --target all --dry-run
 ```
 
 ## Future Development

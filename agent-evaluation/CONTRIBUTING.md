@@ -318,7 +318,7 @@ python scripts/run_eval.py configs/<agent>.yaml --dry-run
 python scripts/run_eval.py configs/<agent>.yaml --resolve-only --connection myconnection
 
 # CI entrypoint (renders templates, runs all agents)
-python -m agent_management.run_ci_eval --env dev
+agent-mgmt-eval-agent --env dev
 
 # View latest results
 python scripts/run_eval.py configs/<agent>.yaml --results --connection myconnection

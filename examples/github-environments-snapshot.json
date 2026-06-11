@@ -1,0 +1,33 @@
+{
+  "required_repo_secrets": [
+    "SNOWFLAKE_ACCOUNT",
+    "SNOWFLAKE_USER",
+    "SNOWFLAKE_PRIVATE_KEY",
+    "SNOWFLAKE_PRIVATE_KEY_RAW"
+  ],
+  "envs": {
+    "DEV": {
+      "reviewers": [],
+      "variables": {
+        "SNOWFLAKE_DATABASE": "MY_APP_DEV",
+        "SNOWFLAKE_ROLE": "MY_APP_DEPLOY_ROLE_DEV",
+        "SNOWFLAKE_WAREHOUSE": "MY_APP_WH_DEV"
+      },
+      "secrets": []
+    },
+    "PROD": {
+      "reviewers": [],
+      "variables": {
+        "SNOWFLAKE_DATABASE": "MY_APP",
+        "SNOWFLAKE_ROLE": "MY_APP_DEPLOY_ROLE",
+        "SNOWFLAKE_WAREHOUSE": "MY_APP_WH"
+      },
+      "secrets": []
+    },
+    "production-promote": {
+      "reviewers": [],
+      "variables": {},
+      "secrets": []
+    }
+  }
+}

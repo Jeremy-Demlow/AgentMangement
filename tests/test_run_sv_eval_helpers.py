@@ -1,11 +1,11 @@
-"""Unit tests for the existing pure helpers in agent_management.run_sv_eval.
+"""Unit tests for pure helpers in agent_management.evals.sv_runner.
 
 REQ-019 followup: lock down platform-blocker classification and score
 computation so future refactors stay safe.
 """
 from __future__ import annotations
 
-from agent_management.run_sv_eval import compute_score, _is_retryable, is_platform_blocker
+from agent_management.evals.sv_runner import compute_score, _is_retryable, is_platform_blocker
 
 
 def test_is_platform_blocker_matches_known_pupr_signature():

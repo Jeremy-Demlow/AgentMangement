@@ -75,7 +75,7 @@ jobs:
           snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
       - name: Snapshot current state (pointer)
-        run: python -m agent_management.snapshot_state --env prod
+        run: agent-mgmt-snapshot --env prod
 
       - name: Upload snapshots
         uses: actions/upload-artifact@v4
@@ -105,7 +105,7 @@ jobs:
           snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
       - name: Sync VQRs into dbt models
-        run: python -m agent_management.sync_vqrs_to_dbt
+        run: agent-mgmt-sync-vqrs
 
       - name: Run dbt
         if: hashFiles('dbt_ski_resort/dbt_project.yml') != ''
@@ -119,7 +119,65 @@ jobs:
           dbt run --target prod --select "marts.semantic" --profiles-dir .
 
       - name: Deploy/verify semantic views (prod)
-        run: python -m agent_management.deploy_semantic_views --env prod
+        run: agent-mgmt-deploy-svs --env prod
+
+      - name: Cleanup
+        if: always()
+        run: rm -f /tmp/snowflake_key.p8
+
+  sv-eval-gate:
+    name: SV Evaluation Gate (prod)
+    runs-on: ubuntu-latest
+    needs: [prod-gate, deploy-svs]
+    continue-on-error: true
+    env:
+      SNOWFLAKE_WAREHOUSE: ${{ needs.prod-gate.outputs.warehouse }}
+      SNOWFLAKE_ROLE: ${{ needs.prod-gate.outputs.role }}
+      SNOWFLAKE_DATABASE: ${{ needs.prod-gate.outputs.database }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Snowflake
+        uses: ./.github/actions/snowflake-setup
+        with:
+          snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+
+      - name: Run SV evaluations (validated)
+        id: sv_eval
+        continue-on-error: true
+        # Exit code taxonomy from agent_management.evals.sv_runner:
+        #   0 = passed
+        #   1 = threshold failure (advisory)
+        #   2 = crash / unhandled (hard fail)
+        #   3 = platform blocker (Cortex Analyst Evaluations PuPr bug) — advisory
+        run: |
+          set +e
+          agent-mgmt-eval-sv --env prod --run-name "CI-${{ github.run_id }}-${{ github.sha }}"
+          code=$?
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          if [ "$code" = "0" ]; then
+            echo "status=passed" >> "$GITHUB_OUTPUT"; exit 0
+          elif [ "$code" = "1" ]; then
+            echo "status=threshold_fail" >> "$GITHUB_OUTPUT"; exit 1
+          elif [ "$code" = "3" ]; then
+            echo "status=platform_blocked" >> "$GITHUB_OUTPUT"; exit 0
+          else
+            echo "status=crash" >> "$GITHUB_OUTPUT"; exit "$code"
+          fi
+
+      - name: SV Eval Summary
+        if: always()
+        run: |
+          case "${{ steps.sv_eval.outputs.status }}" in
+            passed) echo "### PROD SV Evaluation Gate: PASSED" >> "$GITHUB_STEP_SUMMARY" ;;
+            threshold_fail) echo "### PROD SV Evaluation Gate: FAILED (advisory)" >> "$GITHUB_STEP_SUMMARY" ;;
+            platform_blocked) echo "### PROD SV Evaluation Gate: PLATFORM BLOCKED (advisory)" >> "$GITHUB_STEP_SUMMARY" ;;
+            crash|*) echo "### PROD SV Evaluation Gate: CRASHED (code=${{ steps.sv_eval.outputs.code }})" >> "$GITHUB_STEP_SUMMARY" ;;
+          esac
+
+      - name: Fail gate on crash
+        if: steps.sv_eval.outputs.status == 'crash'
+        run: exit 1
 
       - name: Cleanup
         if: always()
@@ -128,7 +186,7 @@ jobs:
   deploy-agents:
     name: Deploy agents (alias=validated)
     runs-on: ubuntu-latest
-    needs: [prod-gate, deploy-svs]
+    needs: [prod-gate, sv-eval-gate]
     env:
       SNOWFLAKE_WAREHOUSE: ${{ needs.prod-gate.outputs.warehouse }}
       SNOWFLAKE_ROLE: ${{ needs.prod-gate.outputs.role }}
@@ -142,10 +200,10 @@ jobs:
           snowflake-private-key: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
       - name: Deploy agents (versioned, alias=validated)
-        run: python -m agent_management.deploy_agents --env prod
+        run: agent-mgmt-deploy-agents --env prod
 
       - name: Smoke test (validated)
-        run: python -m agent_management.smoke_test --env prod --alias validated
+        run: agent-mgmt-smoke-agent --env prod --alias validated
 
       - name: Cleanup
         if: always()
@@ -182,7 +240,7 @@ jobs:
           code=2
           for attempt in 1 2; do
             echo "=== Eval attempt $attempt/2 ==="
-            python -m agent_management.run_ci_eval --env prod --alias validated
+            agent-mgmt-eval-agent --env prod --alias validated
             code=$?
             # Only retry on crash. Pass and threshold-fail are terminal.
             if [ "$code" != "2" ]; then

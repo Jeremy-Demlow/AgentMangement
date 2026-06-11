@@ -25,6 +25,10 @@ runs:
       run: |
         pip install --upgrade pip
         pip install -r ${{ inputs.requirements-file }}
+        # Install the agent-management package so the agent-mgmt-* console
+        # scripts land on PATH. Without this, every workflow step that calls
+        # an agent-mgmt-* command fails with "command not found".
+        pip install .
 
     - name: Write private key
       shell: bash

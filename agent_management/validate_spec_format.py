@@ -19,7 +19,7 @@ Usage::
 
 CLI::
 
-    python -m agent_management.validate_spec_format agents/specs/*.yml
+    agent-mgmt-validate-spec-format agents/specs/*.yml
 """
 from __future__ import annotations
 
@@ -116,7 +116,7 @@ def _check_no_hardcoded_seasons(spec_path: str, spec: dict) -> list[ValidationEr
             rule="no_hardcoded_seasons",
             message=(
                 f"hardcoded season strings {sorted(set(found))}; resolve seasons "
-                "dynamically via DIM_DATE (see docs/operations/AGENT_VERSIONING.md)"
+                "dynamically via DIM_DATE"
             ),
         )
     ]

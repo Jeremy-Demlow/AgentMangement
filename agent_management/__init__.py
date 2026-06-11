@@ -20,24 +20,24 @@ def setup_logging(verbosity: int = 0) -> None:
 
 
 def __getattr__(name: str):
-    # Lazy re-exports so importing the package stays cheap while giving users
-    # the public API surface described in reqs/01_library_boundaries.md.
+    # Lazy re-exports keep package import cheap while preserving the historical
+    # top-level API surface.
     _lazy = {
-        "run_smoke_test": ("agent_management.smoke_test", "run_smoke_test"),
-        "snapshot_agent": ("agent_management.snapshot_agent", "snapshot_agent"),
-        "load_snapshot": ("agent_management.snapshot_agent", "load_snapshot"),
-        "diff_snapshots": ("agent_management.snapshot_agent", "diff_snapshots"),
+        "run_smoke_test": ("agent_management.agents.smoke", "run_smoke_test"),
+        "snapshot_agent": ("agent_management.agents.snapshot", "snapshot_agent"),
+        "load_snapshot": ("agent_management.agents.snapshot", "load_snapshot"),
+        "diff_snapshots": ("agent_management.agents.snapshot", "diff_snapshots"),
         "validate_spec_format": ("agent_management.validate_spec_format", "validate_spec_format"),
-        "commit_version": ("agent_management.versioning", "commit_version"),
-        "commit_live": ("agent_management.versioning", "commit_live"),
-        "add_live_from_last": ("agent_management.versioning", "add_live_from_last"),
-        "modify_live_spec": ("agent_management.versioning", "modify_live_spec"),
-        "has_live_draft": ("agent_management.versioning", "has_live_draft"),
-        "list_versions": ("agent_management.versioning", "list_versions"),
-        "get_aliases": ("agent_management.versioning", "get_aliases"),
-        "set_alias": ("agent_management.versioning", "set_alias"),
-        "version_exists": ("agent_management.versioning", "version_exists"),
-        "promote_alias": ("agent_management.versioning", "promote_alias"),
+        "commit_version": ("agent_management.agents.versioning", "commit_version"),
+        "commit_live": ("agent_management.agents.versioning", "commit_live"),
+        "add_live_from_last": ("agent_management.agents.versioning", "add_live_from_last"),
+        "modify_live_spec": ("agent_management.agents.versioning", "modify_live_spec"),
+        "has_live_draft": ("agent_management.agents.versioning", "has_live_draft"),
+        "list_versions": ("agent_management.agents.versioning", "list_versions"),
+        "get_aliases": ("agent_management.agents.versioning", "get_aliases"),
+        "set_alias": ("agent_management.agents.versioning", "set_alias"),
+        "version_exists": ("agent_management.agents.versioning", "version_exists"),
+        "promote_alias": ("agent_management.agents.versioning", "promote_alias"),
     }
     if name in _lazy:
         import importlib

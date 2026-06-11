@@ -1,4 +1,4 @@
-"""Unit tests for agent_management.rollback (alias reassignment only)."""
+"""Unit tests for agent_management.agents.rollback (alias reassignment only)."""
 from __future__ import annotations
 
 import json
@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from agent_management import rollback as rb
+from agent_management.agents import rollback as rb
 
 
 class FakeConn:
