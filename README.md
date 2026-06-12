@@ -34,7 +34,7 @@ The framework manages the full lifecycle across two environments (DEV, PROD), ea
 │  │  1. DCM         → databases, schemas, roles, grants    │      │
 │  │  2. dbt run    → staging → dims → facts → semantic     │      │
 │  │  3. Deploy SVs  → SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML│      │
-│  │  4. Deploy Agents → ALTER AGENT / CREATE AGENT         │      │
+│  │  4. Deploy Agents → ADD LIVE → MODIFY → COMMIT → alias│      │
 │  │  5. Evaluate    → EXECUTE_AI_EVALUATION + thresholds   │      │
 │  └────────────────────────────────────────────────────────┘      │
 └─────────────────────────────────────────────────────────────────┘
@@ -216,6 +216,27 @@ gh secret set SNOWFLAKE_PRIVATE_KEY < ~/.snowflake/keys/rsa_key.p8
 
 # 3. Push — PRs now trigger validate-pr.yml, merges to dev trigger deploy-dev.yml
 ```
+
+## Branch Model
+
+Standard GitFlow with two long-lived branches and short-lived feature branches:
+
+```
+feature/* ──PR──▶ dev ──PR──▶ main ──manual dispatch──▶ (production alias)
+              │            │                          │
+   validate-pr.yml   deploy-dev.yml          deploy-prod-validated.yml
+   (gate, evals      (DEV deploy,            (PROD deploy to `validated`,
+    advisory on dev)  alias=latest)           single approval gate)
+                                              then promote-validated-to-production.yml
+                                              (customer `production`, second approval)
+```
+
+- **`feature/*`** — branch off `dev`. Open a PR to `dev`; `validate-pr.yml` runs lint, specs, dbt, Snowflake dry-runs, and evals. Eval failures are **advisory on `dev` PRs** (`continue-on-error`), **blocking on `main` PRs**.
+- **`dev`** — integration branch. Merging triggers `deploy-dev.yml` (deploy + smoke + SV/agent eval, alias `latest`).
+- **`main`** — production source of truth. Merging `dev → main` triggers `deploy-prod-validated.yml` (moves `validated` after a single PROD approval).
+- **`production` alias** — customer traffic. Moved only by `promote-validated-to-production.yml` (manual dispatch, second approval); the promote also seeds a LIVE draft on the promoted version.
+
+After merging `dev → main`, fast-forward `dev` to `main` to keep them in sync.
 
 ## CI/CD Pipeline Architecture
 
@@ -430,6 +451,12 @@ After `pip install -e .`:
 | `agent-mgmt-sv-scores` | Display SV eval scorecard with per-VQR detail |
 | `agent-mgmt-check-sv-evals` | Check VQR and eval status across environments |
 | `agent-mgmt-format-sv-comment` | Format SV eval results for PR comments |
+| `agent-mgmt-snapshot-agent` | Capture a full agent spec snapshot (forensics, distinct from the rollback pointer) |
+| `agent-mgmt-detect-sv-drift` | Detect drift between Git semantic-view models and Snowflake |
+| `agent-mgmt-deploy-svs-yaml` | Deploy semantic views from raw YAML (non-dbt path) |
+| `agent-mgmt-regen-sv-gold` | Regenerate semantic-view gold reference files |
+| `agent-mgmt-validate-spec-format` | Validate agent spec field structure/style |
+| `agent-mgmt-format-rollback-comment` | Format rollback results for PR comments |
 
 ## Evaluations
 
@@ -681,7 +708,7 @@ this drift automatically:
   `GROOMING_LOGS.NOTES`, `LIFT_MAINTENANCE.NOTES`) and widens them to
   `VARCHAR` before dbt runs.
 - `.github/workflows/sync_env_data.yml` — same reconciliation against the
-  target env so a freshly-synced DEV/QA never inherits the bug.
+  target env so a freshly-synced DEV never inherits the bug.
 
 See [REG-001 and REG-002 in `tests/regression.md`](tests/regression.md) for
 the original incidents.
