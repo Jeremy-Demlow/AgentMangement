@@ -6,9 +6,8 @@ Environment-specific configuration files that drive the entire deployment pipeli
 
 ```
 environments/
-  dev.env.yml     # DEV — lenient thresholds, _DEV suffix
-  qa.env.yml      # QA — stricter thresholds, _QA suffix, hard eval gate
-  prod.env.yml    # PROD — strictest thresholds, no suffix, auto-rollback on failure
+  dev.env.yml     # DEV — lenient thresholds, _DEV suffix, deploy alias=latest
+  prod.env.yml    # PROD — strict thresholds, no suffix, aliases=validated+production
 ```
 
 ## How Environment Configs Work
