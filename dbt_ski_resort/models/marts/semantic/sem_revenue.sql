@@ -99,6 +99,9 @@ DIMENSIONS (
       COMMENT = 'Transaction date',
     DIM_DATE.SKI_SEASON AS SKI_SEASON
       COMMENT = 'Ski season identifier',
+    DIM_DATE.SEASON_TYPE AS SEASON_TYPE
+      WITH SYNONYMS ('operating_season')
+      COMMENT = 'Season type: winter (Nov-Apr) or summer (May-Oct)',
     DIM_DATE.MONTH_NAME AS MONTH_NAME
       COMMENT = 'Calendar month name',
     DIM_CUSTOMER.CUSTOMER_KEY AS CUSTOMER_KEY
@@ -197,7 +200,7 @@ WITH EXTENSION (CA = $$
 {
   "module_custom_instructions": {
     "question_categorization": "Route lift operations, wait time, or capacity conversations to SKI_RESORT_DB.SEMANTIC.SEM_OPERATIONS. Route pass utilization, renewal, or loyalty questions to SKI_RESORT_DB.SEMANTIC.SEM_PASSHOLDER_ANALYTICS. Route persona-only behavioral questions to SKI_RESORT_DB.SEMANTIC.SEM_CUSTOMER_BEHAVIOR. When a request mentions ticket, ticket sales, or ticket category, use FACT_TICKET_SALES. When it mentions rental or equipment, use FACT_RENTALS. When it mentions food, beverage, F&B, or dining, use FACT_FOOD_BEVERAGE. Never ask for clarification about which revenue stream — infer from context or answer for all streams if ambiguous.",
-    "sql_generation": "Aggregate ticket revenue from FACT_TICKET_SALES, rentals from FACT_RENTALS, and F&B from FACT_FOOD_BEVERAGE. When the question specifies a product family (tickets, rentals, or F&B), use only that fact table. When ambiguous, answer using all relevant fact tables without asking for clarification. Use DIM_DATE.FULL_DATE for calendar filters and DIM_DATE.SKI_SEASON for seasonal framing; leverage DATE_TRUNC for month or season aggregation. Join DIM_LOCATION, DIM_TICKET_TYPE, or DIM_PRODUCT to segment results. Guard division with DIV0(...) and include NULLS LAST when ordering by computed metrics."
+    "sql_generation": "Aggregate ticket revenue from FACT_TICKET_SALES, rentals from FACT_RENTALS, and F&B from FACT_FOOD_BEVERAGE. When the question specifies a product family (tickets, rentals, or F&B), use only that fact table. When ambiguous, answer using all relevant fact tables without asking for clarification. Use DIM_DATE.FULL_DATE for calendar filters and DIM_DATE.SKI_SEASON for seasonal framing; leverage DATE_TRUNC for month or season aggregation. Join DIM_LOCATION, DIM_TICKET_TYPE, or DIM_PRODUCT to segment results. Guard division with DIV0(...) and include NULLS LAST when ordering by computed metrics. The resort operates year-round: winter tickets are ski day passes; summer tickets include bike park, hiking, gondola scenic, and concert passes. When asking about recent revenue without a season filter, include ALL data. Use DIM_DATE.SEASON_TYPE to compare winter vs summer revenue."
   },
   "verified_queries": [
     {

@@ -33,6 +33,9 @@ DIMENSIONS (
       COMMENT = 'Date of incident',
     DIM_DATE.SKI_SEASON AS SKI_SEASON
       COMMENT = 'Ski season identifier (e.g. 2024-2025)',
+    DIM_DATE.SEASON_TYPE AS SEASON_TYPE
+      WITH SYNONYMS ('operating_season')
+      COMMENT = 'Season type: winter (Nov-Apr) or summer (May-Oct)',
     DIM_DATE.FULL_DATE AS FULL_DATE
       WITH SYNONYMS ('date')
       COMMENT = 'Calendar date',
@@ -71,7 +74,7 @@ COMMENT = 'Safety incident tracking'
 WITH EXTENSION (CA = $$
 {
   "module_custom_instructions": {
-    "sql_generation": "Use FACT_INCIDENTS for all safety and incident queries. Use DIM_DATE.SKI_SEASON for seasonal filtering (e.g. 'last season'). Filter by SEVERITY for critical analysis. Use PATROL_RESPONSE_MINUTES for response time metrics. Guard division with DIV0()."
+    "sql_generation": "Use FACT_INCIDENTS for all safety and incident queries. Use DIM_DATE.SKI_SEASON for seasonal filtering (e.g. 'last season'). Filter by SEVERITY for critical analysis. Use PATROL_RESPONSE_MINUTES for response time metrics. Guard division with DIV0(). The resort operates year-round: winter incidents include collisions, falls, lost skiers; summer incidents include bike crashes, trail falls, dehydration, wildlife encounters. When asking about recent incidents without a season filter, include ALL data. Use DIM_DATE.SEASON_TYPE = 'summer' or 'winter' to filter by operating season."
   },
   "verified_queries": [
     {

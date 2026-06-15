@@ -1,6 +1,7 @@
 """
-Shared constants and utilities for ski resort data generation.
+Shared constants and utilities for resort data generation.
 Single source of truth for all data generation scripts.
+Supports year-round operations: winter skiing (Nov-Apr) and summer recreation (May-Oct).
 """
 
 import numpy as np
@@ -218,14 +219,100 @@ INCIDENT_TYPES = ['collision', 'fall', 'equipment_failure', 'medical', 'lost_ski
 INCIDENT_SEVERITY = ['minor', 'moderate', 'serious']
 
 # =============================================================================
+# SUMMER RECREATION CONFIGURATION (May-October)
+# =============================================================================
+SUMMER_MONTHS = {5, 6, 7, 8, 9, 10}
+
+SUMMER_TRAIL_NAMES = [
+    'Summit Trail', 'Eagle Ridge Trail', 'Wildflower Loop', 'River Path',
+    'Bike Flow Track', 'Downhill Run', 'Cross-Country Trail', 'Alpine Meadow',
+    'Peak Vista', 'Forest Single-Track', 'Ridgeline Trail', 'Valley Loop'
+]
+
+SUMMER_ACTIVITIES = ['bike_park', 'hiking', 'scenic_gondola', 'concert', 'zipline', 'climbing_wall']
+
+SUMMER_INCIDENT_TYPES = ['bike_crash', 'trail_fall', 'dehydration', 'wildlife_encounter', 'equipment_failure', 'medical']
+
+SUMMER_LESSON_TYPES = ['mountain_bike_beginner', 'mountain_bike_intermediate', 'mountain_bike_advanced', 'guided_hike', 'kids_adventure_camp']
+
+SUMMER_TICKET_TYPES = ['TKT_BIKE', 'TKT_HIKE', 'TKT_GONDOLA', 'TKT_CONCERT', 'TKT_COMBO']
+SUMMER_TICKET_PRICES = {
+    'TKT_BIKE': 69,      # Bike Park Day Pass
+    'TKT_HIKE': 25,      # Hiking Trail Pass
+    'TKT_GONDOLA': 39,   # Scenic Gondola Ride
+    'TKT_CONCERT': 55,   # Concert Pass
+    'TKT_COMBO': 89,     # Summer Combo Pass
+}
+
+SUMMER_RENTAL_ITEMS = [
+    {'id': 'RPROD001', 'name': 'Mountain Bike', 'price': 65},
+    {'id': 'RPROD002', 'name': 'E-Bike', 'price': 95},
+    {'id': 'RPROD003', 'name': 'Hiking Poles', 'price': 15},
+    {'id': 'RPROD004', 'name': 'Climbing Gear Set', 'price': 45},
+    {'id': 'RPROD005', 'name': 'Bike Helmet', 'price': 20},
+    {'id': 'RPROD006', 'name': 'Bike Armor Pack', 'price': 30},
+]
+
+SUMMER_FEEDBACK_CATEGORIES = ['bike_park', 'trail_conditions', 'food_service', 'rental_shop', 'events', 'overall_experience']
+SUMMER_FEEDBACK_SUBCATEGORIES = {
+    'bike_park': ['trail_quality', 'signage', 'lift_access', 'difficulty_variety'],
+    'trail_conditions': ['maintenance', 'scenery', 'difficulty_marking', 'overcrowding'],
+    'food_service': ['quality', 'speed', 'variety', 'value'],
+    'rental_shop': ['equipment_quality', 'fitting', 'wait_time', 'staff_knowledge'],
+    'events': ['music_quality', 'organization', 'value', 'atmosphere'],
+    'overall_experience': ['value', 'staff', 'facilities', 'accessibility'],
+}
+
+# Lifts operating in summer (gondola for scenic/bike uplift, plus a few chairs)
+SUMMER_LIFT_IDS = ['L001', 'L002', 'L004', 'L009', 'L010']
+SUMMER_LIFT_POPULARITY = {
+    'L001': 2.0,   # Summit Gondola - scenic rides + bike uplift
+    'L002': 1.0,   # Eagle Ridge - bike park access
+    'L004': 0.8,   # Family Fun - hiking access
+    'L009': 1.5,   # Terrain Park Express - bike park main
+    'L010': 1.2,   # Mid Mountain - connector
+}
+
+SUMMER_STAFFING_DEPARTMENTS = [
+    {'id': 'LIFT', 'department': 'Lift Operations', 'job_role': 'Lift Operator',
+     'base_staff': 8, 'weekend_mult': 1.3, 'location_pool': None},
+    {'id': 'RENT', 'department': 'Rentals', 'job_role': 'Rental Tech',
+     'base_staff': 6, 'weekend_mult': 1.4, 'location_pool': RENTAL_LOCS},
+    {'id': 'FOOD', 'department': 'Food & Beverage', 'job_role': 'F&B Staff',
+     'base_staff': 12, 'weekend_mult': 1.5, 'location_pool': FB_LOCS},
+    {'id': 'TICK', 'department': 'Ticket Sales', 'job_role': 'Ticket Agent',
+     'base_staff': 4, 'weekend_mult': 1.6, 'location_pool': TICKET_LOCS[:3]},
+    {'id': 'PTRL', 'department': 'Trail Patrol', 'job_role': 'Patroller',
+     'base_staff': 6, 'weekend_mult': 1.2, 'location_pool': None},
+    {'id': 'GRND', 'department': 'Grounds', 'job_role': 'Trail Crew',
+     'base_staff': 8, 'weekend_mult': 1.0, 'location_pool': None},
+]
+
+# Summer holiday/event multipliers
+SUMMER_HOLIDAY_DATES = {
+    (5, 25): 1.8, (5, 26): 1.8, (5, 27): 1.8,   # Memorial Day weekend
+    (7, 3): 2.2, (7, 4): 2.5, (7, 5): 2.0,       # July 4th
+    (9, 1): 1.8, (9, 2): 1.8,                     # Labor Day weekend
+}
+
+# Monthly base temperatures for summer (Fahrenheit)
+SUMMER_MONTHLY_BASE_TEMP = {5: 55, 6: 65, 7: 72, 8: 70, 9: 60, 10: 48}
+
+# =============================================================================
 # SEASONAL MODIFIERS
 # =============================================================================
-SEASON_MULTIPLIERS = {11: 0.5, 12: 1.2, 1: 1.5, 2: 1.4, 3: 1.1, 4: 0.7}
+SEASON_MULTIPLIERS = {
+    # Winter ski season
+    11: 0.5, 12: 1.2, 1: 1.5, 2: 1.4, 3: 1.1, 4: 0.7,
+    # Summer recreation season
+    5: 0.3, 6: 0.6, 7: 0.8, 8: 0.8, 9: 0.5, 10: 0.3,
+}
 
 def get_daily_modifier(date, rng_instance=None):
     """
     Calculate all modifiers for a single date.
     Returns dict with season_mult, holiday_mult, weather data, etc.
+    Works for both winter (Nov-Apr) and summer (May-Oct) seasons.
     """
     if rng_instance is None:
         rng_instance = rng
@@ -234,31 +321,45 @@ def get_daily_modifier(date, rng_instance=None):
     day_of_week = date.weekday()
     day = date.day
 
-    # Season multiplier (0 = off-season)
+    is_summer = month in SUMMER_MONTHS
+
+    # Season multiplier
     season_mult = SEASON_MULTIPLIERS.get(month, 0)
 
     # Holiday multiplier
     holiday_mult = 1.0
-    if month == 12 and day >= 20:
-        holiday_mult = 2.5
-    elif month == 1 and day <= 5:
-        holiday_mult = 2.5
-    elif month == 2 and 15 <= day <= 21:
-        holiday_mult = 1.8
+    if is_summer:
+        holiday_mult = SUMMER_HOLIDAY_DATES.get((month, day), 1.0)
+    else:
+        if month == 12 and day >= 20:
+            holiday_mult = 2.5
+        elif month == 1 and day <= 5:
+            holiday_mult = 2.5
+        elif month == 2 and 15 <= day <= 21:
+            holiday_mult = 1.8
 
     is_weekend = day_of_week >= 5
     is_saturday = day_of_week == 5
 
     # Weather simulation
-    mean_snow = MONTHLY_SNOWFALL_MEAN.get(month, 0)
-    snowfall = max(0.0, rng_instance.normal(mean_snow, 3.0)) if month in [11, 12, 1, 2, 3, 4] else 0
-    is_powder_day = snowfall >= 6.0
-    storm_warning = snowfall >= 12.0
-
-    # Temperature
-    base_temp = MONTHLY_BASE_TEMP.get(month, 30)
-    temp_high = base_temp + int(rng_instance.integers(0, 10))
-    temp_low = base_temp - int(rng_instance.integers(5, 15))
+    if is_summer:
+        snowfall = 0.0
+        is_powder_day = False
+        storm_warning = False
+        base_temp = SUMMER_MONTHLY_BASE_TEMP.get(month, 65)
+        temp_high = base_temp + int(rng_instance.integers(0, 12))
+        temp_low = base_temp - int(rng_instance.integers(10, 20))
+        # Thunderstorm chance in summer (reduces visitors)
+        is_rainy = rng_instance.random() < 0.15
+    else:
+        mean_snow = MONTHLY_SNOWFALL_MEAN.get(month, 0)
+        snowfall = max(0.0, rng_instance.normal(mean_snow, 3.0)) if month in [11, 12, 1, 2, 3, 4] else 0
+        is_powder_day = snowfall >= 6.0
+        storm_warning = snowfall >= 12.0
+        base_temp = MONTHLY_BASE_TEMP.get(month, 30)
+        temp_high = base_temp + int(rng_instance.integers(0, 10))
+        temp_low = base_temp - int(rng_instance.integers(5, 15))
+        is_rainy = False
 
     return {
         'season_mult': season_mult,
@@ -270,7 +371,9 @@ def get_daily_modifier(date, rng_instance=None):
         'snowfall': snowfall,
         'temp_high_f': temp_high,
         'temp_low_f': temp_low,
-        'powder_boost': 1.35 if is_powder_day else 1.0
+        'powder_boost': 1.35 if is_powder_day else 1.0,
+        'is_summer': is_summer,
+        'is_rainy': is_rainy,
     }
 
 

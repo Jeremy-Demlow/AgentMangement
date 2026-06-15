@@ -60,7 +60,7 @@ COMMENT = 'Ski school analytics'
 WITH EXTENSION (CA = $$
 {
   "module_custom_instructions": {
-    "sql_generation": "Use FACT_LESSONS for all lesson and ski school queries. Filter by LESSON_TYPE for private vs group. Use STUDENT_RATING for instructor performance. Guard division with DIV0()."
+    "sql_generation": "Use FACT_LESSONS for all lesson queries. Filter by LESSON_TYPE for private vs group. Use STUDENT_RATING for instructor performance. Guard division with DIV0(). The resort offers year-round lessons: winter includes ski/snowboard (beginner_group, intermediate_group, advanced_group, private, kids_camp); summer includes mountain biking and guided hikes (mountain_bike_beginner, mountain_bike_intermediate, mountain_bike_advanced, guided_hike, kids_adventure_camp). Use SPORT_TYPE to distinguish ski/snowboard/mountain_bike/hiking/adventure. When asking about recent lessons, include ALL data unless a season is specified."
   },
   "verified_queries": [
     {

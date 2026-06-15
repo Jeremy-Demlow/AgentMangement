@@ -58,7 +58,7 @@ COMMENT = 'Customer satisfaction and feedback analysis'
 WITH EXTENSION (CA = $$
 {
   "module_custom_instructions": {
-    "sql_generation": "Use FACT_FEEDBACK for all feedback and satisfaction queries. Filter by SENTIMENT for positive/negative analysis. Use NPS_SCORE for net promoter calculations. Guard division with DIV0()."
+    "sql_generation": "Use FACT_FEEDBACK for all feedback and satisfaction queries. Filter by SENTIMENT for positive/negative analysis. Use NPS_SCORE for net promoter calculations. Guard division with DIV0(). The resort collects feedback year-round: winter categories include lift_operations, ski_school, rental_shop, food_service, facilities, overall_experience; summer categories include bike_park, trail_conditions, food_service, rental_shop, events, overall_experience. When asking about recent feedback, include ALL data unless a season is specified."
   },
   "verified_queries": [
     {

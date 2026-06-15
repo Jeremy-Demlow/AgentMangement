@@ -3,8 +3,8 @@
 TABLES (
     DIM_DATE AS {{ ref('dim_date') }}
       PRIMARY KEY (DATE_KEY)
-      WITH SYNONYMS ('calendar', 'ski_calendar')
-      COMMENT = 'Calendar dimension with ski-season attributes',
+      WITH SYNONYMS ('calendar', 'ski_calendar', 'resort_calendar')
+      COMMENT = 'Calendar dimension with season attributes (winter skiing and summer recreation)',
 
     DIM_LIFT AS {{ ref('dim_lift') }}
       PRIMARY KEY (LIFT_KEY)
@@ -18,8 +18,8 @@ TABLES (
 
     FACT_LIFT_SCANS AS {{ ref('fact_lift_scans') }}
       PRIMARY KEY (SCAN_KEY)
-      WITH SYNONYMS ('lift_scans', 'lift_usage_events')
-      COMMENT = 'Granular lift scan fact with wait times and weather context',
+      WITH SYNONYMS ('lift_scans', 'lift_usage_events', 'activity_scans')
+      COMMENT = 'Granular lift/gondola scan fact with wait times and weather context (winter ski + summer bike uplift/scenic rides)',
 
     FACT_LIFT_MAINTENANCE AS {{ ref('fact_lift_maintenance') }}
       PRIMARY KEY (MAINTENANCE_KEY)
@@ -28,8 +28,8 @@ TABLES (
 
     FACT_GROOMING AS {{ ref('fact_grooming') }}
       PRIMARY KEY (GROOMING_KEY)
-      WITH SYNONYMS ('grooming', 'trail_grooming', 'grooming_logs')
-      COMMENT = 'Trail grooming operations with conditions before and after'
+      WITH SYNONYMS ('grooming', 'trail_grooming', 'grooming_logs', 'trail_maintenance')
+      COMMENT = 'Trail grooming/maintenance operations with conditions before and after (snow grooming in winter, trail repair in summer)'
 )
 
 RELATIONSHIPS (
@@ -90,8 +90,11 @@ DIMENSIONS (
       COMMENT = 'Holiday indicator',
     DIM_DATE.SKI_SEASON AS SKI_SEASON
       COMMENT = 'Ski season identifier (YYYY-YYYY)',
+    DIM_DATE.SEASON_TYPE AS SEASON_TYPE
+      WITH SYNONYMS ('operating_season')
+      COMMENT = 'Season type: winter (Nov-Apr) or summer (May-Oct)',
     DIM_DATE.SNOW_CONDITION AS SNOW_CONDITION
-      COMMENT = 'Snow surface quality classification',
+      COMMENT = 'Snow surface quality classification (N/A in summer)',
     DIM_LIFT.LIFT_KEY AS LIFT_KEY
       COMMENT = 'Lift surrogate key',
     DIM_LIFT.LIFT_NAME AS LIFT_NAME
@@ -238,7 +241,7 @@ WITH EXTENSION (CA = $$
 {
   "module_custom_instructions": {
     "question_categorization": "This view covers three operational domains: (1) Lift scans and wait times, (2) Lift maintenance and inspections, (3) Trail grooming operations. Route customer persona or churn questions to SEM_CUSTOMER_BEHAVIOR. Route revenue, ticketing, or spend topics to SEM_REVENUE. Route pass ROI or renewal effectiveness to SEM_PASSHOLDER_ANALYTICS. For maintenance questions, use FACT_LIFT_MAINTENANCE metrics (downtime, cost, inspection pass rate). For grooming questions, use FACT_GROOMING metrics (duration, fuel, condition improvement). For lift performance, use FACT_LIFT_SCANS metrics (wait times, utilization).",
-    "sql_generation": "Slice temporal windows with DIM_DATE.FULL_DATE or DIM_DATE.SKI_SEASON and rely on DATE_TRUNC/DATEADD for trend groupings. Use FACT_LIFT_SCANS.WAIT_TIME_MINUTES for wait calculations and DIM_LIFT.CAPACITY_PER_HOUR when computing utilization; wrap ratios with DIV0(...). For maintenance analysis, join through MAINTENANCE_TO_LIFT to get lift names. For grooming analysis, use FACT_GROOMING.TRAIL_NAME directly. Reuse DIM_DATE.IS_WEEKEND and DIM_DATE.SNOW_CONDITION flags instead of recomputing conditions. When ranking lifts by maintenance cost or downtime, include ORDER BY clauses with NULLS LAST."
+    "sql_generation": "Slice temporal windows with DIM_DATE.FULL_DATE or DIM_DATE.SKI_SEASON and rely on DATE_TRUNC/DATEADD for trend groupings. Use DIM_DATE.SEASON_TYPE to filter winter vs summer operations (winter = ski lift scans + snow grooming; summer = bike uplift/scenic gondola scans + trail maintenance). Use FACT_LIFT_SCANS.WAIT_TIME_MINUTES for wait calculations and DIM_LIFT.CAPACITY_PER_HOUR when computing utilization; wrap ratios with DIV0(...). For maintenance analysis, join through MAINTENANCE_TO_LIFT to get lift names. For grooming analysis, use FACT_GROOMING.TRAIL_NAME directly. Reuse DIM_DATE.IS_WEEKEND and DIM_DATE.SNOW_CONDITION flags instead of recomputing conditions. When ranking lifts by maintenance cost or downtime, include ORDER BY clauses with NULLS LAST. When asking about recent or current operations without a season filter, include ALL data."
   },
   "verified_queries": [
     {

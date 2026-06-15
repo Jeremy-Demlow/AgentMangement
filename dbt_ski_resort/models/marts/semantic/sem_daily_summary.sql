@@ -3,6 +3,7 @@
 -- Executive daily summary semantic view
 -- One-stop view for resort KPIs: visitors, revenue by segment
 -- Based on FACT_PASS_USAGE as the primary grain (one row per visitor per day)
+-- Covers year-round operations: skiing (Nov-Apr) and summer recreation (May-Oct)
 
 TABLES (
     DIM_DATE AS {{ ref('dim_date') }}
@@ -17,8 +18,8 @@ TABLES (
 
     FACT_PASS_USAGE AS {{ ref('fact_pass_usage') }}
       PRIMARY KEY (USAGE_KEY)
-      WITH SYNONYMS ('visits', 'daily_attendance', 'skier_days')
-      COMMENT = 'Daily visitor activity - one row per guest per ski day'
+      WITH SYNONYMS ('visits', 'daily_attendance', 'skier_days', 'visitor_days')
+      COMMENT = 'Daily visitor activity - one row per guest per day (winter ski or summer recreation)'
 )
 
 RELATIONSHIPS (
@@ -70,7 +71,12 @@ DIMENSIONS (
     DIM_DATE.HOLIDAY_NAME AS HOLIDAY_NAME
       COMMENT = 'Name of holiday if applicable',
     DIM_DATE.SNOW_CONDITION AS SNOW_CONDITION
-      COMMENT = 'Snow quality (Excellent/Good/Fair)',
+      COMMENT = 'Snow quality (Excellent/Good/Fair/N/A for summer)',
+    DIM_DATE.SEASON_TYPE AS SEASON_TYPE
+      WITH SYNONYMS ('season_type', 'operating_season')
+      COMMENT = 'Season type: winter (Nov-Apr) or summer (May-Oct)',
+    DIM_DATE.IS_SUMMER_SEASON AS IS_SUMMER_SEASON
+      COMMENT = 'Summer season indicator (May-October)',
 
     -- Customer dimensions
     DIM_CUSTOMER.CUSTOMER_SEGMENT AS CUSTOMER_SEGMENT
@@ -154,7 +160,7 @@ WITH EXTENSION (CA = $$
 {
   "module_custom_instructions": {
     "question_categorization": "This is the primary view for overall resort performance, visitor trends, and attendance patterns. Use it for questions about daily visitors, seasonal comparisons, weekend vs weekday patterns, and guest segment mix. Route detailed lift wait times to SEM_OPERATIONS. Route revenue and spend questions to SEM_REVENUE. Route pass holder ROI questions to SEM_PASSHOLDER_ANALYTICS. Route customer journey questions to SEM_CUSTOMER_BEHAVIOR. When no date is specified, default to the current SKI_SEASON.",
-    "sql_generation": "Use DIM_DATE.FULL_DATE for daily analysis, DIM_DATE.SKI_SEASON for seasonal comparisons, and DATE_TRUNC for weekly/monthly trends. Segment by DIM_CUSTOMER.CUSTOMER_SEGMENT for persona insights and DIM_CUSTOMER.IS_PASS_HOLDER for pass vs day ticket analysis. Use DIM_DATE.IS_WEEKEND and DIM_DATE.IS_HOLIDAY for pattern analysis. All division should use DIV0() to handle zeros. For year-over-year, compare by WEEK_OF_SEASON across different SKI_SEASON values."
+    "sql_generation": "Use DIM_DATE.FULL_DATE for daily analysis, DIM_DATE.SKI_SEASON for seasonal comparisons, DIM_DATE.SEASON_TYPE to filter winter vs summer operations, and DATE_TRUNC for weekly/monthly trends. Segment by DIM_CUSTOMER.CUSTOMER_SEGMENT for persona insights and DIM_CUSTOMER.IS_PASS_HOLDER for pass vs day ticket analysis. Use DIM_DATE.IS_WEEKEND and DIM_DATE.IS_HOLIDAY for pattern analysis. All division should use DIV0() to handle zeros. For year-over-year, compare by WEEK_OF_SEASON across different SKI_SEASON values. When asking about recent or current activity and no season filter is specified, include ALL data (both winter and summer). Use DIM_DATE.SEASON_TYPE = 'summer' for bike park, hiking, and recreation queries; use DIM_DATE.SEASON_TYPE = 'winter' for ski-specific queries."
   },
   "verified_queries": [
     {

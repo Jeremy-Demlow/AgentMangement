@@ -43,6 +43,9 @@ DIMENSIONS (
     DIM_DATE.SKI_SEASON AS SKI_SEASON
       WITH SYNONYMS ('season')
       COMMENT = 'Ski season identifier (YYYY-YYYY)',
+    DIM_DATE.SEASON_TYPE AS SEASON_TYPE
+      WITH SYNONYMS ('operating_season')
+      COMMENT = 'Season type: winter (Nov-Apr) or summer (May-Oct)',
     DIM_DATE.WEEK_OF_SEASON AS WEEK_OF_SEASON
       COMMENT = 'Week number within the ski season',
     DIM_DATE.IS_WEEKEND AS IS_WEEKEND
@@ -120,7 +123,7 @@ WITH EXTENSION (CA = $$
 {
   "module_custom_instructions": {
     "question_categorization": "Route lift wait or terrain utilization questions to SKI_RESORT_DB.SEMANTIC.SEM_OPERATIONS. Route revenue, pricing, or transaction questions to SKI_RESORT_DB.SEMANTIC.SEM_REVENUE. Route pass value, ROI, or renewal questions to SKI_RESORT_DB.SEMANTIC.SEM_PASSHOLDER_ANALYTICS. If a request references a specific guest without a CUSTOMER_ID or clear customer name, ask the user to supply that identifier before proceeding. Clarify whether the user wants day visitors, pass holders, or all guests when the persona scope is unclear. When no time frame is provided, default to the current SKI_SEASON and confirm with the user.",
-    "sql_generation": "Filter seasonal analyses with DIM_DATE.SKI_SEASON; use DIM_DATE.FULL_DATE with DATE_TRUNC or DATEADD for calendar windows. Use DIM_DATE.IS_WEEKEND or FACT_PASS_USAGE.IS_WEEKEND to split weekend versus weekday behavior instead of recalculating flags. Aggregate visit metrics from FACT_PASS_USAGE and guard any division with DIV0(...). Break down personas with DIM_CUSTOMER.CUSTOMER_SEGMENT, STATE, and PASS_TYPE rather than ad-hoc string filters. When profiling specific cohorts, join only the declared tables and apply explicit filters (for example DIM_CUSTOMER.IS_PASS_HOLDER = TRUE) before aggregating."
+    "sql_generation": "Filter seasonal analyses with DIM_DATE.SKI_SEASON; use DIM_DATE.FULL_DATE with DATE_TRUNC or DATEADD for calendar windows. Use DIM_DATE.IS_WEEKEND or FACT_PASS_USAGE.IS_WEEKEND to split weekend versus weekday behavior instead of recalculating flags. Aggregate visit metrics from FACT_PASS_USAGE and guard any division with DIV0(...). Break down personas with DIM_CUSTOMER.CUSTOMER_SEGMENT, STATE, and PASS_TYPE rather than ad-hoc string filters. When profiling specific cohorts, join only the declared tables and apply explicit filters (for example DIM_CUSTOMER.IS_PASS_HOLDER = TRUE) before aggregating. The resort operates year-round: visitors in summer use the mountain for biking, hiking, scenic gondola rides, and concerts. When asking about recent visitor behavior, include ALL data unless a season is specified. Use DIM_DATE.SEASON_TYPE to compare winter vs summer visitor patterns."
   },
   "verified_queries": [
     {

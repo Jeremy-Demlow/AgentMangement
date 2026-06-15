@@ -18,7 +18,13 @@ from shared import (
     PERSONAS, LIFT_IDS, LIFT_CAPACITY, LIFT_POPULARITY,
     RENTAL_LOCS, FB_LOCS, RENTAL_PRODS, FB_PRODS, DAY_PASSES, TICKET_PRICES,
     WEATHER_ZONES, STAFFING_DEPARTMENTS, INSTRUCTOR_IDS, PARKING_LOT_INFO,
-    TRAIL_NAMES, LESSON_TYPES, INCIDENT_TYPES, INCIDENT_SEVERITY
+    TRAIL_NAMES, LESSON_TYPES, INCIDENT_TYPES, INCIDENT_SEVERITY,
+    # Summer-specific imports
+    SUMMER_MONTHS, SUMMER_TRAIL_NAMES, SUMMER_ACTIVITIES,
+    SUMMER_INCIDENT_TYPES, SUMMER_LESSON_TYPES,
+    SUMMER_TICKET_TYPES, SUMMER_TICKET_PRICES, SUMMER_RENTAL_ITEMS,
+    SUMMER_FEEDBACK_CATEGORIES, SUMMER_FEEDBACK_SUBCATEGORIES,
+    SUMMER_LIFT_IDS, SUMMER_LIFT_POPULARITY, SUMMER_STAFFING_DEPARTMENTS,
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -103,18 +109,24 @@ def check_any_data_exists(conn, date):
 # DATA GENERATION FUNCTIONS
 # =============================================================================
 def generate_weather(date, daily_mod):
-    """Generate weather records for all zones."""
+    """Generate weather records for all zones (year-round)."""
     records = []
     created_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    is_summer = daily_mod.get('is_summer', False)
 
     for zone in WEATHER_ZONES:
-        snowfall = max(0.0, daily_mod['snowfall'] + rng.normal(0, 1.0))
-        base_depth = max(18.0, 36 + rng.normal(0, 5.0))
+        if is_summer:
+            snowfall = 0.0
+            base_depth = 0.0
+            snow_condition = 'No Snow'
+        else:
+            snowfall = max(0.0, daily_mod['snowfall'] + rng.normal(0, 1.0))
+            base_depth = max(18.0, 36 + rng.normal(0, 5.0))
+            snow_condition = get_snow_condition(snowfall, date.month)
+
         temp_high = daily_mod['temp_high_f'] + int(rng.integers(-3, 4))
         temp_low = daily_mod['temp_low_f'] + int(rng.integers(-3, 4))
         wind_speed = int(rng.integers(3, 25))
-
-        snow_condition = get_snow_condition(snowfall, date.month)
 
         records.append({
             'WEATHER_DATE': date.strftime('%Y-%m-%d'),
@@ -133,12 +145,14 @@ def generate_weather(date, daily_mod):
 
 
 def generate_staffing(date, daily_mod):
-    """Generate staffing records for the day."""
+    """Generate staffing records for the day (season-aware)."""
     entries = []
     created_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     is_weekend = daily_mod['is_weekend']
+    is_summer = daily_mod.get('is_summer', False)
 
-    for dept in STAFFING_DEPARTMENTS:
+    departments = SUMMER_STAFFING_DEPARTMENTS if is_summer else STAFFING_DEPARTMENTS
+    for dept in departments:
         base = dept['base_staff']
         mult = dept['weekend_mult'] if is_weekend else 1.0
         scheduled = int(base * mult * daily_mod['season_mult'])
@@ -787,6 +801,488 @@ def generate_grooming_logs(date, daily_mod):
     return pd.DataFrame(records)
 
 
+def generate_summer_transactions(date, customers_df, daily_mod):
+    """Generate summer recreation transactions (bike park, hiking, scenic rides).
+    Returns: (scans_df, usage_df, sales_df, fb_df, rent_df) same shape as winter.
+    """
+    date_str = date.strftime('%Y%m%d')
+    visit_date = date.strftime('%Y-%m-%d')
+    created_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    # Select visitors using same persona probabilities (lower volume via season_mult)
+    visitors = []
+    for persona, config in PERSONAS.items():
+        persona_customers = customers_df[customers_df['CUSTOMER_SEGMENT'] == persona]
+        if len(persona_customers) == 0:
+            continue
+
+        if persona == 'weekend_warrior':
+            if daily_mod['is_saturday']:
+                base_prob = config['base_prob']['saturday']
+            elif daily_mod['is_weekend']:
+                base_prob = config['base_prob']['sunday']
+            else:
+                base_prob = config['base_prob']['weekday']
+        else:
+            base_prob = config['base_prob']['weekend'] if daily_mod['is_weekend'] else config['base_prob']['weekday']
+
+        final_prob = base_prob * daily_mod['season_mult'] * daily_mod['holiday_mult']
+        if daily_mod.get('is_rainy', False):
+            final_prob *= 0.5
+        final_prob = min(0.9, final_prob)
+
+        visit_mask = rng.random(len(persona_customers)) < final_prob
+        if visit_mask.any():
+            visitors.append(persona_customers[visit_mask])
+
+    if not visitors:
+        return None, None, None, None, None
+
+    customers_today = pd.concat(visitors, ignore_index=True)
+    n_visitors = len(customers_today)
+    logger.info(f"  {visit_date}: {n_visitors} summer visitors (rainy: {daily_mod.get('is_rainy', False)}, weekend: {daily_mod['is_weekend']})")
+
+    personas = customers_today['CUSTOMER_SEGMENT'].values
+    customer_ids = customers_today['CUSTOMER_ID'].values
+    is_pass_holder = customers_today['IS_PASS_HOLDER'].values if 'IS_PASS_HOLDER' in customers_today.columns else np.zeros(n_visitors, dtype=bool)
+
+    # === LIFT SCANS (gondola/bike uplift) ===
+    # Summer visitors do fewer "laps" (scenic gondola rides or bike uplift runs)
+    lap_mins = np.array([max(2, PERSONAS[p]['laps_range'][0] // 3) for p in personas])
+    lap_maxs = np.array([max(4, PERSONAS[p]['laps_range'][1] // 3) for p in personas])
+    num_laps = rng.integers(lap_mins, lap_maxs + 1)
+    total_scans = int(num_laps.sum())
+
+    weather = 'Sunny' if not daily_mod.get('is_rainy', False) else 'Rainy'
+
+    # Assign to summer-operating lifts
+    lift_pop_array = np.array([SUMMER_LIFT_POPULARITY[lid] for lid in SUMMER_LIFT_IDS])
+    lift_probs = lift_pop_array / lift_pop_array.sum()
+    lift_assignments = rng.choice(SUMMER_LIFT_IDS, size=total_scans, p=lift_probs)
+
+    # Generate hours (summer hours: 9am-5pm, peak 10am-2pm)
+    hour_probs = np.array([0.08, 0.14, 0.17, 0.18, 0.16, 0.12, 0.08, 0.05, 0.02])  # 9am-5pm
+    hours = rng.choice(range(9, 18), size=total_scans, p=hour_probs)
+    minutes = rng.integers(0, 60, size=total_scans)
+
+    # Wait times are shorter in summer
+    wait_times = np.clip(rng.uniform(1, 10, total_scans), 1, 15).round(1)
+
+    scans_df = pd.DataFrame({
+        'SCAN_ID': [f'SCAN{date_str}{i:08d}' for i in range(total_scans)],
+        'CUSTOMER_ID': np.repeat(customer_ids, num_laps),
+        'LIFT_ID': lift_assignments,
+        'SCAN_TIMESTAMP': [f'{visit_date} {h:02d}:{m:02d}:00' for h, m in zip(hours, minutes)],
+        'WAIT_TIME_MINUTES': wait_times,
+        'TEMPERATURE_F': daily_mod['temp_low_f'] + rng.integers(5, 15, size=total_scans),
+        'WEATHER_CONDITION': weather,
+        'CREATED_AT': created_at
+    })
+
+    # === PASS USAGE ===
+    usage_df = pd.DataFrame({
+        'USAGE_ID': [f'USAGE{date_str}{cid}' for cid in customer_ids],
+        'CUSTOMER_ID': customer_ids,
+        'VISIT_DATE': visit_date,
+        'FIRST_SCAN_TIME': [f'{visit_date} 09:{int(rng.integers(0, 60)):02d}:00' for _ in range(n_visitors)],
+        'LAST_SCAN_TIME': [f'{visit_date} 16:{int(rng.integers(0, 60)):02d}:00' for _ in range(n_visitors)],
+        'TOTAL_LIFT_RIDES': num_laps,
+        'HOURS_ON_MOUNTAIN': np.clip(rng.uniform(3, 7, n_visitors), 2.0, 8.0).round(2),
+        'CREATED_AT': created_at
+    })
+
+    # === TICKET SALES (summer passes) ===
+    non_pass_mask = ~is_pass_holder
+    n_tickets = non_pass_mask.sum()
+    if n_tickets > 0:
+        ticket_cids = customer_ids[non_pass_mask]
+        channels = rng.choice(['online', 'window', 'kiosk'], size=n_tickets, p=[0.45, 0.45, 0.10])
+        ticket_types = rng.choice(SUMMER_TICKET_TYPES, size=n_tickets)
+        amounts = np.array([SUMMER_TICKET_PRICES.get(t, 55) for t in ticket_types])
+
+        sales_df = pd.DataFrame({
+            'SALE_ID': [f'SALE{date_str}{i:06d}' for i in range(n_tickets)],
+            'CUSTOMER_ID': ticket_cids,
+            'TICKET_TYPE_ID': ticket_types,
+            'LOCATION_ID': np.where(channels == 'online', 'LOC019', rng.choice(['LOC017', 'LOC018', 'LOC020'], size=n_tickets)),
+            'PURCHASE_TIMESTAMP': [f'{visit_date} {int(rng.integers(8, 12)):02d}:{int(rng.integers(0, 60)):02d}:00' for _ in range(n_tickets)],
+            'VALID_FROM_DATE': visit_date,
+            'VALID_TO_DATE': visit_date,
+            'PURCHASE_AMOUNT': amounts.astype(float),
+            'PAYMENT_METHOD': rng.choice(['Credit Card', 'Debit Card', 'Cash'], size=n_tickets),
+            'PURCHASE_CHANNEL': channels,
+            'CREATED_AT': created_at
+        })
+    else:
+        sales_df = pd.DataFrame()
+
+    # === F&B TRANSACTIONS (restaurants open year-round) ===
+    fb_counts = np.array([int(rng.integers(*PERSONAS[p]['fb_trans'])) for p in personas])
+    total_fb = int(fb_counts.sum())
+
+    fb_df = pd.DataFrame({
+        'TRANSACTION_ID': [f'FB{date_str}{i:08d}' for i in range(total_fb)],
+        'CUSTOMER_ID': np.repeat(customer_ids, fb_counts),
+        'LOCATION_ID': rng.choice(FB_LOCS, size=total_fb),
+        'PRODUCT_ID': rng.choice(FB_PRODS, size=total_fb),
+        'TRANSACTION_TIMESTAMP': [f'{visit_date} {rng.choice([10,11,12,13,14,15,16]):02d}:{int(rng.integers(0, 60)):02d}:00' for _ in range(total_fb)],
+        'QUANTITY': rng.integers(1, 3, total_fb),
+        'UNIT_PRICE': rng.integers(5, 18, total_fb).astype(float),
+        'TOTAL_AMOUNT': rng.integers(5, 35, total_fb).astype(float),
+        'PAYMENT_METHOD': rng.choice(['Credit Card', 'Debit Card', 'Cash'], size=total_fb),
+        'CREATED_AT': created_at
+    })
+
+    # === RENTALS (bikes, helmets, hiking gear) ===
+    rental_probs = np.array([PERSONAS[p]['rental_prob'] for p in personas])
+    rental_mask = rng.random(n_visitors) < rental_probs
+    n_rentals = rental_mask.sum()
+
+    if n_rentals > 0:
+        rental_items = rng.choice(SUMMER_RENTAL_ITEMS, size=n_rentals)
+        rent_df = pd.DataFrame({
+            'RENTAL_ID': [f'RENT{date_str}{i:06d}' for i in range(n_rentals)],
+            'CUSTOMER_ID': customer_ids[rental_mask],
+            'LOCATION_ID': rng.choice(RENTAL_LOCS, size=n_rentals),
+            'PRODUCT_ID': [item['id'] for item in rental_items],
+            'RENTAL_TIMESTAMP': f'{visit_date} 09:00:00',
+            'RETURN_TIMESTAMP': f'{visit_date} 17:00:00',
+            'RENTAL_DURATION_HOURS': 8.0,
+            'RENTAL_AMOUNT': np.array([item['price'] for item in rental_items], dtype=float),
+            'CREATED_AT': created_at
+        })
+    else:
+        rent_df = pd.DataFrame()
+
+    return scans_df, usage_df, sales_df, fb_df, rent_df
+
+
+def generate_summer_lessons(date, n_visitors, daily_mod, customers_df):
+    """Generate summer recreation lessons (mountain biking, guided hikes)."""
+    created_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    date_str = date.strftime('%Y-%m-%d')
+
+    base_lessons = max(2, int(n_visitors * 0.06))
+    if daily_mod['is_weekend']:
+        base_lessons = int(base_lessons * 1.4)
+    n_lessons = int(rng.integers(max(1, base_lessons - 2), base_lessons + 4))
+
+    lesson_customers = customers_df.sample(n=min(n_lessons, len(customers_df)))['CUSTOMER_ID'].values
+
+    records = []
+    for i in range(n_lessons):
+        lesson_type = rng.choice(SUMMER_LESSON_TYPES)
+        start_hour = rng.choice([9, 10, 13, 14])
+
+        if 'bike' in lesson_type:
+            sport_type = 'mountain_bike'
+            duration = 2
+            if 'advanced' in lesson_type:
+                group_size = int(rng.integers(3, 6))
+                price = 120
+            elif 'intermediate' in lesson_type:
+                group_size = int(rng.integers(4, 8))
+                price = 95
+            else:
+                group_size = int(rng.integers(4, 10))
+                price = 85
+        elif 'hike' in lesson_type:
+            sport_type = 'hiking'
+            duration = 3
+            group_size = int(rng.integers(6, 15))
+            price = 65
+        else:
+            sport_type = 'adventure'
+            duration = 4
+            group_size = int(rng.integers(6, 12))
+            price = 110
+
+        rental_included = rng.random() < 0.5
+
+        records.append({
+            'LESSON_ID': f'LESSON{date.strftime("%Y%m%d")}{i:04d}',
+            'CUSTOMER_ID': lesson_customers[i % len(lesson_customers)],
+            'LESSON_DATE': date_str,
+            'LESSON_START_TIME': f'{start_hour:02d}:00:00',
+            'LESSON_TYPE': lesson_type,
+            'SPORT_TYPE': sport_type,
+            'SKILL_LEVEL': rng.choice(['beginner', 'intermediate', 'advanced']),
+            'DURATION_HOURS': float(duration),
+            'INSTRUCTOR_ID': rng.choice(INSTRUCTOR_IDS),
+            'GROUP_SIZE': group_size,
+            'LESSON_AMOUNT': float(price),
+            'RENTAL_INCLUDED': rental_included,
+            'RENTAL_AMOUNT': float(35) if rental_included else 0.0,
+            'TIP_AMOUNT': float(rng.choice([0, 10, 15, 20])),
+            'BOOKING_CHANNEL': rng.choice(['online', 'phone', 'walk_in']),
+            'BOOKING_LEAD_DAYS': int(rng.integers(0, 7)),
+            'COMPLETED': True,
+            'CANCELLATION_REASON': None,
+            'STUDENT_RATING': float(rng.choice([4.0, 4.5, 5.0, 4.5, 5.0])) if rng.random() < 0.7 else None,
+            'CREATED_AT': created_at
+        })
+
+    return pd.DataFrame(records)
+
+
+def generate_summer_incidents(date, n_visitors, daily_mod, customers_df):
+    """Generate summer safety incidents (bike crashes, trail falls, etc.)."""
+    created_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    date_str = date.strftime('%Y-%m-%d')
+
+    incident_rate = 0.0015
+    if daily_mod.get('is_rainy', False):
+        incident_rate *= 1.4  # Wet trails increase incidents
+
+    n_incidents = max(0, int(rng.poisson(n_visitors * incident_rate)))
+
+    records = []
+    for i in range(n_incidents):
+        incident_type = rng.choice(SUMMER_INCIDENT_TYPES, p=[0.30, 0.30, 0.15, 0.05, 0.10, 0.10])
+        severity = rng.choice(INCIDENT_SEVERITY, p=[0.72, 0.23, 0.05])
+        hour = int(rng.integers(9, 17))
+        minute = int(rng.integers(0, 60))
+
+        trail_name = rng.choice(SUMMER_TRAIL_NAMES)
+        lift_id = rng.choice(SUMMER_LIFT_IDS) if incident_type == 'equipment_failure' and rng.random() < 0.2 else None
+        if lift_id:
+            trail_name = None
+
+        records.append({
+            'INCIDENT_ID': f'INC{date.strftime("%Y%m%d")}{i:04d}',
+            'INCIDENT_DATE': date_str,
+            'INCIDENT_TIME': f'{hour:02d}:{minute:02d}:00',
+            'INCIDENT_TIMESTAMP': f'{date_str} {hour:02d}:{minute:02d}:00',
+            'INCIDENT_TYPE': incident_type,
+            'SEVERITY': severity,
+            'LOCATION_ID': f'LOC{int(rng.integers(1, 20)):03d}',
+            'LIFT_ID': lift_id,
+            'TRAIL_NAME': trail_name,
+            'CUSTOMER_ID': rng.choice(customers_df['CUSTOMER_ID'].values) if rng.random() < 0.8 else None,
+            'CUSTOMER_AGE': int(rng.integers(12, 65)) if rng.random() < 0.8 else None,
+            'CUSTOMER_SKILL_LEVEL': rng.choice(['beginner', 'intermediate', 'advanced', 'expert']),
+            'DESCRIPTION': f'{incident_type.replace("_", " ").title()} incident on {trail_name or "lift area"}',
+            'CAUSE': rng.choice(['user_error', 'conditions', 'equipment', 'other']),
+            'WEATHER_FACTOR': daily_mod.get('is_rainy', False),
+            'EQUIPMENT_FACTOR': incident_type == 'equipment_failure',
+            'FIRST_AID_RENDERED': severity in ['moderate', 'serious'],
+            'TRANSPORT_REQUIRED': severity == 'serious',
+            'TRANSPORT_TYPE': 'vehicle' if severity == 'serious' else None,
+            'PATROL_RESPONSE_MINUTES': int(rng.integers(3, 12)),
+            'RESOLUTION': 'resolved',
+            'FOLLOWUP_REQUIRED': severity == 'serious',
+            'REPORT_FILED': True,
+            'CREATED_AT': created_at
+        })
+
+    return pd.DataFrame(records)
+
+
+def generate_summer_feedback(date, n_visitors, daily_mod, customers_df):
+    """Generate summer customer feedback."""
+    created_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    date_str = date.strftime('%Y-%m-%d')
+
+    n_feedback = max(0, int(rng.poisson(n_visitors * 0.05)))
+    if n_feedback == 0:
+        return pd.DataFrame()
+
+    summer_text_banks = {
+        ('bike_park', 'pos'): [
+            "Bike trails are well maintained. Flow track is so fun!",
+            "Great variety of difficulty levels. Downhill run is world-class.",
+            "Uplift service is fast and efficient. Got in 15 runs today.",
+        ],
+        ('bike_park', 'neg'): [
+            "Some trails had big ruts that weren't marked. Sketchy.",
+            "Bike park got too crowded on Saturday -- long uplift waits.",
+            "Signage for trail difficulty is confusing. Nearly went off a drop.",
+        ],
+        ('trail_conditions', 'pos'): [
+            "Wildflower Loop was stunning. Trails are in great shape.",
+            "Well-marked trails with gorgeous views. Perfect day hike.",
+            "Summit Trail is challenging but rewarding. Well maintained.",
+        ],
+        ('trail_conditions', 'neg'): [
+            "Trails were muddy and poorly drained after yesterday's rain.",
+            "Signage at the junction was missing -- got lost for 30 min.",
+            "Overcrowded on the main loop. Needs capacity management.",
+        ],
+        ('food_service', 'pos'): [
+            "Loved the summer BBQ menu at the lodge. Great beer selection.",
+            "Patio dining with the mountain view is unbeatable.",
+        ],
+        ('food_service', 'neg'): [
+            "Still overpriced for the quality. $18 for a mediocre burger.",
+            "Ran out of water bottles by 2pm on a hot day. Come on.",
+        ],
+        ('events', 'pos'): [
+            "Concert series is a great addition. Atmosphere was amazing.",
+            "Family movie night on the lawn was a hit with the kids.",
+        ],
+        ('events', 'neg'): [
+            "Concert sound quality was poor -- couldn't hear from the back.",
+            "Event parking was a disaster. Took 40 min to leave.",
+        ],
+        ('overall_experience', 'pos'): [
+            "Summer at Alpine Peaks is just as good as winter. We'll be back!",
+            "Kids loved the adventure camp. Best summer activity in the area.",
+            "Great value on the combo pass. Biking + gondola + lunch was perfect.",
+        ],
+        ('overall_experience', 'neg'): [
+            "Not much to do if you don't mountain bike. Needs more activities.",
+            "Expensive for what it is. Hiking trails should be free.",
+        ],
+    }
+
+    visitor_ids = customers_df['CUSTOMER_ID'].values
+    is_rainy = daily_mod.get('is_rainy', False)
+
+    records = []
+    for i in range(n_feedback):
+        base_rating = 4.2 if not is_rainy else 3.6
+        nps = int(min(10, max(0, rng.normal(base_rating * 2, 1.5))))
+        satisfaction = round(min(5.0, max(1.0, rng.normal(base_rating, 0.7))), 1)
+
+        if satisfaction >= 4:
+            sentiment, bucket = 'positive', 'pos'
+        elif satisfaction < 3:
+            sentiment, bucket = 'negative', 'neg'
+        else:
+            sentiment, bucket = 'neutral', 'neu'
+
+        category = rng.choice(SUMMER_FEEDBACK_CATEGORIES)
+        subcategory = rng.choice(SUMMER_FEEDBACK_SUBCATEGORIES.get(category, ['general']))
+
+        if rng.random() < 0.65:
+            bank_key = (category, bucket)
+            # Fall back to pos/neg if exact bucket isn't available
+            bank = summer_text_banks.get(bank_key) or summer_text_banks.get((category, 'pos')) or ["Great summer experience."]
+            feedback_text = str(rng.choice(bank))
+        else:
+            feedback_text = None
+
+        has_response = rng.random() < 0.35
+        response_text = "Thanks for the feedback! We'll share with the team." if has_response else None
+        response_date = (date + timedelta(hours=float(rng.uniform(4, 48)))).strftime('%Y-%m-%d %H:%M:%S') if has_response else None
+        responded_by = f'STAFF{int(rng.integers(1, 50)):03d}' if has_response else None
+        resolved = bool(rng.random() < 0.7)
+
+        records.append({
+            'FEEDBACK_ID': f'FDBK{date.strftime("%Y%m%d")}{i:04d}',
+            'CUSTOMER_ID': rng.choice(visitor_ids),
+            'FEEDBACK_DATE': date_str,
+            'FEEDBACK_TYPE': rng.choice(['survey', 'comment_card', 'email', 'app']),
+            'SURVEY_ID': f'SURV{int(rng.integers(1, 100)):03d}',
+            'NPS_SCORE': nps,
+            'SATISFACTION_SCORE': satisfaction,
+            'LIKELIHOOD_TO_RETURN': int(min(10, max(0, nps + int(rng.integers(-1, 2))))),
+            'LIKELIHOOD_TO_RECOMMEND': nps,
+            'CATEGORY': category,
+            'SUBCATEGORY': subcategory,
+            'SENTIMENT': sentiment,
+            'SENTIMENT_SCORE': round(satisfaction / 5.0, 2),
+            'FEEDBACK_TEXT': feedback_text,
+            'RESPONSE_TEXT': response_text,
+            'RESPONSE_DATE': response_date,
+            'RESPONDED_BY': responded_by,
+            'RESOLVED': resolved,
+            'RESOLUTION_DATE': (date + timedelta(hours=float(rng.uniform(24, 120)))).strftime('%Y-%m-%d %H:%M:%S') if resolved else None,
+            'ESCALATED': bool(satisfaction < 2.5),
+            'SOURCE': rng.choice(['email', 'app', 'kiosk', 'web']),
+            'VISIT_DATE': date_str,
+            'CREATED_AT': created_at,
+        })
+
+    return pd.DataFrame(records)
+
+
+def generate_summer_maintenance(date, daily_mod):
+    """Generate summer lift/trail maintenance logs."""
+    created_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    date_str = date.strftime('%Y-%m-%d')
+
+    records = []
+    # Only summer-operating lifts get maintenance
+    for lift_id in SUMMER_LIFT_IDS:
+        if rng.random() < 0.12:
+            maint_type = rng.choice(['repair', 'replacement', 'adjustment'])
+            downtime = int(rng.integers(20, 120))
+            during_ops = rng.random() < 0.2
+            parts_cost = float(rng.integers(100, 1500)) if maint_type == 'replacement' else 0.0
+        else:
+            maint_type = 'inspection'
+            downtime = 0
+            during_ops = False
+            parts_cost = 0.0
+
+        labor_hours = round(rng.uniform(0.5, 2.5), 1)
+        labor_cost = float(labor_hours * 75)
+
+        records.append({
+            'MAINTENANCE_ID': f'MAINT{date.strftime("%Y%m%d")}{lift_id}',
+            'LIFT_ID': lift_id,
+            'MAINTENANCE_DATE': date_str,
+            'MAINTENANCE_TYPE': maint_type,
+            'CATEGORY': rng.choice(['mechanical', 'electrical', 'safety', 'routine']),
+            'DESCRIPTION': f'Summer {maint_type} for {lift_id}',
+            'START_TIME': f'{date_str} 06:00:00',
+            'END_TIME': f'{date_str} 07:30:00',
+            'DOWNTIME_MINUTES': downtime,
+            'DURING_OPERATING_HOURS': during_ops,
+            'PARTS_REPLACED': maint_type == 'replacement',
+            'PARTS_COST': parts_cost,
+            'LABOR_HOURS': labor_hours,
+            'LABOR_COST': labor_cost,
+            'TOTAL_COST': parts_cost + labor_cost,
+            'TECHNICIAN_ID': f'TECH{int(rng.integers(1, 10)):03d}',
+            'PASSED_INSPECTION': maint_type == 'inspection' or rng.random() < 0.95,
+            'FOLLOWUP_REQUIRED': maint_type != 'inspection' and rng.random() < 0.1,
+            'NOTES': f'Summer {maint_type.title()} completed' if rng.random() < 0.3 else None,
+            'CREATED_AT': created_at
+        })
+
+    return pd.DataFrame(records)
+
+
+def generate_summer_grooming(date, daily_mod):
+    """Generate summer trail maintenance/grooming logs."""
+    created_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    date_str = date.strftime('%Y-%m-%d')
+
+    # Fewer trails groomed in summer, early morning work
+    n_trails = min(len(SUMMER_TRAIL_NAMES), int(round(rng.normal(6, 2))))
+    n_trails = max(3, n_trails)
+    trails_maintained = list(rng.choice(SUMMER_TRAIL_NAMES, size=n_trails, replace=False))
+
+    records = []
+    for i, trail in enumerate(trails_maintained):
+        start_hour = int(rng.integers(5, 8))
+        end_hour = start_hour + int(rng.integers(1, 3))
+        duration = (end_hour - start_hour) * 60 + int(rng.integers(-10, 20))
+
+        records.append({
+            'LOG_ID': f'GROOM{date.strftime("%Y%m%d")}{i:03d}',
+            'GROOMING_DATE': date_str,
+            'SHIFT': 'morning',
+            'TRAIL_NAME': trail,
+            'GROOMER_ID': f'EMP{int(rng.integers(50, 60)):03d}',
+            'MACHINE_ID': f'CAT{int(rng.integers(1, 4)):02d}',
+            'START_TIME': f'{date_str} {start_hour:02d}:00:00',
+            'END_TIME': f'{date_str} {end_hour:02d}:00:00',
+            'DURATION_MINUTES': duration,
+            'GROOMING_TYPE': rng.choice(['trail_repair', 'brush_clearing', 'drainage_work']),
+            'SNOW_DEPTH_INCHES': 0.0,
+            'CONDITIONS_BEFORE': rng.choice(['good', 'fair', 'muddy', 'eroded']),
+            'CONDITIONS_AFTER': rng.choice(['excellent', 'good', 'fair']),
+            'FUEL_USED_GALLONS': round(rng.uniform(3, 12), 1),
+            'NOTES': f'Trail maintenance on {trail}' if rng.random() < 0.3 else None,
+            'CREATED_AT': created_at
+        })
+
+    return pd.DataFrame(records)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Generate incremental daily data - ALL data types.")
     parser.add_argument('--date', type=str, default=datetime.now().strftime('%Y-%m-%d'),
@@ -860,16 +1356,24 @@ def main():
         if not present["STAFFING_SCHEDULE"]:
             all_staffing.append(generate_staffing(current_date, daily_mod))
 
-        # Ski-season-only generation -- gated by season AND per-table presence.
+        # Season-gated generation -- gated by season AND per-table presence.
+        # Now supports both winter (Nov-Apr) and summer (May-Oct) operations.
+        is_summer = daily_mod.get('is_summer', False)
+
         if daily_mod['season_mult'] > 0:
             if not present["LIFT_MAINTENANCE"]:
-                all_maintenance.append(generate_lift_maintenance(current_date, daily_mod))
+                if is_summer:
+                    all_maintenance.append(generate_summer_maintenance(current_date, daily_mod))
+                else:
+                    all_maintenance.append(generate_lift_maintenance(current_date, daily_mod))
             if not present["GROOMING_LOGS"]:
-                all_grooming.append(generate_grooming_logs(current_date, daily_mod))
+                if is_summer:
+                    all_grooming.append(generate_summer_grooming(current_date, daily_mod))
+                else:
+                    all_grooming.append(generate_grooming_logs(current_date, daily_mod))
 
-            # Transactional bundle: only call generate_day_transactions if any
-            # of its outputs are missing. Generating partially is wasteful but
-            # safer than leaving holes; the writes below are individually gated.
+            # Transactional bundle: only call the transaction generator if any
+            # of its outputs are missing.
             transactional_missing = any(
                 not present[t] for t in (
                     "LIFT_SCANS", "PASS_USAGE", "TICKET_SALES",
@@ -883,7 +1387,11 @@ def main():
                 )
             )
             if transactional_missing or extras_missing:
-                result = generate_day_transactions(current_date, customers_df, daily_mod)
+                if is_summer:
+                    result = generate_summer_transactions(current_date, customers_df, daily_mod)
+                else:
+                    result = generate_day_transactions(current_date, customers_df, daily_mod)
+
                 if result[0] is not None:
                     n_visitors = len(result[1])
                     if not present["LIFT_SCANS"]:
@@ -898,11 +1406,20 @@ def main():
                         all_rentals.append(result[4])
 
                     if not present["SKI_LESSONS"]:
-                        all_lessons.append(generate_ski_lessons(current_date, n_visitors, daily_mod, customers_df))
+                        if is_summer:
+                            all_lessons.append(generate_summer_lessons(current_date, n_visitors, daily_mod, customers_df))
+                        else:
+                            all_lessons.append(generate_ski_lessons(current_date, n_visitors, daily_mod, customers_df))
                     if not present["INCIDENTS"]:
-                        all_incidents.append(generate_incidents(current_date, n_visitors, daily_mod, customers_df))
+                        if is_summer:
+                            all_incidents.append(generate_summer_incidents(current_date, n_visitors, daily_mod, customers_df))
+                        else:
+                            all_incidents.append(generate_incidents(current_date, n_visitors, daily_mod, customers_df))
                     if not present["CUSTOMER_FEEDBACK"]:
-                        all_feedback.append(generate_customer_feedback(current_date, n_visitors, daily_mod, customers_df))
+                        if is_summer:
+                            all_feedback.append(generate_summer_feedback(current_date, n_visitors, daily_mod, customers_df))
+                        else:
+                            all_feedback.append(generate_customer_feedback(current_date, n_visitors, daily_mod, customers_df))
                     if not present["PARKING_OCCUPANCY"]:
                         all_parking.append(generate_parking_occupancy(current_date, n_visitors, daily_mod))
 

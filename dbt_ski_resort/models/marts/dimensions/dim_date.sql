@@ -5,7 +5,7 @@
     )
 }}
 
--- Date dimension for ski resort analytics
+-- Date dimension for resort analytics (year-round: skiing Nov-Apr, recreation May-Oct)
 -- Dynamically covers from 2020-2021 through 2 years into the future
 -- No manual updates needed
 
@@ -124,14 +124,23 @@ date_attributes AS (
             WHEN MONTH(date_day) IN (1, 2) THEN 'Excellent'  -- Peak season
             WHEN MONTH(date_day) IN (12, 3) THEN 'Good'
             WHEN MONTH(date_day) IN (11, 4) THEN 'Fair'
-            ELSE 'Closed'
+            ELSE 'N/A'  -- No snow in summer
         END AS snow_condition,
 
-        -- Operating status
+        -- Operating status (resort operates year-round with different activities)
+        TRUE AS is_operating,
+
+        -- Season type for filtering winter vs summer operations
         CASE
-            WHEN MONTH(date_day) BETWEEN 5 AND 10 THEN FALSE  -- Closed in summer
-            ELSE TRUE
-        END AS is_operating
+            WHEN MONTH(date_day) >= 11 OR MONTH(date_day) <= 4 THEN 'winter'
+            ELSE 'summer'
+        END AS season_type,
+
+        -- Summer season flag (complement of is_in_season)
+        CASE
+            WHEN MONTH(date_day) BETWEEN 5 AND 10 THEN TRUE
+            ELSE FALSE
+        END AS is_summer_season
 
     FROM date_spine
     WHERE date_day <= DATEADD(YEAR, 2, CURRENT_DATE())  -- Always 2 years ahead, no manual updates
@@ -162,6 +171,8 @@ SELECT
     holiday_name,
     snow_condition,
     is_operating,
+    season_type,
+    is_summer_season,
     CURRENT_TIMESTAMP() AS created_at
 FROM date_attributes
 -- Include every date in the range. Off-season rows are tagged with the

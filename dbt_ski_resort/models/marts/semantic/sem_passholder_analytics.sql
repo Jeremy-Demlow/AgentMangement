@@ -62,6 +62,9 @@ DIMENSIONS (
       COMMENT = 'Date of pass usage or sale',
     DIM_DATE.SKI_SEASON AS SKI_SEASON
       COMMENT = 'Ski season identifier',
+    DIM_DATE.SEASON_TYPE AS SEASON_TYPE
+      WITH SYNONYMS ('operating_season')
+      COMMENT = 'Season type: winter (Nov-Apr) or summer (May-Oct)',
     DIM_CUSTOMER.PASS_TYPE AS PASS_TYPE
       COMMENT = 'Pass product currently held',
     DIM_CUSTOMER.CUSTOMER_SEGMENT AS CUSTOMER_SEGMENT
@@ -133,7 +136,7 @@ WITH EXTENSION (CA = $$
 {
   "module_custom_instructions": {
     "question_categorization": "Route lift wait time or terrain utilization topics to SKI_RESORT_DB.SEMANTIC.SEM_OPERATIONS. Route broad revenue mix, pricing, or channel analyses that include non-pass sales to SKI_RESORT_DB.SEMANTIC.SEM_REVENUE. Route general customer segmentation or visitation cadence questions to SKI_RESORT_DB.SEMANTIC.SEM_CUSTOMER_BEHAVIOR. If a user references a pass without identifying PASS_TYPE or TICKET_CATEGORY, ask for clarification before proceeding. Confirm whether the user needs active pass holders, historical pass owners, or all customers when the population is ambiguous.",
-    "sql_generation": "Anchor time filters with DIM_DATE.SKI_SEASON or DIM_DATE.FULL_DATE; use DATE_TRUNC for season-to-date comparisons. Aggregate utilization metrics exclusively from FACT_PASS_USAGE and revenue metrics from FACT_TICKET_SALES; wrap ratios with DIV0(...). Filter pass-specific cohorts with DIM_CUSTOMER.IS_PASS_HOLDER = TRUE and refine by PASS_TYPE when requested. When analyzing sales channels, rely on FACT_TICKET_SALES.PURCHASE_CHANNEL and group by DIM_TICKET_TYPE.TICKET_CATEGORY as needed. Exclude day-ticket categories when the question targets pass-only behavior to prevent double counting."
+    "sql_generation": "Anchor time filters with DIM_DATE.SKI_SEASON or DIM_DATE.FULL_DATE; use DATE_TRUNC for season-to-date comparisons. Aggregate utilization metrics exclusively from FACT_PASS_USAGE and revenue metrics from FACT_TICKET_SALES; wrap ratios with DIV0(...). Filter pass-specific cohorts with DIM_CUSTOMER.IS_PASS_HOLDER = TRUE and refine by PASS_TYPE when requested. When analyzing sales channels, rely on FACT_TICKET_SALES.PURCHASE_CHANNEL and group by DIM_TICKET_TYPE.TICKET_CATEGORY as needed. Exclude day-ticket categories when the question targets pass-only behavior to prevent double counting. Pass holders can use their passes year-round (skiing in winter, bike park and gondola in summer). When asking about recent pass usage, include ALL data unless a season is specified."
   },
   "verified_queries": [
     {
