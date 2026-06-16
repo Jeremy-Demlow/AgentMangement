@@ -434,6 +434,13 @@ jobs:
           SNOWFLAKE_DATABASE: ${{ steps.config.outputs.prod_database }}
         run: dbt deps
 
+      - name: Run DBT Seeds
+        working-directory: dbt_ski_resort
+        env:
+          DBT_TARGET: prod
+          SNOWFLAKE_DATABASE: ${{ steps.config.outputs.prod_database }}
+        run: dbt seed --full-refresh
+
       - name: Run DBT Fact Tables
         working-directory: dbt_ski_resort
         env:
