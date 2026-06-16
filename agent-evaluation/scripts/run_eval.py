@@ -77,6 +77,7 @@ def load_questions(dataset_path: str, category: str = None, tags: list = None) -
                 "question": q["question"].strip(),
                 "ground_truth": q.get("ground_truth", "").strip(),
                 "expected_tools": q.get("expected_tools", []),
+                "ground_truth_invocations": q.get("ground_truth_invocations", []),
                 "category": q.get("category", ""),
                 "tags": q.get("tags", []),
                 "test_type": q.get("test_type", "in_scope"),
@@ -173,11 +174,20 @@ def load_questions_to_snowflake(cursor, questions: list[dict], target_table: str
             .replace("'", "\\'")
             .replace('"', '\\"')
         )
+
+        # Build ground_truth_invocations: use explicit field if provided,
+        # otherwise auto-generate from expected_tools (TSA-only, just names).
+        invocations = q.get("ground_truth_invocations", [])
+        if not invocations and q.get("expected_tools"):
+            invocations = [{"tool_name": t} for t in q["expected_tools"]]
+
+        invocations_json = json.dumps(invocations).replace("'", "\\'")
+
         cursor.execute(f"""
             INSERT INTO {target_table} (input_query, output)
             SELECT
                 '{q_escaped}',
-                PARSE_JSON('{{"ground_truth_output": "{gt_escaped}"}}')
+                PARSE_JSON('{{"ground_truth_output": "{gt_escaped}", "ground_truth_invocations": {invocations_json}}}')
         """)
 
     cursor.execute(f"SELECT COUNT(*) FROM {target_table}")

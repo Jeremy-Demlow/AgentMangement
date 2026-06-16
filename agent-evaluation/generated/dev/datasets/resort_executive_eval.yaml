@@ -11,15 +11,16 @@
 #   - ground_truth: Static fallback (used only when no validation_query)
 #
 # Time Anchoring:
-#   Questions use relative references ("most recent complete season", "current season")
-#   so the same eval set works across seasons without manual updates.
+#   Questions use natural-language time references ("last season", "this season")
+#   that mirror how real users talk.  "Last season" = the season before the
+#   current one; "this season" / "current season" = the season in progress.
 #   See references/dynamic-ground-truth.md for patterns.
 
 questions:
   # ===========================================================================
   # REVENUE — Season Totals (RevenueAnalytics / DailySummaryKPIs)
   # ===========================================================================
-  - question: "What was our total ticket revenue for the most recent complete season?"
+  - question: "What was our total ticket revenue last season?"
     expected_tools: ["DailySummaryKPIs", "RevenueAnalytics"]
     category: revenue
     tags: [tickets, season_total, dynamic]
@@ -45,7 +46,7 @@ questions:
       ${total_revenue:,.0f} from {ticket_count:,} tickets sold,
       with an average ticket price of ${avg_price:,.2f}.
 
-  - question: "How did food and beverage revenue perform during the most recent complete season?"
+  - question: "How did food and beverage revenue perform last season?"
     expected_tools: ["RevenueAnalytics"]
     category: revenue
     tags: [fnb, season_total, dynamic]
@@ -66,7 +67,7 @@ questions:
       Food and beverage revenue for the {season} season was approximately
       ${total_revenue:,.0f} from {transaction_count:,} transactions.
 
-  - question: "What was the total rental revenue for the most recent complete season?"
+  - question: "What was the total rental revenue last season?"
     expected_tools: ["RevenueAnalytics"]
     category: revenue
     tags: [rentals, season_total, dynamic]
@@ -140,7 +141,7 @@ questions:
   # ===========================================================================
   # WEATHER (WeatherAnalytics)
   # ===========================================================================
-  - question: "How much total snowfall did we receive during the most recent complete season and how many powder days?"
+  - question: "How much total snowfall did we receive last season and how many powder days?"
     expected_tools: ["WeatherAnalytics"]
     category: weather
     tags: [snowfall, powder_days, season_total, dynamic]
@@ -153,6 +154,7 @@ questions:
       SELECT d.SKI_SEASON AS season,
              ROUND(SUM(w.SNOWFALL_INCHES), 1) AS total_snowfall,
              SUM(CASE WHEN w.IS_POWDER_DAY THEN 1 ELSE 0 END) AS powder_days,
+             COUNT(DISTINCT CASE WHEN w.IS_POWDER_DAY THEN d.FULL_DATE END) AS powder_calendar_days,
              ROUND(AVG(w.TEMP_HIGH_F), 1) AS avg_high,
              ROUND(AVG(w.TEMP_LOW_F), 1) AS avg_low
       FROM AM_SKI_RESORT_DEV.MARTS.FACT_WEATHER w
@@ -160,14 +162,15 @@ questions:
       WHERE d.SKI_SEASON = (SELECT season FROM most_recent_complete)
       GROUP BY d.SKI_SEASON
     answer_template: >-
-      The resort received {total_snowfall:,.1f} inches of total snowfall during the
-      {season} season with {powder_days} powder days.
+      The resort received {total_snowfall:,.1f} inches of cumulative snowfall across all mountain zones
+      during the {season} season with {powder_days} powder day observations across zones
+      ({powder_calendar_days} unique calendar powder days).
       Average high temperature was {avg_high}F and average low was {avg_low}F.
 
   # ===========================================================================
   # LIFT OPERATIONS (LiftOperations)
   # ===========================================================================
-  - question: "What was the average lift wait time for the most recent complete season and how many total scans were recorded?"
+  - question: "What was the average lift wait time last season and how many total scans were recorded?"
     expected_tools: ["LiftOperations"]
     category: operations
     tags: [wait_time, lift_scans, season_total, dynamic]
@@ -188,7 +191,7 @@ questions:
       Average lift wait time for the {season} season was {avg_wait} minutes
       with {total_scans:,} total lift scans recorded.
 
-  - question: "Which days of the week had the most lift activity during the most recent complete season?"
+  - question: "Which days of the week had the most lift activity last season?"
     expected_tools: ["LiftOperations"]
     category: operations
     tags: [day_of_week, lift_scans, ranking, dynamic]
@@ -206,13 +209,12 @@ questions:
       ORDER BY count1 DESC
       LIMIT 1
     answer_template: >-
-      {day1} was the busiest day with {count1:,} lift scans during the most recent complete season.
-    ground_truth: ""
+      {day1} had {count1:,} lift scans last season.
 
   # ===========================================================================
   # STAFFING (StaffingAnalytics)
   # ===========================================================================
-  - question: "What was the average staffing coverage ratio during the most recent complete season and how many understaffed shifts occurred?"
+  - question: "What was the average staffing coverage ratio last season and how many understaffed shifts occurred?"
     expected_tools: ["StaffingAnalytics"]
     category: staffing
     tags: [coverage, understaffed, season_total, dynamic]
@@ -236,7 +238,7 @@ questions:
   # ===========================================================================
   # MARKETING (MarketingAnalytics)
   # ===========================================================================
-  - question: "Which marketing campaign had the highest conversion rate during the most recent complete season?"
+  - question: "Which marketing campaign had the highest conversion rate last season?"
     expected_tools: ["MarketingAnalytics"]
     category: marketing
     tags: [conversion, campaign, ranking, dynamic]
@@ -256,12 +258,12 @@ questions:
       LIMIT 1
     answer_template: >-
       {top_campaign} via {channel} had the highest conversion rate
-      at approximately {conversion_pct}% during the most recent complete season.
+      at approximately {conversion_pct}% last season.
 
   # ===========================================================================
   # CUSTOMER SATISFACTION (CustomerSatisfaction)
   # ===========================================================================
-  - question: "What was our average NPS score and customer rating during the most recent complete season?"
+  - question: "What was our average NPS score and customer rating last season?"
     expected_tools: ["CustomerSatisfaction"]
     category: satisfaction
     tags: [nps, rating, season_total, dynamic]
@@ -286,7 +288,7 @@ questions:
   # ===========================================================================
   # SAFETY (SafetyIncidents)
   # ===========================================================================
-  - question: "How many safety incidents occurred during the most recent complete season and what was the average patrol response time?"
+  - question: "How many safety incidents occurred last season and what was the average patrol response time?"
     expected_tools: ["SafetyIncidents"]
     category: safety
     tags: [incidents, response_time, season_total, dynamic]
@@ -306,13 +308,12 @@ questions:
       GROUP BY d.SKI_SEASON
     answer_template: >-
       There were {incident_count} safety incidents during the {season} season
-      with an average severity score of {avg_severity} and
-      average patrol response time of {avg_response_time} minutes.
+      with average patrol response time of {avg_response_time} minutes.
 
   # ===========================================================================
   # SKI SCHOOL (SkiSchoolAnalytics)
   # ===========================================================================
-  - question: "How did ski school perform during the most recent complete season in terms of lessons and revenue?"
+  - question: "How did ski school perform last season in terms of lessons and revenue?"
     expected_tools: ["SkiSchoolAnalytics"]
     category: ski_school
     tags: [lessons, revenue, season_total, dynamic]
@@ -338,7 +339,7 @@ questions:
   # ===========================================================================
   # PASSHOLDER (PassholderAnalytics)
   # ===========================================================================
-  - question: "How many season passes were sold for the most recent complete season and what was the total pass revenue?"
+  - question: "How many season passes were sold for last season and what was the total pass revenue?"
     expected_tools: ["PassholderAnalytics"]
     category: passholders
     tags: [passes, revenue, season_total, dynamic]
@@ -357,8 +358,8 @@ questions:
       WHERE sp.VALID_SEASON = (SELECT season FROM most_recent_complete)
     answer_template: >-
       {passes_sold:,} season passes were sold for the {season} season
-      generating approximately ${total_revenue:,.0f} in revenue,
-      with an average pass price of ${avg_price:,.2f}. {renewals:,} were renewals.
+      generating approximately ${total_revenue:,.0f} in total pass revenue.
+      Average pass price was ${avg_price:,.2f} with {renewals:,} renewals.
 
   # ===========================================================================
   # CUSTOMER SEGMENTS (CustomerAnalytics) — Static (dimension data, not time-dependent)
@@ -415,6 +416,86 @@ questions:
     answer_template: >-
       Current {season} season to date: ticket revenue is ${ticket_rev:,.0f},
       total snowfall is {snowfall:,.1f} inches, and there have been {incidents} safety incidents.
+
+  # ===========================================================================
+  # ===========================================================================
+  # SUMMER OPERATIONS — Year-Round Coverage
+  # ===========================================================================
+  - question: "What was the total bike park revenue last summer?"
+    expected_tools: ["RevenueAnalytics"]
+    category: revenue
+    tags: [summer, bike_park, dynamic]
+    test_type: in_scope
+    ground_truth_invocations:
+      - tool_name: "RevenueAnalytics"
+        tool_input: "Total bike park revenue for last summer"
+        tool_output: "SQL joining FACT_TICKET_SALES to DIM_TICKET_TYPE (ticket_category = 'summer_activity', ticket_type_id = 'TKT_BIKE') and DIM_DATE (season_type = 'summer', year = last year), returning SUM(purchase_amount)."
+    validation_query: |
+      SELECT SUM(t.PURCHASE_AMOUNT) AS total_revenue, COUNT(*) AS ticket_count
+      FROM AM_SKI_RESORT_DEV.MARTS.FACT_TICKET_SALES t
+      JOIN AM_SKI_RESORT_DEV.MARTS.DIM_DATE d ON t.PURCHASE_DATE_KEY = d.DATE_KEY
+      WHERE d.SEASON_TYPE = 'summer' AND t.TICKET_TYPE_ID = 'TKT_BIKE'
+        AND d.CALENDAR_YEAR = YEAR(CURRENT_DATE()) - 1
+    answer_template: >-
+      Bike park revenue last summer was approximately ${total_revenue:,.0f}
+      from {ticket_count:,} tickets sold.
+
+  - question: "How does summer revenue compare to winter revenue?"
+    expected_tools: ["RevenueAnalytics", "DailySummaryKPIs"]
+    category: revenue
+    tags: [summer, comparison, dynamic]
+    test_type: in_scope
+    ground_truth_invocations:
+      - tool_name: "RevenueAnalytics"
+        tool_input: "Compare summer revenue to winter revenue"
+        tool_output: "SQL grouping FACT_TICKET_SALES by DIM_DATE.SEASON_TYPE, returning SUM(purchase_amount) for both 'summer' and 'winter' rows."
+    validation_query: |
+      SELECT d.SEASON_TYPE, SUM(t.PURCHASE_AMOUNT) AS total_revenue, COUNT(*) AS ticket_count
+      FROM AM_SKI_RESORT_DEV.MARTS.FACT_TICKET_SALES t
+      JOIN AM_SKI_RESORT_DEV.MARTS.DIM_DATE d ON t.PURCHASE_DATE_KEY = d.DATE_KEY
+      GROUP BY d.SEASON_TYPE ORDER BY d.SEASON_TYPE
+    answer_template: >-
+      Summer ticket revenue is ${total_revenue:,.0f} from {ticket_count:,} tickets.
+      This represents the comparison between summer recreation (bike park, hiking, gondola, concerts)
+      and winter ski operations.
+
+  - question: "What are the most common summer safety incidents?"
+    expected_tools: ["SafetyIncidents"]
+    category: safety
+    tags: [summer, incidents, dynamic]
+    test_type: in_scope
+    ground_truth_invocations:
+      - tool_name: "SafetyIncidents"
+        tool_input: "Most common summer safety incident types"
+        tool_output: "SQL filtering FACT_INCIDENTS joined to DIM_DATE where season_type = 'summer', grouped by incident_type, ordered by count descending. Expected types include bike_crash, trail_fall, dehydration, wildlife_encounter."
+    validation_query: |
+      SELECT i.INCIDENT_TYPE, COUNT(*) AS incident_count
+      FROM AM_SKI_RESORT_DEV.MARTS.FACT_INCIDENTS i
+      JOIN AM_SKI_RESORT_DEV.MARTS.DIM_DATE d ON i.DATE_KEY = d.DATE_KEY
+      WHERE d.SEASON_TYPE = 'summer'
+      GROUP BY i.INCIDENT_TYPE ORDER BY incident_count DESC LIMIT 5
+    answer_template: >-
+      The most common summer incident types are listed by frequency.
+      Summer incidents include bike crashes, trail falls, dehydration, and wildlife encounters.
+
+  - question: "How many mountain bike lessons were booked last summer?"
+    expected_tools: ["SkiSchoolAnalytics"]
+    category: lessons
+    tags: [summer, lessons, dynamic]
+    test_type: in_scope
+    ground_truth_invocations:
+      - tool_name: "SkiSchoolAnalytics"
+        tool_input: "Mountain bike lesson bookings last summer"
+        tool_output: "SQL filtering FACT_LESSONS where sport_type = 'mountain_bike' joined to DIM_DATE with season_type = 'summer' for last year, returning COUNT and SUM(total_lesson_revenue)."
+    validation_query: |
+      SELECT COUNT(*) AS total_lessons, ROUND(SUM(TOTAL_LESSON_REVENUE), 0) AS total_revenue
+      FROM AM_SKI_RESORT_DEV.MARTS.FACT_LESSONS
+      WHERE SPORT_TYPE = 'mountain_bike'
+        AND YEAR(LESSON_DATE) = YEAR(CURRENT_DATE()) - 1
+        AND MONTH(LESSON_DATE) BETWEEN 5 AND 10
+    answer_template: >-
+      There were {total_lessons:,} mountain bike lessons booked last summer,
+      generating approximately ${total_revenue:,.0f} in revenue.
 
   # ===========================================================================
   # OUT-OF-SCOPE QUERIES (agent should decline) — Static ground truth

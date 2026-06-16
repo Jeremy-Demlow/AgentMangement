@@ -440,8 +440,15 @@ jobs:
           DBT_TARGET: prod
           SNOWFLAKE_DATABASE: ${{ steps.config.outputs.prod_database }}
         run: |
+          # Auto-detect schema changes: if fact model SQL files changed since last
+          # successful daily refresh, force a full-refresh to backfill new columns.
+          FACT_MODELS_CHANGED=$(git diff --name-only HEAD~1 -- 'models/marts/facts/' 2>/dev/null | wc -l | tr -d ' ')
+
           if [ "${{ github.event.inputs.full_refresh }}" = "true" ]; then
             echo "Full refresh requested - rebuilding all fact tables..."
+            dbt run --select "+marts.facts" --full-refresh
+          elif [ "$FACT_MODELS_CHANGED" -gt "0" ]; then
+            echo "Fact model SQL changed ($FACT_MODELS_CHANGED files) - running full refresh to apply schema changes..."
             dbt run --select "+marts.facts" --full-refresh
           else
             dbt run --select "+marts.facts"

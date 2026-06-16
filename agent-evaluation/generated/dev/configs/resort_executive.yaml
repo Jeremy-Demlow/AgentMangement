@@ -47,6 +47,8 @@ thresholds:
 metrics:
   - "answer_correctness"
   - "logical_consistency"
+  - "tool_selection_accuracy"
+  - "tool_execution_accuracy"
   # Uncomment below to add boundary enforcement testing.
   # Requires out_of_scope and negative rows in your CSV.
   #

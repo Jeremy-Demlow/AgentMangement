@@ -247,6 +247,13 @@ models:
         tests:
           - unique
           - not_null
+      - name: lesson_date_key
+        description: FK to dim_date (YYYYMMDD integer)
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
       - name: customer_id
         description: Customer taking lesson
       - name: total_lesson_revenue
@@ -277,6 +284,13 @@ models:
         tests:
           - unique
           - not_null
+      - name: feedback_date_key
+        description: FK to dim_date (YYYYMMDD integer)
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
       - name: sentiment_score
         description: Numeric sentiment (-1, 0, 1)
 

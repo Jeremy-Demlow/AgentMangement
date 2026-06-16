@@ -30,3 +30,9 @@ PROD028,Beer - Domestic,beverage,alcohol,7
 PROD029,Beer - Craft,beverage,alcohol,9
 PROD030,Wine - Glass,beverage,alcohol,10
 PROD031,Mixed Drink,beverage,alcohol,12
+RPROD001,Mountain Bike,rental,bike,65
+RPROD002,E-Bike,rental,bike,95
+RPROD003,Hiking Poles,rental,accessory,15
+RPROD004,Climbing Gear Set,rental,climbing,45
+RPROD005,Bike Helmet,rental,safety,20
+RPROD006,Bike Armor Pack,rental,safety,30

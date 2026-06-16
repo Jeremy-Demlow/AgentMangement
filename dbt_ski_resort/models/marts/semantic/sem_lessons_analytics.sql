@@ -1,12 +1,22 @@
 {{ config(materialized='semantic_view') }}
 
--- Lessons Analytics semantic view (simplified)
+-- Lessons Analytics semantic view — year-round instruction programs
 
 TABLES (
     FACT_LESSONS AS {{ ref('fact_lessons') }}
       PRIMARY KEY (LESSON_ID)
       WITH SYNONYMS ('lessons', 'ski_school', 'instruction')
-      COMMENT = 'Ski lesson bookings'
+      COMMENT = 'Lesson bookings: ski, snowboard, mountain bike, hiking, kids camp',
+
+    DIM_DATE AS {{ ref('dim_date') }}
+      PRIMARY KEY (DATE_KEY)
+      WITH SYNONYMS ('calendar')
+      COMMENT = 'Calendar dimension with season and summer awareness'
+)
+
+RELATIONSHIPS (
+    LESSONS_TO_DATE AS
+      FACT_LESSONS (LESSON_DATE_KEY) REFERENCES DIM_DATE
 )
 
 FACTS (
@@ -25,6 +35,18 @@ FACTS (
 DIMENSIONS (
     FACT_LESSONS.LESSON_DATE AS LESSON_DATE
       COMMENT = 'Date of lesson',
+    DIM_DATE.SEASON_TYPE AS SEASON_TYPE
+      WITH SYNONYMS ('operating_season')
+      COMMENT = 'Season type: winter (Nov-Apr) or summer (May-Oct)',
+    DIM_DATE.SKI_SEASON AS SKI_SEASON
+      COMMENT = 'Ski season identifier (e.g. 2024-2025)',
+    DIM_DATE.FULL_DATE AS FULL_DATE
+      WITH SYNONYMS ('date')
+      COMMENT = 'Calendar date',
+    DIM_DATE.IS_WEEKEND AS IS_WEEKEND
+      COMMENT = 'Weekend flag',
+    DIM_DATE.IS_HOLIDAY AS IS_HOLIDAY
+      COMMENT = 'Holiday flag',
     FACT_LESSONS.LESSON_TYPE AS LESSON_TYPE
       WITH SYNONYMS ('type')
       COMMENT = 'Lesson type',
@@ -60,7 +82,8 @@ COMMENT = 'Ski school analytics'
 WITH EXTENSION (CA = $$
 {
   "module_custom_instructions": {
-    "sql_generation": "Use FACT_LESSONS for all lesson queries. Filter by LESSON_TYPE for private vs group. Use STUDENT_RATING for instructor performance. Guard division with DIV0(). The resort offers year-round lessons: winter includes ski/snowboard (beginner_group, intermediate_group, advanced_group, private, kids_camp); summer includes mountain biking and guided hikes (mountain_bike_beginner, mountain_bike_intermediate, mountain_bike_advanced, guided_hike, kids_adventure_camp). Use SPORT_TYPE to distinguish ski/snowboard/mountain_bike/hiking/adventure. When asking about recent lessons, include ALL data unless a season is specified."
+    "question_categorization": "This view covers all resort instruction programs year-round. Winter lessons include ski and snowboard instruction (beginner_group, intermediate_group, advanced_group, private, kids_camp). Summer lessons include mountain bike instruction (mountain_bike_beginner, mountain_bike_intermediate, mountain_bike_advanced), guided hikes (guided_hike), and kids adventure camps (kids_adventure_camp). Use SPORT_TYPE to distinguish winter (ski, snowboard) from summer (mountain_bike, hiking, adventure) activities. Route revenue questions to SEM_REVENUE if they are about ticket/pass sales rather than lesson bookings.",
+    "sql_generation": "Use FACT_LESSONS for all lesson queries. Filter by LESSON_TYPE for private vs group. Use STUDENT_RATING for instructor performance. Guard division with DIV0(). Use DIM_DATE.SEASON_TYPE to filter winter vs summer lessons. The resort offers year-round lessons: winter includes ski/snowboard (beginner_group, intermediate_group, advanced_group, private, kids_camp); summer includes mountain biking and guided hikes (mountain_bike_beginner, mountain_bike_intermediate, mountain_bike_advanced, guided_hike, kids_adventure_camp). Use SPORT_TYPE to distinguish ski/snowboard/mountain_bike/hiking/adventure. When asking about recent lessons, include ALL data unless a season is specified."
   },
   "verified_queries": [
     {
@@ -102,6 +125,14 @@ WITH EXTENSION (CA = $$
       "verified_by": "Cortex Analyst",
       "verified_at": 1744900000,
       "use_as_onboarding_question": false
+    },
+    {
+      "name": "summer_lessons_by_sport",
+      "question": "What is the total lesson count and revenue for summer activities by sport type?",
+      "sql": "WITH __fact_lessons AS (\n  SELECT sport_type, lesson_id, total_lesson_revenue\n  FROM {{ target.database }}.MARTS.FACT_LESSONS\n  WHERE sport_type IN ('mountain_bike', 'hiking', 'adventure')\n) SELECT sport_type, COUNT(lesson_id) AS total_lessons, SUM(total_lesson_revenue) AS total_revenue\nFROM __fact_lessons\nGROUP BY sport_type\nORDER BY total_revenue DESC NULLS LAST",
+      "verified_by": "Cortex Analyst",
+      "verified_at": 1750032000,
+      "use_as_onboarding_question": true
     }
   ]
 }

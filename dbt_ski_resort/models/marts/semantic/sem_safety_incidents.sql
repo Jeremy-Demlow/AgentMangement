@@ -74,6 +74,7 @@ COMMENT = 'Safety incident tracking'
 WITH EXTENSION (CA = $$
 {
   "module_custom_instructions": {
+    "question_categorization": "This view tracks all safety incidents year-round. Winter incidents include collisions, falls, lost skiers, frostbite, and equipment failure. Summer incidents include bike_crash, trail_fall, dehydration, wildlife_encounter, equipment_failure, and medical emergencies. Use INCIDENT_TYPE to filter by specific incident category. Route revenue or staffing questions to their respective views.",
     "sql_generation": "Use FACT_INCIDENTS for all safety and incident queries. Use DIM_DATE.SKI_SEASON for seasonal filtering (e.g. 'last season'). Filter by SEVERITY for critical analysis. Use PATROL_RESPONSE_MINUTES for response time metrics. Guard division with DIV0(). The resort operates year-round: winter incidents include collisions, falls, lost skiers; summer incidents include bike crashes, trail falls, dehydration, wildlife encounters. When asking about recent incidents without a season filter, include ALL data. Use DIM_DATE.SEASON_TYPE = 'summer' or 'winter' to filter by operating season."
   },
   "verified_queries": [
@@ -108,6 +109,14 @@ WITH EXTENSION (CA = $$
       "verified_by": "Cortex Analyst",
       "verified_at": 1744900000,
       "use_as_onboarding_question": false
+    },
+    {
+      "name": "summer_incidents_by_type",
+      "question": "What are the most common summer incident types and their average severity?",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n    {{ target.database }}.SEMANTIC.SEM_SAFETY_INCIDENTS\n    DIMENSIONS incident_type, season_type\n    METRICS total_incidents, average_severity\n    WHERE season_type = 'summer'\n) ORDER BY total_incidents DESC NULLS LAST",
+      "verified_by": "Cortex Analyst",
+      "verified_at": 1750032000,
+      "use_as_onboarding_question": true
     }
   ]
 }

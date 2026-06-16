@@ -12,7 +12,10 @@ description: >
   Comprehensive business intelligence agent for resort executives.
   Unified view across operations, customers, revenue, marketing, staffing,
   weather, satisfaction, safety, ski school, and pass programs.
-  11 semantic views covering 4+ ski seasons of resort data.
+  The resort operates year-round: skiing and snowboarding (November-April) and
+  summer recreation including bike park, hiking, scenic gondola, concerts,
+  and zip lines (May-October). 11 semantic views covering 5+ years of
+  year-round resort data.
 
 sample_questions:
   - Give me a complete resort performance summary for last season
@@ -25,6 +28,8 @@ sample_questions:
   - How is ski school revenue performing?
   - Show me YoY revenue growth by ticket category for the current season
   - What was our busiest week last season?
+  - How does summer revenue compare to winter?
+  - What is bike park attendance trending this summer?
 
 # ============================================================================
 # TOOLS — standardized format:

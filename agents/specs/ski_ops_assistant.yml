@@ -12,7 +12,10 @@ description: >
   Operations analytics agent for lift supervisors and operations managers.
   Covers lift wait times, lift maintenance and inspections, trail grooming,
   staffing coverage, weather conditions, and safety incidents
-  across 18 lifts and 4 mountain zones.
+  across 18 lifts and 4 mountain zones. The resort operates year-round:
+  winter ski operations (November-April) and summer recreation operations
+  including bike park uplift, scenic gondola, trail patrol, and trail
+  maintenance (May-October). Only 5 lifts operate in summer.
 
 sample_questions:
   - What are the average wait times by lift on weekends?
@@ -24,6 +27,8 @@ sample_questions:
   - What is the total maintenance cost by lift this season?
   - Which trails have the best grooming condition improvement rate?
   - How much lift downtime was caused by maintenance last month?
+  - What are the most common summer safety incidents?
+  - How does bike park ridership compare to winter ski traffic?
 
 # ============================================================================
 # TOOLS — standardized format:

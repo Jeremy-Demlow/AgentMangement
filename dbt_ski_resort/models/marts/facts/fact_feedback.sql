@@ -2,7 +2,8 @@
     config(
         materialized='incremental',
         unique_key='feedback_id',
-        on_schema_change='sync_all_columns'
+        on_schema_change='sync_all_columns',
+        cluster_by=['feedback_date_key']
     )
 }}
 
@@ -20,6 +21,7 @@ final as (
         f.customer_id,
         c.customer_segment,
         f.feedback_date,
+        TO_NUMBER(TO_CHAR(f.feedback_date, 'YYYYMMDD')) AS feedback_date_key,
         f.visit_date,
         f.feedback_type,
         f.category,

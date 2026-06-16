@@ -17,3 +17,8 @@ TKT015,Family 4-Pack Day,day_pass,1,Full,400,None
 TKT016,Beginner Package,day_pass,1,Limited,99,Beginner Area Only
 TKT017,Night Skiing,half_day,1,Limited,49,Specific Lifts Only
 TKT018,Spring Pass,season_pass,60,Full,299,Mar-Apr Only
+TKT_BIKE,Bike Park Day Pass,summer_activity,1,Full,69,None
+TKT_HIKE,Hiking Trail Pass,summer_activity,1,Full,25,None
+TKT_GONDOLA,Scenic Gondola Ride,summer_activity,1,Full,39,None
+TKT_CONCERT,Concert Ticket,summer_activity,1,Full,55,None
+TKT_COMBO,Summer Combo Pass,summer_activity,1,Full,89,None

@@ -1,12 +1,22 @@
 {{ config(materialized='semantic_view') }}
 
--- Customer Satisfaction semantic view (simplified)
+-- Customer Satisfaction semantic view — year-round feedback analysis
 
 TABLES (
     FACT_FEEDBACK AS {{ ref('fact_feedback') }}
       PRIMARY KEY (FEEDBACK_ID)
       WITH SYNONYMS ('customer_feedback', 'satisfaction', 'nps')
-      COMMENT = 'Customer feedback and satisfaction scores'
+      COMMENT = 'Customer feedback and satisfaction scores',
+
+    DIM_DATE AS {{ ref('dim_date') }}
+      PRIMARY KEY (DATE_KEY)
+      WITH SYNONYMS ('calendar')
+      COMMENT = 'Calendar dimension with season awareness'
+)
+
+RELATIONSHIPS (
+    FEEDBACK_TO_DATE AS
+      FACT_FEEDBACK (FEEDBACK_DATE_KEY) REFERENCES DIM_DATE
 )
 
 FACTS (
@@ -27,6 +37,14 @@ FACTS (
 DIMENSIONS (
     FACT_FEEDBACK.FEEDBACK_DATE AS FEEDBACK_DATE
       COMMENT = 'Date feedback was submitted',
+    DIM_DATE.SEASON_TYPE AS SEASON_TYPE
+      WITH SYNONYMS ('operating_season')
+      COMMENT = 'Season type: winter (Nov-Apr) or summer (May-Oct)',
+    DIM_DATE.SKI_SEASON AS SKI_SEASON
+      COMMENT = 'Ski season identifier (e.g. 2024-2025)',
+    DIM_DATE.FULL_DATE AS FULL_DATE
+      WITH SYNONYMS ('date')
+      COMMENT = 'Calendar date',
     FACT_FEEDBACK.CATEGORY AS CATEGORY
       WITH SYNONYMS ('feedback_category')
       COMMENT = 'Feedback category',
@@ -58,7 +76,7 @@ COMMENT = 'Customer satisfaction and feedback analysis'
 WITH EXTENSION (CA = $$
 {
   "module_custom_instructions": {
-    "sql_generation": "Use FACT_FEEDBACK for all feedback and satisfaction queries. Filter by SENTIMENT for positive/negative analysis. Use NPS_SCORE for net promoter calculations. Guard division with DIV0(). The resort collects feedback year-round: winter categories include lift_operations, ski_school, rental_shop, food_service, facilities, overall_experience; summer categories include bike_park, trail_conditions, food_service, rental_shop, events, overall_experience. When asking about recent feedback, include ALL data unless a season is specified."
+    "sql_generation": "Use FACT_FEEDBACK for all feedback and satisfaction queries. Filter by SENTIMENT for positive/negative analysis. Use NPS_SCORE for net promoter calculations. Guard division with DIV0(). Use DIM_DATE.SEASON_TYPE to filter feedback by operating season. The resort collects feedback year-round: winter categories include lift_operations, ski_school, rental_shop, food_service, facilities, overall_experience; summer categories include bike_park, trail_conditions, food_service, rental_shop, events, overall_experience. When asking about recent feedback, include ALL data unless a season is specified."
   },
   "verified_queries": [
     {

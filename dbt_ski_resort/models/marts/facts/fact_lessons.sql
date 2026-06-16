@@ -2,7 +2,8 @@
     config(
         materialized='incremental',
         unique_key='lesson_id',
-        on_schema_change='sync_all_columns'
+        on_schema_change='sync_all_columns',
+        cluster_by=['lesson_date_key']
     )
 }}
 
@@ -25,6 +26,7 @@ final as (
         l.customer_id,
         c.customer_segment,
         l.lesson_date,
+        TO_NUMBER(TO_CHAR(l.lesson_date, 'YYYYMMDD')) AS lesson_date_key,
         l.lesson_start_time,
         l.lesson_type,
         l.sport_type,

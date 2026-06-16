@@ -199,7 +199,7 @@ COMMENT = 'Revenue semantic view for analyzing ticket, rental, and F&B performan
 WITH EXTENSION (CA = $$
 {
   "module_custom_instructions": {
-    "question_categorization": "Route lift operations, wait time, or capacity conversations to SKI_RESORT_DB.SEMANTIC.SEM_OPERATIONS. Route pass utilization, renewal, or loyalty questions to SKI_RESORT_DB.SEMANTIC.SEM_PASSHOLDER_ANALYTICS. Route persona-only behavioral questions to SKI_RESORT_DB.SEMANTIC.SEM_CUSTOMER_BEHAVIOR. When a request mentions ticket, ticket sales, or ticket category, use FACT_TICKET_SALES. When it mentions rental or equipment, use FACT_RENTALS. When it mentions food, beverage, F&B, or dining, use FACT_FOOD_BEVERAGE. Never ask for clarification about which revenue stream — infer from context or answer for all streams if ambiguous.",
+    "question_categorization": "Route lift operations, wait time, or capacity conversations to SKI_RESORT_DB.SEMANTIC.SEM_OPERATIONS. Route pass utilization, renewal, or loyalty questions to SKI_RESORT_DB.SEMANTIC.SEM_PASSHOLDER_ANALYTICS. Route persona-only behavioral questions to SKI_RESORT_DB.SEMANTIC.SEM_CUSTOMER_BEHAVIOR. When a request mentions ticket, ticket sales, or ticket category, use FACT_TICKET_SALES. When it mentions rental or equipment, use FACT_RENTALS. When it mentions food, beverage, F&B, or dining, use FACT_FOOD_BEVERAGE. Summer revenue includes bike park passes (TKT_BIKE), hiking trail passes (TKT_HIKE), scenic gondola rides (TKT_GONDOLA), concert tickets (TKT_CONCERT), and summer combo passes (TKT_COMBO) — all in FACT_TICKET_SALES with ticket_category = 'summer_activity'. Summer rentals include mountain bikes, e-bikes, hiking poles, and climbing gear. Never ask for clarification about which revenue stream — infer from context or answer for all streams if ambiguous.",
     "sql_generation": "Aggregate ticket revenue from FACT_TICKET_SALES, rentals from FACT_RENTALS, and F&B from FACT_FOOD_BEVERAGE. When the question specifies a product family (tickets, rentals, or F&B), use only that fact table. When ambiguous, answer using all relevant fact tables without asking for clarification. Use DIM_DATE.FULL_DATE for calendar filters and DIM_DATE.SKI_SEASON for seasonal framing; leverage DATE_TRUNC for month or season aggregation. Join DIM_LOCATION, DIM_TICKET_TYPE, or DIM_PRODUCT to segment results. Guard division with DIV0(...) and include NULLS LAST when ordering by computed metrics. The resort operates year-round: winter tickets are ski day passes; summer tickets include bike park, hiking, gondola scenic, and concert passes. When asking about recent revenue without a season filter, include ALL data. Use DIM_DATE.SEASON_TYPE to compare winter vs summer revenue."
   },
   "verified_queries": [
@@ -242,6 +242,22 @@ WITH EXTENSION (CA = $$
       "verified_by": "Cortex Analyst",
       "verified_at": 1744900000,
       "use_as_onboarding_question": false
+    },
+    {
+      "name": "summer_revenue_by_activity",
+      "question": "What is the total revenue for each summer activity type?",
+      "sql": "WITH __fact_ticket_sales AS (\n  SELECT ticket_type_id, purchase_amount\n  FROM {{ target.database }}.MARTS.FACT_TICKET_SALES\n), __dim_ticket_type AS (\n  SELECT ticket_type_id, ticket_name, ticket_category\n  FROM {{ target.database }}.MARTS.DIM_TICKET_TYPE\n  WHERE is_current = TRUE AND ticket_category = 'summer_activity'\n) SELECT dtt.ticket_name, SUM(fts.purchase_amount) AS total_revenue\nFROM __fact_ticket_sales AS fts\nINNER JOIN __dim_ticket_type AS dtt ON fts.ticket_type_id = dtt.ticket_type_id\nGROUP BY dtt.ticket_name\nORDER BY total_revenue DESC NULLS LAST",
+      "verified_by": "Cortex Analyst",
+      "verified_at": 1750032000,
+      "use_as_onboarding_question": true
+    },
+    {
+      "name": "summer_vs_winter_revenue",
+      "question": "How does total ticket revenue compare between summer and winter seasons?",
+      "sql": "SELECT * FROM SEMANTIC_VIEW(\n  {{ target.database }}.SEMANTIC.SEM_REVENUE\n  METRICS ticket_revenue\n  DIMENSIONS season_type\n) ORDER BY season_type NULLS LAST",
+      "verified_by": "Cortex Analyst",
+      "verified_at": 1750032000,
+      "use_as_onboarding_question": true
     }
   ]
 }

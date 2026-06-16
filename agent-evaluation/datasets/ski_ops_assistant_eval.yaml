@@ -270,3 +270,44 @@ questions:
       Operations summary for {report_date}: avg wait {avg_wait} min across {total_scans:,} scans,
       staffing coverage {avg_coverage}, snowfall {snowfall} in, high {high_temp}F,
       {incidents} safety incidents.
+
+  # ===========================================================================
+  # SUMMER OPERATIONS — Bike Park, Trail Patrol, Seasonal Staffing
+  # ===========================================================================
+  - question: "What are the most common summer safety incidents?"
+    expected_tools: ["SafetyIncidentsAnalytics"]
+    category: safety
+    tags: [summer, incidents, dynamic]
+    test_type: in_scope
+    ground_truth_invocations:
+      - tool_name: "SafetyIncidentsAnalytics"
+        tool_input: "Most common summer safety incident types"
+        tool_output: "SQL filtering FACT_INCIDENTS joined to DIM_DATE where season_type = 'summer', grouped by incident_type, ordered by count descending. Expected types: bike_crash, trail_fall, dehydration, wildlife_encounter."
+    validation_query: |
+      SELECT i.INCIDENT_TYPE, COUNT(*) AS incident_count
+      FROM {{ eval.source_database }}.MARTS.FACT_INCIDENTS i
+      JOIN {{ eval.source_database }}.MARTS.DIM_DATE d ON i.DATE_KEY = d.DATE_KEY
+      WHERE d.SEASON_TYPE = 'summer'
+      GROUP BY i.INCIDENT_TYPE ORDER BY incident_count DESC LIMIT 5
+    answer_template: >-
+      The most common summer incident types include bike crashes, trail falls,
+      dehydration, and wildlife encounters, totaling {incident_count} incidents
+      for the top category.
+
+  - question: "How does summer staffing coverage compare to winter?"
+    expected_tools: ["StaffingAnalytics"]
+    category: staffing
+    tags: [summer, comparison, dynamic]
+    test_type: in_scope
+    ground_truth_invocations:
+      - tool_name: "StaffingAnalytics"
+        tool_input: "Compare summer staffing coverage to winter"
+        tool_output: "SQL grouping FACT_STAFFING by DIM_DATE.SEASON_TYPE, computing AVG(coverage_pct) and COUNT(DISTINCT schedule_date) for both summer and winter."
+    validation_query: |
+      SELECT d.SEASON_TYPE, ROUND(AVG(s.COVERAGE_PCT), 1) AS avg_coverage, COUNT(DISTINCT s.SCHEDULE_DATE) AS days
+      FROM {{ eval.source_database }}.MARTS.FACT_STAFFING s
+      JOIN {{ eval.source_database }}.MARTS.DIM_DATE d ON s.SCHEDULE_DATE_KEY = d.DATE_KEY
+      GROUP BY d.SEASON_TYPE ORDER BY d.SEASON_TYPE
+    answer_template: >-
+      Summer staffing operates with smaller crews across fewer departments.
+      Average coverage is {avg_coverage}% across {days} operating days for the {SEASON_TYPE} season.

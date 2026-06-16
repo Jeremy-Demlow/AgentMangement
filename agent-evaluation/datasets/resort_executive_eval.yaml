@@ -418,6 +418,86 @@ questions:
       total snowfall is {snowfall:,.1f} inches, and there have been {incidents} safety incidents.
 
   # ===========================================================================
+  # ===========================================================================
+  # SUMMER OPERATIONS — Year-Round Coverage
+  # ===========================================================================
+  - question: "What was the total bike park revenue last summer?"
+    expected_tools: ["RevenueAnalytics"]
+    category: revenue
+    tags: [summer, bike_park, dynamic]
+    test_type: in_scope
+    ground_truth_invocations:
+      - tool_name: "RevenueAnalytics"
+        tool_input: "Total bike park revenue for last summer"
+        tool_output: "SQL joining FACT_TICKET_SALES to DIM_TICKET_TYPE (ticket_category = 'summer_activity', ticket_type_id = 'TKT_BIKE') and DIM_DATE (season_type = 'summer', year = last year), returning SUM(purchase_amount)."
+    validation_query: |
+      SELECT SUM(t.PURCHASE_AMOUNT) AS total_revenue, COUNT(*) AS ticket_count
+      FROM {{ eval.source_database }}.MARTS.FACT_TICKET_SALES t
+      JOIN {{ eval.source_database }}.MARTS.DIM_DATE d ON t.PURCHASE_DATE_KEY = d.DATE_KEY
+      WHERE d.SEASON_TYPE = 'summer' AND t.TICKET_TYPE_ID = 'TKT_BIKE'
+        AND d.CALENDAR_YEAR = YEAR(CURRENT_DATE()) - 1
+    answer_template: >-
+      Bike park revenue last summer was approximately ${total_revenue:,.0f}
+      from {ticket_count:,} tickets sold.
+
+  - question: "How does summer revenue compare to winter revenue?"
+    expected_tools: ["RevenueAnalytics", "DailySummaryKPIs"]
+    category: revenue
+    tags: [summer, comparison, dynamic]
+    test_type: in_scope
+    ground_truth_invocations:
+      - tool_name: "RevenueAnalytics"
+        tool_input: "Compare summer revenue to winter revenue"
+        tool_output: "SQL grouping FACT_TICKET_SALES by DIM_DATE.SEASON_TYPE, returning SUM(purchase_amount) for both 'summer' and 'winter' rows."
+    validation_query: |
+      SELECT d.SEASON_TYPE, SUM(t.PURCHASE_AMOUNT) AS total_revenue, COUNT(*) AS ticket_count
+      FROM {{ eval.source_database }}.MARTS.FACT_TICKET_SALES t
+      JOIN {{ eval.source_database }}.MARTS.DIM_DATE d ON t.PURCHASE_DATE_KEY = d.DATE_KEY
+      GROUP BY d.SEASON_TYPE ORDER BY d.SEASON_TYPE
+    answer_template: >-
+      Summer ticket revenue is ${total_revenue:,.0f} from {ticket_count:,} tickets.
+      This represents the comparison between summer recreation (bike park, hiking, gondola, concerts)
+      and winter ski operations.
+
+  - question: "What are the most common summer safety incidents?"
+    expected_tools: ["SafetyIncidents"]
+    category: safety
+    tags: [summer, incidents, dynamic]
+    test_type: in_scope
+    ground_truth_invocations:
+      - tool_name: "SafetyIncidents"
+        tool_input: "Most common summer safety incident types"
+        tool_output: "SQL filtering FACT_INCIDENTS joined to DIM_DATE where season_type = 'summer', grouped by incident_type, ordered by count descending. Expected types include bike_crash, trail_fall, dehydration, wildlife_encounter."
+    validation_query: |
+      SELECT i.INCIDENT_TYPE, COUNT(*) AS incident_count
+      FROM {{ eval.source_database }}.MARTS.FACT_INCIDENTS i
+      JOIN {{ eval.source_database }}.MARTS.DIM_DATE d ON i.DATE_KEY = d.DATE_KEY
+      WHERE d.SEASON_TYPE = 'summer'
+      GROUP BY i.INCIDENT_TYPE ORDER BY incident_count DESC LIMIT 5
+    answer_template: >-
+      The most common summer incident types are listed by frequency.
+      Summer incidents include bike crashes, trail falls, dehydration, and wildlife encounters.
+
+  - question: "How many mountain bike lessons were booked last summer?"
+    expected_tools: ["SkiSchoolAnalytics"]
+    category: lessons
+    tags: [summer, lessons, dynamic]
+    test_type: in_scope
+    ground_truth_invocations:
+      - tool_name: "SkiSchoolAnalytics"
+        tool_input: "Mountain bike lesson bookings last summer"
+        tool_output: "SQL filtering FACT_LESSONS where sport_type = 'mountain_bike' joined to DIM_DATE with season_type = 'summer' for last year, returning COUNT and SUM(total_lesson_revenue)."
+    validation_query: |
+      SELECT COUNT(*) AS total_lessons, ROUND(SUM(TOTAL_LESSON_REVENUE), 0) AS total_revenue
+      FROM {{ eval.source_database }}.MARTS.FACT_LESSONS
+      WHERE SPORT_TYPE = 'mountain_bike'
+        AND YEAR(LESSON_DATE) = YEAR(CURRENT_DATE()) - 1
+        AND MONTH(LESSON_DATE) BETWEEN 5 AND 10
+    answer_template: >-
+      There were {total_lessons:,} mountain bike lessons booked last summer,
+      generating approximately ${total_revenue:,.0f} in revenue.
+
+  # ===========================================================================
   # OUT-OF-SCOPE QUERIES (agent should decline) — Static ground truth
   # ===========================================================================
   # - question: "What is the stock price of Vail Resorts?"

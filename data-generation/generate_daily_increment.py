@@ -5,6 +5,7 @@ Includes idempotency checks to prevent duplicate data.
 """
 
 import argparse
+import time
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
@@ -30,8 +31,86 @@ from shared import (
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Use unseeded RNG for incremental (truly random daily data)
+# Legacy global RNG — kept for backward compatibility with helper functions
+# that haven't been refactored to accept rng as a parameter yet.
+# The main loop now uses per-day deterministic RNG (seeded from date) for
+# cross-table consistency on partial failure re-runs.
 rng = get_rng()
+
+
+# =============================================================================
+# WRITE HELPERS — Per-day batch writes with retry and reconnection
+# =============================================================================
+
+MAX_WRITE_RETRIES = 3
+RETRY_BACKOFF_BASE = 2  # seconds; exponential: 2, 4, 8...
+
+
+def write_day_batch(conn, day_frames: dict, connection_args: dict = None) -> list:
+    """Write all DataFrames for a single day to Snowflake with retry logic.
+
+    Args:
+        conn: SnowflakeConnection instance
+        day_frames: {table_name: DataFrame} — only non-empty frames
+        connection_args: dict with keys needed to reconnect if session is stale
+
+    Returns:
+        List of successfully written table names.
+
+    Raises:
+        Exception from the last retry if all retries exhausted for a table.
+    """
+    written = []
+    for table_name, df in day_frames.items():
+        if df is None or df.empty:
+            continue
+        for attempt in range(MAX_WRITE_RETRIES):
+            try:
+                conn.session.write_pandas(
+                    df, table_name=table_name,
+                    auto_create_table=False, overwrite=False
+                )
+                written.append(table_name)
+                break
+            except Exception as e:
+                if attempt == MAX_WRITE_RETRIES - 1:
+                    logger.error(
+                        "FAILED writing %s after %d attempts: %s",
+                        table_name, MAX_WRITE_RETRIES, e
+                    )
+                    raise
+                wait = RETRY_BACKOFF_BASE ** (attempt + 1)
+                logger.warning(
+                    "Retry %d/%d for %s: %s. Waiting %ds...",
+                    attempt + 1, MAX_WRITE_RETRIES, table_name, e, wait
+                )
+                time.sleep(wait)
+                # Attempt session recovery on connection errors
+                if connection_args and _is_connection_error(e):
+                    conn = _reconnect(conn, connection_args)
+    return written
+
+
+def _is_connection_error(exc: Exception) -> bool:
+    """Heuristic: does this look like a stale/dropped session?"""
+    msg = str(exc).lower()
+    return any(kw in msg for kw in (
+        'session', 'token', 'expired', 'connection', 'timeout',
+        'gone', 'reset', 'broken pipe', 'eof',
+    ))
+
+
+def _reconnect(conn, connection_args: dict):
+    """Close stale session and establish a new one."""
+    logger.warning("Reconnecting to Snowflake...")
+    try:
+        conn.close()
+    except Exception:
+        pass
+    new_conn = SnowflakeConnection.from_env_or_snow_cli(connection_args['connection_name'])
+    new_conn.execute(f"USE DATABASE {connection_args['database']}")
+    new_conn.execute(f"USE SCHEMA {connection_args['schema']}")
+    return new_conn
 
 
 # =============================================================================
@@ -1312,27 +1391,32 @@ def main():
     conn.execute(f"USE DATABASE {target_db}")
     conn.execute(f"USE SCHEMA {RAW_SCHEMA}")
 
+    # Connection args for reconnection on session timeout
+    connection_args = {
+        'connection_name': args.connection,
+        'database': target_db,
+        'schema': RAW_SCHEMA,
+    }
+
     # Load customers
     customers_df = conn.sql("SELECT CUSTOMER_ID, CUSTOMER_SEGMENT, IS_PASS_HOLDER FROM CUSTOMERS").to_pandas()
     logger.info(f"Loaded {len(customers_df)} customers")
 
-    # Collect all data
-    all_weather, all_staffing = [], []
-    all_scans, all_usage, all_sales, all_fb, all_rentals = [], [], [], [], []
-    all_lessons, all_incidents, all_feedback = [], [], []
-    all_parking, all_maintenance, all_grooming = [], [], []
+    # === Per-day generation and write loop ===
+    # Key design: generate one day at a time, write immediately, then free
+    # memory. This keeps RAM bounded regardless of --days value. Each day
+    # uses a deterministic RNG seeded from the date, so re-runs after partial
+    # failure produce identical data (maintaining cross-table consistency).
 
-    skipped_dates = []
     fully_skipped = []
+    days_written = 0
+    total_rows = 0
 
     for day_offset in range(args.days):
         current_date = start_date + timedelta(days=day_offset)
         date_str = current_date.strftime('%Y-%m-%d')
 
         # === Per-table idempotency ===
-        # Skip only the tables that already have rows for this date; let the
-        # rest fill in. --force overrides everything (treats every table as
-        # absent so it gets re-generated).
         if args.force:
             present = {tag: False for tag in IDEMPOTENCY_TABLES}
         else:
@@ -1346,34 +1430,40 @@ def main():
                 "  %s: backfilling %d missing table(s): %s",
                 date_str, len(missing), ", ".join(sorted(missing)),
             )
-        skipped_dates.append((date_str, missing))
 
-        daily_mod = get_daily_modifier(current_date, rng)
+        # Deterministic RNG per day — same date always produces same data.
+        # This ensures cross-table consistency: if a crash leaves some tables
+        # written and others missing, the re-run regenerates missing tables
+        # with the same random state (same visitors, same amounts).
+        day_seed = int(current_date.strftime('%Y%m%d'))
+        day_rng = get_rng(day_seed)
+        daily_mod = get_daily_modifier(current_date, day_rng)
 
-        # Year-round generation -- skip if already present for this date.
+        # Build this day's data frames
+        day_frames = {}
+
+        # Year-round generation
         if not present["WEATHER_CONDITIONS"]:
-            all_weather.append(generate_weather(current_date, daily_mod))
+            day_frames["WEATHER_CONDITIONS"] = generate_weather(current_date, daily_mod)
         if not present["STAFFING_SCHEDULE"]:
-            all_staffing.append(generate_staffing(current_date, daily_mod))
+            day_frames["STAFFING_SCHEDULE"] = generate_staffing(current_date, daily_mod)
 
-        # Season-gated generation -- gated by season AND per-table presence.
-        # Now supports both winter (Nov-Apr) and summer (May-Oct) operations.
+        # Season-gated generation
         is_summer = daily_mod.get('is_summer', False)
 
         if daily_mod['season_mult'] > 0:
             if not present["LIFT_MAINTENANCE"]:
                 if is_summer:
-                    all_maintenance.append(generate_summer_maintenance(current_date, daily_mod))
+                    day_frames["LIFT_MAINTENANCE"] = generate_summer_maintenance(current_date, daily_mod)
                 else:
-                    all_maintenance.append(generate_lift_maintenance(current_date, daily_mod))
+                    day_frames["LIFT_MAINTENANCE"] = generate_lift_maintenance(current_date, daily_mod)
             if not present["GROOMING_LOGS"]:
                 if is_summer:
-                    all_grooming.append(generate_summer_grooming(current_date, daily_mod))
+                    day_frames["GROOMING_LOGS"] = generate_summer_grooming(current_date, daily_mod)
                 else:
-                    all_grooming.append(generate_grooming_logs(current_date, daily_mod))
+                    day_frames["GROOMING_LOGS"] = generate_grooming_logs(current_date, daily_mod)
 
-            # Transactional bundle: only call the transaction generator if any
-            # of its outputs are missing.
+            # Transactional bundle
             transactional_missing = any(
                 not present[t] for t in (
                     "LIFT_SCANS", "PASS_USAGE", "TICKET_SALES",
@@ -1395,33 +1485,42 @@ def main():
                 if result[0] is not None:
                     n_visitors = len(result[1])
                     if not present["LIFT_SCANS"]:
-                        all_scans.append(result[0])
+                        day_frames["LIFT_SCANS"] = result[0]
                     if not present["PASS_USAGE"]:
-                        all_usage.append(result[1])
+                        day_frames["PASS_USAGE"] = result[1]
                     if not present["TICKET_SALES"] and not result[2].empty:
-                        all_sales.append(result[2])
+                        day_frames["TICKET_SALES"] = result[2]
                     if not present["FOOD_BEVERAGE"]:
-                        all_fb.append(result[3])
+                        day_frames["FOOD_BEVERAGE"] = result[3]
                     if not present["RENTALS"] and not result[4].empty:
-                        all_rentals.append(result[4])
+                        day_frames["RENTALS"] = result[4]
 
                     if not present["SKI_LESSONS"]:
                         if is_summer:
-                            all_lessons.append(generate_summer_lessons(current_date, n_visitors, daily_mod, customers_df))
+                            day_frames["SKI_LESSONS"] = generate_summer_lessons(current_date, n_visitors, daily_mod, customers_df)
                         else:
-                            all_lessons.append(generate_ski_lessons(current_date, n_visitors, daily_mod, customers_df))
+                            day_frames["SKI_LESSONS"] = generate_ski_lessons(current_date, n_visitors, daily_mod, customers_df)
                     if not present["INCIDENTS"]:
                         if is_summer:
-                            all_incidents.append(generate_summer_incidents(current_date, n_visitors, daily_mod, customers_df))
+                            day_frames["INCIDENTS"] = generate_summer_incidents(current_date, n_visitors, daily_mod, customers_df)
                         else:
-                            all_incidents.append(generate_incidents(current_date, n_visitors, daily_mod, customers_df))
+                            day_frames["INCIDENTS"] = generate_incidents(current_date, n_visitors, daily_mod, customers_df)
                     if not present["CUSTOMER_FEEDBACK"]:
                         if is_summer:
-                            all_feedback.append(generate_summer_feedback(current_date, n_visitors, daily_mod, customers_df))
+                            day_frames["CUSTOMER_FEEDBACK"] = generate_summer_feedback(current_date, n_visitors, daily_mod, customers_df)
                         else:
-                            all_feedback.append(generate_customer_feedback(current_date, n_visitors, daily_mod, customers_df))
+                            day_frames["CUSTOMER_FEEDBACK"] = generate_customer_feedback(current_date, n_visitors, daily_mod, customers_df)
                     if not present["PARKING_OCCUPANCY"]:
-                        all_parking.append(generate_parking_occupancy(current_date, n_visitors, daily_mod))
+                        day_frames["PARKING_OCCUPANCY"] = generate_parking_occupancy(current_date, n_visitors, daily_mod)
+
+        # Write this day's data immediately — frees memory after each day
+        if day_frames:
+            day_row_count = sum(len(df) for df in day_frames.values() if df is not None and not df.empty)
+            written = write_day_batch(conn, day_frames, connection_args)
+            days_written += 1
+            total_rows += day_row_count
+            if days_written % 10 == 0:
+                logger.info(f"  Progress: {days_written} days written, {total_rows:,} total rows")
 
     if fully_skipped:
         logger.info(
@@ -1430,102 +1529,11 @@ def main():
             ", ".join(fully_skipped[:5]) + ("..." if len(fully_skipped) > 5 else ""),
         )
 
-    # If absolutely nothing was collected for any table, exit early. This
-    # is the per-table-aware version of the old `if not all_weather` check
-    # -- with per-table idempotency, weather may already be present while
-    # other tables (e.g. CUSTOMER_FEEDBACK after the SUBCATEGORY bug)
-    # are still missing for the same dates.
-    all_collections = (
-        all_weather, all_staffing, all_scans, all_usage, all_sales,
-        all_fb, all_rentals, all_lessons, all_incidents, all_feedback,
-        all_parking, all_maintenance, all_grooming,
-    )
-    if not any(all_collections):
+    if days_written == 0:
         logger.info("\n✅ No new data to generate (every requested table already has rows for these dates)")
-        conn.close()
-        return
-
-    # Combine DataFrames -- only when their list has entries. The original
-    # code unconditionally concat()'d weather/staffing which crashes on
-    # an empty list when the per-table idempotency leaves them untouched.
-    weather_df = pd.concat(all_weather, ignore_index=True) if all_weather else pd.DataFrame()
-    staffing_df = pd.concat(all_staffing, ignore_index=True) if all_staffing else pd.DataFrame()
-
-    logger.info(f"\n📊 Generated Data (Original Tables):")
-    logger.info(f"  Weather:       {len(weather_df):,}")
-    logger.info(f"  Staffing:      {len(staffing_df):,}")
-
-    if all_scans:
-        scans_df = pd.concat(all_scans, ignore_index=True)
-        usage_df = pd.concat(all_usage, ignore_index=True) if all_usage else pd.DataFrame()
-        sales_df = pd.concat(all_sales, ignore_index=True) if all_sales else pd.DataFrame()
-        fb_df = pd.concat(all_fb, ignore_index=True) if all_fb else pd.DataFrame()
-        rentals_df = pd.concat(all_rentals, ignore_index=True) if all_rentals else pd.DataFrame()
-
-        logger.info(f"  Lift scans:    {len(scans_df):,}")
-        logger.info(f"  Pass usage:    {len(usage_df):,}")
-        logger.info(f"  Ticket sales:  {len(sales_df):,}")
-        logger.info(f"  F&B trans:     {len(fb_df):,}")
-        logger.info(f"  Rentals:       {len(rentals_df):,}")
     else:
-        scans_df = pd.DataFrame()
-        usage_df = pd.DataFrame()
-        sales_df = pd.DataFrame()
-        fb_df = pd.DataFrame()
-        rentals_df = pd.DataFrame()
+        logger.info(f"\n✅ Incremental load complete! {days_written} day(s), {total_rows:,} rows written.")
 
-    logger.info(f"\n📊 Generated Data (New Tables):")
-
-    lessons_df = pd.concat(all_lessons, ignore_index=True) if all_lessons else pd.DataFrame()
-    incidents_df = pd.concat(all_incidents, ignore_index=True) if all_incidents else pd.DataFrame()
-    feedback_df = pd.concat(all_feedback, ignore_index=True) if all_feedback else pd.DataFrame()
-    parking_df = pd.concat(all_parking, ignore_index=True) if all_parking else pd.DataFrame()
-    maintenance_df = pd.concat(all_maintenance, ignore_index=True) if all_maintenance else pd.DataFrame()
-    grooming_df = pd.concat(all_grooming, ignore_index=True) if all_grooming else pd.DataFrame()
-
-    logger.info(f"  Ski lessons:   {len(lessons_df):,}")
-    logger.info(f"  Incidents:     {len(incidents_df):,}")
-    logger.info(f"  Feedback:      {len(feedback_df):,}")
-    logger.info(f"  Parking:       {len(parking_df):,}")
-    logger.info(f"  Maintenance:   {len(maintenance_df):,}")
-    logger.info(f"  Grooming:      {len(grooming_df):,}")
-
-    logger.info("\n📤 Loading to Snowflake...")
-
-    # Per-table writes -- only call write_pandas when the corresponding
-    # DataFrame has rows. Avoids writing an empty DataFrame which fails
-    # on auto_create_table=False.
-    if not weather_df.empty:
-        conn.session.write_pandas(weather_df, table_name="WEATHER_CONDITIONS", auto_create_table=False, overwrite=False)
-    if not staffing_df.empty:
-        conn.session.write_pandas(staffing_df, table_name="STAFFING_SCHEDULE", auto_create_table=False, overwrite=False)
-
-    if not scans_df.empty:
-        conn.session.write_pandas(scans_df, table_name="LIFT_SCANS", auto_create_table=False, overwrite=False)
-    if not usage_df.empty:
-        conn.session.write_pandas(usage_df, table_name="PASS_USAGE", auto_create_table=False, overwrite=False)
-    if not sales_df.empty:
-        conn.session.write_pandas(sales_df, table_name="TICKET_SALES", auto_create_table=False, overwrite=False)
-    if not fb_df.empty:
-        conn.session.write_pandas(fb_df, table_name="FOOD_BEVERAGE", auto_create_table=False, overwrite=False)
-    if not rentals_df.empty:
-        conn.session.write_pandas(rentals_df, table_name="RENTALS", auto_create_table=False, overwrite=False)
-
-    # Load NEW tables
-    if not lessons_df.empty:
-        conn.session.write_pandas(lessons_df, table_name="SKI_LESSONS", auto_create_table=False, overwrite=False)
-    if not incidents_df.empty:
-        conn.session.write_pandas(incidents_df, table_name="INCIDENTS", auto_create_table=False, overwrite=False)
-    if not feedback_df.empty:
-        conn.session.write_pandas(feedback_df, table_name="CUSTOMER_FEEDBACK", auto_create_table=False, overwrite=False)
-    if not parking_df.empty:
-        conn.session.write_pandas(parking_df, table_name="PARKING_OCCUPANCY", auto_create_table=False, overwrite=False)
-    if not maintenance_df.empty:
-        conn.session.write_pandas(maintenance_df, table_name="LIFT_MAINTENANCE", auto_create_table=False, overwrite=False)
-    if not grooming_df.empty:
-        conn.session.write_pandas(grooming_df, table_name="GROOMING_LOGS", auto_create_table=False, overwrite=False)
-
-    logger.info("✅ Incremental load complete!")
     conn.close()
 
 
