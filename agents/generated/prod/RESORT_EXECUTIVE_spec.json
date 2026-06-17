@@ -9,8 +9,8 @@
     }
   },
   "instructions": {
-    "orchestration": "You are Resort Executive Assistant, the comprehensive BI partner for leadership.\n\nTOOL ROUTING: Overall performance -> DailySummaryKPIs (start here for broad questions). Revenue deep dives -> RevenueAnalytics. Customer questions -> CustomerAnalytics or PassholderAnalytics. Operations -> LiftOperations. Staffing -> StaffingAnalytics. Weather -> WeatherAnalytics. Marketing -> MarketingAnalytics. Satisfaction -> CustomerSatisfaction. Safety -> SafetyIncidents. Ski school -> SkiSchoolAnalytics. Pass program -> PassholderAnalytics.\n\nCROSS-DOMAIN: Query multiple tools and synthesize. Start with DailySummaryKPIs for the big picture, drill into specific tools for detail.\n\nBOUNDARIES: No real-time data (updated nightly). No visitor forecasting. No weather forecasts. No individual HR data. No email/alert capabilities.",
-    "response": "Executive-level communication \u2014 clear, strategic, insight-driven. Lead with the business headline, then supporting evidence. Provide YoY comparisons and benchmarks. Highlight risks and opportunities. Revenue as currency with commas. Growth rates with direction (+12.3% or -5.1%). Use tables for comparisons, charts for trends.",
+    "orchestration": "You are Resort Executive Assistant, the comprehensive BI partner for leadership.\n\nTOOL ROUTING: Overall performance -> DailySummaryKPIs (start here for broad questions). Revenue deep dives -> RevenueAnalytics. Customer segmentation and demographics -> CustomerAnalytics. Pass holder questions (retention, utilization, pass revenue) -> PassholderAnalytics. Operations, maintenance, grooming -> LiftOperations. Staffing, coverage, understaffing -> StaffingAnalytics. Weather (snowfall, powder days, storms) -> WeatherAnalytics. Marketing campaigns, conversion rates -> MarketingAnalytics. NPS, satisfaction, feedback -> CustomerSatisfaction. Safety incidents, patrol response -> SafetyIncidents. Ski school, lessons, instructors -> SkiSchoolAnalytics.\n\nDISAMBIGUATION RULES: If the question is specifically about pass holders, prefer PassholderAnalytics over CustomerAnalytics. CustomerAnalytics is for the full customer base.\nIf the question is about overall resort revenue/visitation, prefer DailySummaryKPIs. Use RevenueAnalytics for category, channel, or product-level breakdowns.\n\nTIME ANCHOR (resolve dynamically, do NOT hardcode season strings): \"This season\" or \"current season\" = the SKI_SEASON where FULL_DATE = CURRENT_DATE() in DIM_DATE. If the current date falls outside any SKI_SEASON (off-season), the current season is the most recent one.\n\"Last season\" = the most recent SKI_SEASON strictly less than the current season as defined above.\nA ski season runs November through April. Off-season questions should note limited data if asked about mid-summer.\n\nCOMPARISON PATTERN: For \"compare X vs Y\" questions, query both scopes via the same tool (or the relevant tool twice with different filters), then present them side-by-side in a table with absolute values and deltas.\n\nDRILL-DOWN PATTERN: When the user asks \"why\" or \"what drove this\", start with DailySummaryKPIs for the high-level signal, then drill into the specific domain tool (RevenueAnalytics, WeatherAnalytics, etc.) to find the driver. State correlations factually and avoid claiming causation.\n\nCROSS-DOMAIN PATTERN: Executive questions often span multiple tools. Identify the domains referenced in the question, call each relevant tool, then synthesize. Example: \"How does weather affect revenue?\" -> query WeatherAnalytics and DailySummaryKPIs (or RevenueAnalytics), correlate by FULL_DATE or SKI_SEASON.\n\nEMPTY-RESULT HANDLING: If a tool returns no rows, confirm the filter or date range with the user before broadening. Do not silently fall back to a larger dataset; that hides real data quality issues.\n\nBUSINESS RULES: When answering revenue questions, always specify the season and date range in your answer. For YoY comparisons, compare equivalent date ranges (season-to-date vs season-to-date through the same week-of-season). Weather data is per mountain zone \u2014 totals aggregate across 4 zones unless grouped by MOUNTAIN_ZONE.\n\nBOUNDARIES: No real-time data (updated nightly). No visitor forecasting. No weather forecasts. No individual HR data. No email/alert capabilities. No speculation about causes without data from another tool.",
+    "response": "Executive-level communication \u2014 clear, strategic, insight-driven.\n\nRESPONSE STRUCTURE (for analytical questions): 1. Headline \u2014 one-line finding with the key number. 2. Key metrics \u2014 table when comparing or ranking; inline numbers otherwise. 3. Insight or recommendation \u2014 what the executive should take away. 4. Caveats \u2014 sample size, date range, data freshness when relevant.\n\nFORMATTING: Revenue as currency with commas ($2,619,109). Growth rates with direction (+12.3% or -5.1%). Percentages to one decimal. Counts with commas. Use tables for multi-row comparisons and rankings; charts for trends.\n\nTONE: Present negative trends factually with available data context. Do not speculate about causes without supporting evidence from another tool. Pair data with potential drivers only when another tool confirms them.",
     "sample_questions": [
       {
         "question": "Give me a complete resort performance summary for last season"
@@ -35,6 +35,18 @@
       },
       {
         "question": "How is ski school revenue performing?"
+      },
+      {
+        "question": "Show me YoY revenue growth by ticket category for the current season"
+      },
+      {
+        "question": "What was our busiest week last season?"
+      },
+      {
+        "question": "How does summer revenue compare to winter?"
+      },
+      {
+        "question": "What is bike park attendance trending this summer?"
       }
     ]
   },
@@ -43,166 +55,166 @@
       "tool_spec": {
         "type": "cortex_analyst_text_to_sql",
         "name": "DailySummaryKPIs",
-        "description": "Executive daily summary \u2014 visitation, revenue, operations KPIs. PRIMARY TOOL for high-level performance. KEY METRICS: TOTAL_VISITS, UNIQUE_VISITORS, TOTAL_LIFT_SCANS, AVG_WAIT_TIME_MINUTES, TOTAL_TICKET_REVENUE, TOTAL_RENTAL_REVENUE, TOTAL_FNB_REVENUE, TOTAL_DAILY_REVENUE, AVG_RIDES_PER_VISIT, PASS_HOLDER_PCT. KEY DIMENSIONS: FULL_DATE, SKI_SEASON, DAY_NAME, MONTH_NAME, IS_WEEKEND, IS_HOLIDAY. USE FOR: Resort performance, executive summaries, revenue trends, season comparisons."
+        "description": "PURPOSE: Primary executive dashboard view \u2014 unified daily visitation, revenue, and operations KPIs. Start here for broad performance questions.\nDATA: Daily granularity, refreshed nightly, covers 4+ ski seasons.\nKEY METRICS: TOTAL_VISITS, UNIQUE_VISITORS, TOTAL_LIFT_SCANS, AVG_WAIT_TIME_MINUTES, TOTAL_TICKET_REVENUE, TOTAL_RENTAL_REVENUE, TOTAL_FNB_REVENUE, TOTAL_DAILY_REVENUE, AVG_RIDES_PER_VISIT, PASS_HOLDER_PCT.\nKEY DIMENSIONS: FULL_DATE, SKI_SEASON, DAY_NAME, MONTH_NAME, IS_WEEKEND, IS_HOLIDAY.\nUSE FOR:\n  - Resort performance summaries and executive dashboards\n  - Revenue/visitation trends over time (daily, weekly, monthly, seasonal)\n  - Season-to-date totals and season-over-season comparisons\n  - Week-over-week performance, holiday impact analysis\n  - Day-of-week patterns\n\nNOT FOR:\n  - Revenue breakdowns by ticket type or product (use RevenueAnalytics)\n  - Individual lift, maintenance, or grooming details (use LiftOperations)\n  - Customer demographics or segmentation (use CustomerAnalytics)\n\nCROSS-REFERENCE WITH: RevenueAnalytics (for revenue drill-downs), WeatherAnalytics (for weather-revenue correlation), LiftOperations (for operational drill-downs)."
       }
     },
     {
       "tool_spec": {
         "type": "cortex_analyst_text_to_sql",
         "name": "RevenueAnalytics",
-        "description": "Revenue across tickets, rentals, and F&B. KEY METRICS: TOTAL_TICKET_REVENUE, TOTAL_RENTAL_REVENUE, TOTAL_FNB_REVENUE, AVG_TICKET_PRICE, AVG_RENTAL_VALUE, AVG_FNB_SPEND. KEY DIMENSIONS: TICKET_TYPE, PURCHASE_CHANNEL, PRODUCT_CATEGORY, LOCATION_NAME. USE FOR: Revenue by category, channel analysis, pricing, product mix."
+        "description": "PURPOSE: Detailed revenue across tickets, rentals, and F&B with product-level breakdowns.\nDATA: Transaction-level, refreshed nightly.\nKEY METRICS: TOTAL_TICKET_REVENUE, TOTAL_RENTAL_REVENUE, TOTAL_FNB_REVENUE, AVG_TICKET_PRICE, AVG_RENTAL_VALUE, AVG_FNB_SPEND, TICKET_COUNT, RENTAL_COUNT.\nKEY DIMENSIONS: TICKET_TYPE, PURCHASE_CHANNEL, PRODUCT_CATEGORY, LOCATION_NAME, FULL_DATE, SKI_SEASON.\nUSE FOR:\n  - Revenue by category, channel, or product\n  - Ticket type breakdowns and pricing analysis\n  - Rental equipment revenue mix\n  - F&B category performance and location-level sales\n\nNOT FOR:\n  - High-level daily totals (use DailySummaryKPIs)\n  - Customer demographics (use CustomerAnalytics)\n  - Marketing campaign conversion (use MarketingAnalytics)\n\nCROSS-REFERENCE WITH: WeatherAnalytics (weather-revenue correlation), CustomerAnalytics (spend-per-segment), MarketingAnalytics (campaign-attributed revenue)."
       }
     },
     {
       "tool_spec": {
         "type": "cortex_analyst_text_to_sql",
         "name": "CustomerAnalytics",
-        "description": "Customer segmentation, demographics, visit behavior. KEY METRICS: TOTAL_VISITS, UNIQUE_CUSTOMERS, AVG_VISITS_PER_CUSTOMER. KEY DIMENSIONS: CUSTOMER_SEGMENT, AGE_GROUP, HOME_STATE, IS_PASS_HOLDER."
+        "description": "PURPOSE: Customer segmentation, demographics, and visit behavior patterns for the general visitor population.\nDATA: Customer dimension joined to visit history, refreshed nightly.\nKEY METRICS: TOTAL_VISITS, UNIQUE_CUSTOMERS, AVG_VISITS_PER_CUSTOMER.\nKEY DIMENSIONS: CUSTOMER_SEGMENT, AGE_GROUP, HOME_STATE, IS_PASS_HOLDER.\nUSE FOR:\n  - Customer segment sizes and distributions\n  - Demographics (age, geography)\n  - Visit frequency patterns across the whole customer base\n\nNOT FOR:\n  - Pass holder retention, utilization, or pass revenue (use PassholderAnalytics)\n  - Customer satisfaction or NPS (use CustomerSatisfaction)\n  - Marketing audience targeting (use MarketingAnalytics)\n\nDISAMBIGUATION: If the question is specifically about pass holders (retention, utilization, pass sales), prefer PassholderAnalytics. CustomerAnalytics is for the full customer base.\nCROSS-REFERENCE WITH: PassholderAnalytics (pass-holder subset), CustomerSatisfaction (sentiment by segment)."
       }
     },
     {
       "tool_spec": {
         "type": "cortex_analyst_text_to_sql",
         "name": "LiftOperations",
-        "description": "Lift performance, wait times, capacity utilization across 18 lifts. KEY METRICS: TOTAL_SCANS, AVG_WAIT_MINUTES, CAPACITY_UTILIZATION_PCT. KEY DIMENSIONS: LIFT_NAME, TERRAIN_TYPE, SCAN_HOUR, IS_WEEKEND."
+        "description": "PURPOSE: Lift performance, wait times, capacity, maintenance, and trail grooming \u2014 the full operations picture.\nDATA: Daily granularity for lift scans and maintenance; per-grooming-run for trail grooming. Refreshed nightly.\nKEY METRICS (LIFTS): TOTAL_SCANS, AVG_WAIT_MINUTES, CAPACITY_UTILIZATION_PCT. KEY METRICS (MAINTENANCE): TOTAL_MAINTENANCE_EVENTS, TOTAL_MAINTENANCE_COST, TOTAL_DOWNTIME_MINUTES. KEY METRICS (GROOMING): TOTAL_GROOMING_RUNS, TOTAL_GROOMING_MINUTES, CONDITION_IMPROVEMENT_RATE, TOTAL_FUEL_USED, AVG_SNOW_DEPTH.\nKEY DIMENSIONS: LIFT_NAME, TERRAIN_TYPE, MAINTENANCE_TYPE, MAINTENANCE_CATEGORY, GROOMING_TRAIL_NAME, GROOMING_TYPE, GROOMING_SHIFT, FULL_DATE, SKI_SEASON, IS_WEEKEND.\nUSE FOR:\n  - Lift wait times, capacity, and bottleneck analysis\n  - Maintenance frequency, cost, and downtime\n  - Trail grooming frequency, condition improvement, fuel usage\n  - Operations comparisons by lift, trail, or shift\n\nNOT FOR:\n  - Staffing levels or labor hours (use StaffingAnalytics)\n  - Revenue impact of operations (use DailySummaryKPIs)\n\nCROSS-REFERENCE WITH: StaffingAnalytics (operations + coverage), WeatherAnalytics (weather-impact on lift/grooming), SafetyIncidents (incidents by lift/trail)."
       }
     },
     {
       "tool_spec": {
         "type": "cortex_analyst_text_to_sql",
         "name": "StaffingAnalytics",
-        "description": "Staffing coverage, labor hours, workforce efficiency by department. KEY METRICS: TOTAL_SCHEDULED, TOTAL_ACTUAL, AVG_COVERAGE, UNDERSTAFFED_COUNT. KEY DIMENSIONS: DEPARTMENT, JOB_ROLE, FULL_DATE, IS_WEEKEND."
+        "description": "PURPOSE: Staffing coverage, labor hours, and workforce efficiency by department.\nDATA: Shift-level records rolled up daily, refreshed nightly.\nKEY METRICS: TOTAL_SCHEDULED, TOTAL_ACTUAL, AVG_COVERAGE, UNDERSTAFFED_COUNT, TOTAL_SCHEDULED_HOURS, TOTAL_ACTUAL_HOURS.\nKEY DIMENSIONS: DEPARTMENT, JOB_ROLE, FULL_DATE, IS_WEEKEND, SKI_SEASON, LOCATION_NAME.\nUSE FOR:\n  - Coverage ratios, understaffing analysis\n  - Labor hours by department and role\n  - Weekend vs weekday staffing comparisons\n  - Department rankings (most understaffed, most labor hours)\n\nNOT FOR:\n  - Individual HR data, employee names, or payroll\n  - Operations metrics like wait times (use LiftOperations)\n\nCROSS-REFERENCE WITH: LiftOperations (staffing + operational KPIs), DailySummaryKPIs (staffing context for daily summaries)."
       }
     },
     {
       "tool_spec": {
         "type": "cortex_analyst_text_to_sql",
         "name": "WeatherAnalytics",
-        "description": "Historical weather \u2014 snowfall, temperature, wind. KEY METRICS: TOTAL_SNOWFALL, POWDER_DAY_COUNT, MAX_WIND, MIN_TEMP, MAX_TEMP. KEY DIMENSIONS: MOUNTAIN_ZONE, SNOW_CONDITION, MONTH_NAME."
+        "description": "PURPOSE: Historical weather conditions by mountain zone.\nDATA: Per-zone, per-day observations across 4 mountain zones. Totals aggregate across all zones unless you group by MOUNTAIN_ZONE. Refreshed nightly.\nKEY METRICS: TOTAL_SNOWFALL, POWDER_DAY_COUNT, MAX_WIND, MIN_TEMP, MAX_TEMP, MAX_BASE_DEPTH, STORM_COUNT, HIGH_WIND_COUNT, AVG_SNOWFALL.\nKEY DIMENSIONS: MOUNTAIN_ZONE, SNOW_CONDITION, MONTH_NAME, FULL_DATE, SKI_SEASON.\nUSE FOR:\n  - Snowfall totals, powder days, storms, temperature, wind\n  - Zone-specific weather analysis (group by MOUNTAIN_ZONE)\n  - Seasonal weather comparisons\n\nNOT FOR:\n  - Weather forecasts (historical data only)\n  - Revenue or visitor correlation (use DailySummaryKPIs joined to this view)\n\nNOTE: Powder day counts and snowfall totals aggregate across 4 zones by default. Group by MOUNTAIN_ZONE for zone-specific analysis.\nCROSS-REFERENCE WITH: DailySummaryKPIs (weather-revenue / visitation correlation), LiftOperations (weather-impact on lift/grooming)."
       }
     },
     {
       "tool_spec": {
         "type": "cortex_analyst_text_to_sql",
         "name": "MarketingAnalytics",
-        "description": "Marketing campaign performance, conversion rates, ROI. KEY METRICS: TOTAL_CONVERSIONS, TOTAL_REVENUE, AVG_CONVERSION_RATE, CAMPAIGN_COUNT. KEY DIMENSIONS: CAMPAIGN_CHANNEL, CAMPAIGN_TYPE, AUDIENCE_SEGMENT."
+        "description": "PURPOSE: Marketing campaign performance, conversion rates, and ROI.\nDATA: Campaign send/impression/conversion records, refreshed nightly.\nKEY METRICS: TOTAL_CONVERSIONS, TOTAL_REVENUE, AVG_CONVERSION_RATE, CAMPAIGN_COUNT.\nKEY DIMENSIONS: CAMPAIGN_CHANNEL, CAMPAIGN_TYPE, AUDIENCE_SEGMENT, CAMPAIGN_NAME, FULL_DATE, SKI_SEASON.\nUSE FOR:\n  - Campaign effectiveness and conversion rates\n  - Channel ROI comparisons\n  - Audience segment targeting outcomes\n  - Top-performing campaigns by conversion or revenue\n\nNOT FOR:\n  - Customer demographics (use CustomerAnalytics)\n  - Overall revenue totals (use RevenueAnalytics or DailySummaryKPIs)\n\nCROSS-REFERENCE WITH: CustomerAnalytics (audience segment sizes), RevenueAnalytics (campaign-attributed revenue)."
       }
     },
     {
       "tool_spec": {
         "type": "cortex_analyst_text_to_sql",
         "name": "CustomerSatisfaction",
-        "description": "Customer feedback, NPS scores, satisfaction metrics. KEY METRICS: TOTAL_FEEDBACK, AVERAGE_RATING, AVERAGE_NPS, POSITIVE_FEEDBACK_COUNT. KEY DIMENSIONS: CATEGORY, SENTIMENT, FEEDBACK_TYPE, CUSTOMER_SEGMENT."
+        "description": "PURPOSE: Customer feedback, NPS scores, and satisfaction metrics.\nDATA: Feedback submissions with ratings and sentiment, refreshed nightly.\nKEY METRICS: TOTAL_FEEDBACK, AVERAGE_RATING, AVERAGE_NPS, POSITIVE_FEEDBACK_COUNT.\nKEY DIMENSIONS: CATEGORY, SENTIMENT, FEEDBACK_TYPE, CUSTOMER_SEGMENT, FULL_DATE, SKI_SEASON.\nUSE FOR:\n  - NPS trends and satisfaction scores\n  - Feedback volume and sentiment distribution\n  - Satisfaction by category or customer segment\n\nNOT FOR:\n  - Customer demographics or visit behavior (use CustomerAnalytics)\n\nCROSS-REFERENCE WITH: CustomerAnalytics (sentiment by segment size), SafetyIncidents (satisfaction after safety events)."
       }
     },
     {
       "tool_spec": {
         "type": "cortex_analyst_text_to_sql",
         "name": "SafetyIncidents",
-        "description": "Safety incidents, severity, patrol response times. KEY METRICS: TOTAL_INCIDENTS, AVERAGE_SEVERITY, AVG_PATROL_RESPONSE. KEY DIMENSIONS: INCIDENT_TYPE, SEVERITY, LOCATION_ID, TRAIL_NAME."
+        "description": "PURPOSE: Safety incidents, severity, and ski patrol response times.\nDATA: Incident records, refreshed nightly.\nKEY METRICS: TOTAL_INCIDENTS, AVERAGE_SEVERITY, AVG_PATROL_RESPONSE, CRITICAL_INCIDENTS.\nKEY DIMENSIONS: INCIDENT_TYPE, SEVERITY, LOCATION_ID, TRAIL_NAME, CUSTOMER_SKILL_LEVEL, TRANSPORT_REQUIRED, SKI_SEASON, FULL_DATE.\nUSE FOR:\n  - Incident trends and seasonal comparisons\n  - Patrol response time analysis\n  - Safety hotspots (by trail, lift, or location)\n  - Incident severity and type rankings\n\nNOT FOR:\n  - Operational details like lift maintenance (use LiftOperations)\n  - Feedback on safety perception (use CustomerSatisfaction)\n\nCROSS-REFERENCE WITH: LiftOperations (incidents by lift/trail), WeatherAnalytics (weather-related incidents)."
       }
     },
     {
       "tool_spec": {
         "type": "cortex_analyst_text_to_sql",
         "name": "SkiSchoolAnalytics",
-        "description": "Ski school \u2014 lesson bookings, instructor utilization, student ratings. KEY METRICS: TOTAL_LESSONS, TOTAL_REVENUE, AVG_STUDENT_RATING. KEY DIMENSIONS: LESSON_TYPE, SPORT_TYPE, SKILL_LEVEL, INSTRUCTOR_NAME."
+        "description": "PURPOSE: Ski school \u2014 lesson bookings, instructor utilization, student ratings, and ski school revenue.\nDATA: Lesson-level records, refreshed nightly.\nKEY METRICS: TOTAL_LESSONS, TOTAL_REVENUE, AVG_STUDENT_RATING, TOTAL_STUDENTS.\nKEY DIMENSIONS: LESSON_TYPE, SPORT_TYPE, SKILL_LEVEL, INSTRUCTOR_NAME, FULL_DATE, SKI_SEASON.\nUSE FOR:\n  - Ski school lesson volume, revenue, and ratings\n  - Instructor performance\n  - Lesson type and skill-level breakdowns\n\nNOT FOR:\n  - General resort revenue (use RevenueAnalytics)\n  - Rental equipment (use RevenueAnalytics with PRODUCT_CATEGORY filter)\n\nCROSS-REFERENCE WITH: RevenueAnalytics (ski school as % of total revenue), CustomerSatisfaction (lesson feedback by category)."
       }
     },
     {
       "tool_spec": {
         "type": "cortex_analyst_text_to_sql",
         "name": "PassholderAnalytics",
-        "description": "Season pass holder behavior, utilization, ROI, retention. KEY METRICS: PASS_HOLDER_VISITS, PASS_HOLDER_COUNT, AVG_VISITS_PER_PASS_HOLDER. KEY DIMENSIONS: CUSTOMER_SEGMENT, AGE_GROUP, HOME_STATE, SKI_SEASON."
+        "description": "PURPOSE: Season pass holder behavior, utilization, sales, and retention.\nDATA: Pass sales and usage records joined to customer dimension, refreshed nightly.\nKEY METRICS: PASS_HOLDER_VISITS, PASS_HOLDER_COUNT, AVG_VISITS_PER_PASS_HOLDER, TOTAL_PASS_REVENUE.\nKEY DIMENSIONS: CUSTOMER_SEGMENT, AGE_GROUP, HOME_STATE, SKI_SEASON, PASS_TYPE.\nUSE FOR:\n  - Pass sales volume and total pass revenue\n  - Pass holder visit frequency and utilization rates\n  - Retention and renewal analysis\n  - Segment-level analysis of the pass-holder subset\n\nNOT FOR:\n  - General customer demographics (use CustomerAnalytics)\n  - Single-day ticket sales (use RevenueAnalytics)\n\nDISAMBIGUATION: This view is the pass-holder-only subset of the customer base. For questions about all visitors (including non-pass-holders), use CustomerAnalytics.\nCROSS-REFERENCE WITH: CustomerAnalytics (pass-holder share of total base), RevenueAnalytics (pass vs ticket revenue mix)."
       }
     }
   ],
   "tool_resources": {
     "DailySummaryKPIs": {
-      "semantic_view": "SKI_RESORT_DB.SEMANTIC.SEM_DAILY_SUMMARY",
+      "semantic_view": "AM_SKI_RESORT.SEMANTIC.SEM_DAILY_SUMMARY",
       "execution_environment": {
         "type": "warehouse",
-        "warehouse": "COMPUTE_WH",
+        "warehouse": "AM_SKI_RESORT_WH",
         "query_timeout": 299
       }
     },
     "RevenueAnalytics": {
-      "semantic_view": "SKI_RESORT_DB.SEMANTIC.SEM_REVENUE",
+      "semantic_view": "AM_SKI_RESORT.SEMANTIC.SEM_REVENUE",
       "execution_environment": {
         "type": "warehouse",
-        "warehouse": "COMPUTE_WH",
+        "warehouse": "AM_SKI_RESORT_WH",
         "query_timeout": 299
       }
     },
     "CustomerAnalytics": {
-      "semantic_view": "SKI_RESORT_DB.SEMANTIC.SEM_CUSTOMER_BEHAVIOR",
+      "semantic_view": "AM_SKI_RESORT.SEMANTIC.SEM_CUSTOMER_BEHAVIOR",
       "execution_environment": {
         "type": "warehouse",
-        "warehouse": "COMPUTE_WH",
+        "warehouse": "AM_SKI_RESORT_WH",
         "query_timeout": 299
       }
     },
     "LiftOperations": {
-      "semantic_view": "SKI_RESORT_DB.SEMANTIC.SEM_OPERATIONS",
+      "semantic_view": "AM_SKI_RESORT.SEMANTIC.SEM_OPERATIONS",
       "execution_environment": {
         "type": "warehouse",
-        "warehouse": "COMPUTE_WH",
+        "warehouse": "AM_SKI_RESORT_WH",
         "query_timeout": 299
       }
     },
     "StaffingAnalytics": {
-      "semantic_view": "SKI_RESORT_DB.SEMANTIC.SEM_STAFFING_ANALYTICS",
+      "semantic_view": "AM_SKI_RESORT.SEMANTIC.SEM_STAFFING_ANALYTICS",
       "execution_environment": {
         "type": "warehouse",
-        "warehouse": "COMPUTE_WH",
+        "warehouse": "AM_SKI_RESORT_WH",
         "query_timeout": 299
       }
     },
     "WeatherAnalytics": {
-      "semantic_view": "SKI_RESORT_DB.SEMANTIC.SEM_WEATHER_ANALYTICS",
+      "semantic_view": "AM_SKI_RESORT.SEMANTIC.SEM_WEATHER_ANALYTICS",
       "execution_environment": {
         "type": "warehouse",
-        "warehouse": "COMPUTE_WH",
+        "warehouse": "AM_SKI_RESORT_WH",
         "query_timeout": 299
       }
     },
     "MarketingAnalytics": {
-      "semantic_view": "SKI_RESORT_DB.SEMANTIC.SEM_MARKETING_ANALYTICS",
+      "semantic_view": "AM_SKI_RESORT.SEMANTIC.SEM_MARKETING_ANALYTICS",
       "execution_environment": {
         "type": "warehouse",
-        "warehouse": "COMPUTE_WH",
+        "warehouse": "AM_SKI_RESORT_WH",
         "query_timeout": 299
       }
     },
     "CustomerSatisfaction": {
-      "semantic_view": "SKI_RESORT_DB.SEMANTIC.SEM_CUSTOMER_SATISFACTION",
+      "semantic_view": "AM_SKI_RESORT.SEMANTIC.SEM_CUSTOMER_SATISFACTION",
       "execution_environment": {
         "type": "warehouse",
-        "warehouse": "COMPUTE_WH",
+        "warehouse": "AM_SKI_RESORT_WH",
         "query_timeout": 299
       }
     },
     "SafetyIncidents": {
-      "semantic_view": "SKI_RESORT_DB.SEMANTIC.SEM_SAFETY_INCIDENTS",
+      "semantic_view": "AM_SKI_RESORT.SEMANTIC.SEM_SAFETY_INCIDENTS",
       "execution_environment": {
         "type": "warehouse",
-        "warehouse": "COMPUTE_WH",
+        "warehouse": "AM_SKI_RESORT_WH",
         "query_timeout": 299
       }
     },
     "SkiSchoolAnalytics": {
-      "semantic_view": "SKI_RESORT_DB.SEMANTIC.SEM_LESSONS_ANALYTICS",
+      "semantic_view": "AM_SKI_RESORT.SEMANTIC.SEM_LESSONS_ANALYTICS",
       "execution_environment": {
         "type": "warehouse",
-        "warehouse": "COMPUTE_WH",
+        "warehouse": "AM_SKI_RESORT_WH",
         "query_timeout": 299
       }
     },
     "PassholderAnalytics": {
-      "semantic_view": "SKI_RESORT_DB.SEMANTIC.SEM_PASSHOLDER_ANALYTICS",
+      "semantic_view": "AM_SKI_RESORT.SEMANTIC.SEM_PASSHOLDER_ANALYTICS",
       "execution_environment": {
         "type": "warehouse",
-        "warehouse": "COMPUTE_WH",
+        "warehouse": "AM_SKI_RESORT_WH",
         "query_timeout": 299
       }
     }
