@@ -2,6 +2,178 @@
 
 A detailed ASCII representation of the Kimball dimensional model. Readable in any text editor, terminal, or markdown viewer without rendering dependencies.
 
+## Join Map — All Relationships
+
+Every line represents a foreign key join. Read as: FACT_TABLE.FK_COLUMN → DIM_TABLE.PK_COLUMN.
+
+```
+                                         ┌───────────────┐
+                                         │   DIM_DATE    │
+                                         │  PK: DATE_KEY │
+                                         └───────┬───────┘
+                                                 │
+         ┌───────────────┬───────────────┬───────┼───────┬───────────────┬───────────────┐
+         │               │               │       │       │               │               │
+         │               │               │       │       │               │               │
+         ▼               ▼               ▼       ▼       ▼               ▼               ▼
+   ┌───────────┐   ┌───────────┐   ┌─────────┐ │ ┌─────────┐   ┌───────────┐   ┌───────────┐
+   │FACT_TICKET│   │FACT_LIFT_ │   │FACT_PASS│ │ │FACT_    │   │FACT_FOOD_ │   │FACT_      │
+   │_SALES     │   │SCANS      │   │_USAGE   │ │ │RENTALS  │   │BEVERAGE   │   │WEATHER    │
+   └─────┬─────┘   └─────┬─────┘   └─────────┘ │ └────┬────┘   └─────┬─────┘   └───────────┘
+         │               │                      │      │               │
+         │               │                      │      │               │
+         │               │               ┌──────┴──────┴───────────────┴──────┐
+         │               │               │                                     │
+         │               │               ▼                                     ▼
+         │               │         ┌───────────┐   ┌───────────┐   ┌───────────┐   ┌───────────┐
+         │               │         │FACT_      │   │FACT_      │   │FACT_      │   │FACT_LIFT_ │
+         │               │         │STAFFING   │   │INCIDENTS  │   │LESSONS    │   │MAINTENANCE│
+         │               │         └───────────┘   └───────────┘   └───────────┘   └─────┬─────┘
+         │               │                                                               │
+         │               │         ┌───────────┐   ┌───────────┐   ┌───────────┐         │
+         │               │         │FACT_      │   │FACT_      │   │FACT_      │         │
+         │               │         │FEEDBACK   │   │GROOMING   │   │PARKING    │         │
+         │               │         └───────────┘   └───────────┘   └───────────┘         │
+         │               │                                                               │
+         │               │                                                               │
+         ▼               ▼                                                               ▼
+   ┌─────────────┐ ┌─────────────┐                                                ┌─────────────┐
+   │DIM_CUSTOMER │ │  DIM_LIFT   │                                                │  DIM_LIFT   │
+   │PK:          │ │PK: LIFT_KEY │                                                │(same table) │
+   │CUSTOMER_KEY │ └─────────────┘                                                └─────────────┘
+   └──────┬──────┘
+          │
+          │  (also joined by FACT_RENTALS, FACT_FOOD_BEVERAGE, FACT_PASS_USAGE)
+          │
+          │
+          ▼
+   ┌─────────────────────────────────────────────────────────────────────────────────────────────┐
+   │                              COMPLETE JOIN REFERENCE                                         │
+   ├─────────────────────────────────────────────────────────────────────────────────────────────┤
+   │                                                                                             │
+   │  FACT_TICKET_SALES                                                                          │
+   │    ├── purchase_date_key ──────────────── → DIM_DATE.date_key                               │
+   │    ├── customer_key ───────────────────── → DIM_CUSTOMER.customer_key                       │
+   │    ├── ticket_type_key ────────────────── → DIM_TICKET_TYPE.ticket_type_key                 │
+   │    └── location_key ───────────────────── → DIM_LOCATION.location_key                       │
+   │                                                                                             │
+   │  FACT_LIFT_SCANS                                                                            │
+   │    ├── date_key ───────────────────────── → DIM_DATE.date_key                               │
+   │    ├── customer_key ───────────────────── → DIM_CUSTOMER.customer_key                       │
+   │    └── lift_key ───────────────────────── → DIM_LIFT.lift_key                               │
+   │                                                                                             │
+   │  FACT_PASS_USAGE                                                                            │
+   │    ├── date_key ───────────────────────── → DIM_DATE.date_key                               │
+   │    └── customer_key ───────────────────── → DIM_CUSTOMER.customer_key                       │
+   │                                                                                             │
+   │  FACT_RENTALS                                                                               │
+   │    ├── rental_date_key ────────────────── → DIM_DATE.date_key                               │
+   │    ├── customer_key ───────────────────── → DIM_CUSTOMER.customer_key                       │
+   │    ├── product_key ────────────────────── → DIM_PRODUCT.product_key                         │
+   │    └── location_key ───────────────────── → DIM_LOCATION.location_key                       │
+   │                                                                                             │
+   │  FACT_FOOD_BEVERAGE                                                                         │
+   │    ├── transaction_date_key ───────────── → DIM_DATE.date_key                               │
+   │    ├── customer_key ───────────────────── → DIM_CUSTOMER.customer_key                       │
+   │    ├── product_key ────────────────────── → DIM_PRODUCT.product_key                         │
+   │    └── location_key ───────────────────── → DIM_LOCATION.location_key                       │
+   │                                                                                             │
+   │  FACT_WEATHER                                                                               │
+   │    └── date_key ───────────────────────── → DIM_DATE.date_key                               │
+   │                                                                                             │
+   │  FACT_STAFFING                                                                              │
+   │    ├── schedule_date_key ──────────────── → DIM_DATE.date_key                               │
+   │    └── location_key ───────────────────── → DIM_LOCATION.location_key                       │
+   │                                                                                             │
+   │  FACT_INCIDENTS                                                                             │
+   │    └── date_key ───────────────────────── → DIM_DATE.date_key                               │
+   │                                                                                             │
+   │  FACT_LESSONS                                                                               │
+   │    └── lesson_date_key ────────────────── → DIM_DATE.date_key                               │
+   │                                                                                             │
+   │  FACT_FEEDBACK                                                                              │
+   │    └── feedback_date_key ──────────────── → DIM_DATE.date_key                               │
+   │                                                                                             │
+   │  FACT_GROOMING                                                                              │
+   │    └── date_key ───────────────────────── → DIM_DATE.date_key                               │
+   │                                                                                             │
+   │  FACT_LIFT_MAINTENANCE                                                                      │
+   │    ├── date_key ───────────────────────── → DIM_DATE.date_key                               │
+   │    └── lift_key ───────────────────────── → DIM_LIFT.lift_key                               │
+   │                                                                                             │
+   │  FACT_PARKING                                                                               │
+   │    └── (no dimension joins — flat fact)                                                     │
+   │                                                                                             │
+   │  FACT_SEASON_PASS_SALES                                                                     │
+   │    └── (joins staging models, not conformed dims — future improvement)                      │
+   │                                                                                             │
+   │  FACT_MARKETING                                                                             │
+   │    └── date_key ───────────────────────── → DIM_DATE.date_key                               │
+   │                                                                                             │
+   └─────────────────────────────────────────────────────────────────────────────────────────────┘
+
+   Total: 26 foreign key relationships across 15 fact tables → 6 dimensions
+```
+
+## Join Cardinality
+
+```
+   Dimension              │ # Facts That Join │ Join Type          │ SCD Pattern
+  ─────────────────────── │ ───────────────── │ ────────────────── │ ─────────────────────────
+   DIM_DATE               │        13         │ INNER (via int key)│ N/A (generated spine)
+   DIM_CUSTOMER           │         5         │ LEFT (SCD2)        │ ON customer_id AND is_current=TRUE
+   DIM_TICKET_TYPE        │         1         │ LEFT (SCD2)        │ ON ticket_type_id AND is_current=TRUE
+   DIM_PRODUCT            │         2         │ LEFT (SCD2)        │ ON product_key (surrogate)
+   DIM_LOCATION           │         4         │ LEFT (surrogate)   │ ON location_key (surrogate)
+   DIM_LIFT               │         2         │ LEFT (surrogate)   │ ON lift_key (surrogate)
+```
+
+## Star Schema Visual (Classic Kimball Layout)
+
+```
+                              ┌─────────────┐
+                              │  DIM_DATE   │
+                              │ (conformed) │
+                              └──────┬──────┘
+                                     │
+            ┌────────────────────────┼────────────────────────┐
+            │                        │                        │
+            │    ┌───────────────────┼───────────────────┐    │
+            │    │                   │                   │    │
+            │    │    ┌──────────────┼──────────────┐    │    │
+            │    │    │              │              │    │    │
+            ▼    ▼    ▼              ▼              ▼    ▼    ▼
+┌─────┐  ┌─────────────────────────────────────────────────────────┐  ┌─────┐
+│ DIM │  │                                                         │  │ DIM │
+│CUST.│◄─┤   FACT_TICKET_SALES    FACT_LIFT_SCANS    FACT_RENTALS  │──►│PROD.│
+│     │  │                                                         │  │     │
+└─────┘  │   FACT_FOOD_BEVERAGE   FACT_PASS_USAGE    FACT_WEATHER  │  └─────┘
+         │                                                         │
+┌─────┐  │   FACT_STAFFING        FACT_INCIDENTS     FACT_LESSONS  │  ┌─────┐
+│ DIM │  │                                                         │  │ DIM │
+│TICK.│◄─┤   FACT_FEEDBACK        FACT_GROOMING      FACT_MAINT.   │──►│LIFT │
+│TYPE │  │                                                         │  │     │
+└─────┘  │   FACT_PARKING         FACT_MARKETING     FACT_PASSES   │  └─────┘
+         │                                                         │
+         └──────────────────────────────┬──────────────────────────┘
+                                        │
+                                        ▼
+                                  ┌───────────┐
+                                  │    DIM    │
+                                  │ LOCATION  │
+                                  └───────────┘
+
+
+   CONFORMED DIMENSIONS (shared across multiple facts):
+   ════════════════════════════════════════════════════
+   DIM_DATE ────────── joins 13 of 15 facts (universal time dimension)
+   DIM_CUSTOMER ────── joins 5 facts (visitor-attributed transactions)
+   DIM_LOCATION ────── joins 4 facts (venue-attributed events)
+   DIM_LIFT ────────── joins 2 facts (lift-specific operations)
+   DIM_PRODUCT ─────── joins 2 facts (item-level spend)
+   DIM_TICKET_TYPE ─── joins 1 fact  (ticket sales only)
+```
+
 ## Star Schema Overview
 
 ```
