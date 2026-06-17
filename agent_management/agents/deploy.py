@@ -347,6 +347,13 @@ def deploy_agent(
         # and smoke tests become misleading.
         assert_alias_points_to(conn, agent_fqn, deploy_alias, version_after)
 
+        # Recreate LIVE version after commit so the agent is invokable via REST
+        # and Snowsight chat UI (both resolve bare /agents/<name>:run to LIVE).
+        try:
+            cur.execute(f"ALTER AGENT {agent_fqn} ADD LIVE VERSION FROM LAST")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("could not recreate LIVE on %s: %s", agent_fqn, exc)
+
         # Attach identity metadata to the new version so "what is VERSION$N?"
         # is answerable from SHOW VERSIONS alone.
         identity = discover_identity(env)
